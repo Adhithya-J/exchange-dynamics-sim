@@ -7,12 +7,15 @@ from collections import deque
 
 GIVING_FLOOR = 1
 RECEIVING_CEIL = 1e4
+# COST_OF_LIVING = 0.2 # assume food and other expenses? # let this be uniform for now
+MIN_RESOURCES = 0.0 # floor for resources
 
 random.seed(42)
 np.random.seed(42)
 
 # initialization
-    
+
+
 def initialize_agents(n=100) -> pd.DataFrame:
     df = pd.DataFrame(columns=["id","generosity_score","acceptance_score","resources"])
     
@@ -39,6 +42,26 @@ def single_iteration(df) -> pd.DataFrame:
     df = df.copy()
     agent_ids = list(df.index)
 
+    def _affordability(resources, low=50, high=300):
+        if resources < low:
+            return 0.0
+        if resources > high:
+            return 1.0
+        return (resources - low) / (high - low)
+    
+    def _effective_generosity(row):
+        return row["generosity_score"] * _affordability(row["resources"])
+
+    def _effective_acceptance(row):
+        return row["acceptance_score"] * (2 - _affordability(row["resources"]))
+
+
+
+    def apply_living_cost(df):
+        df["resources"] -= df["resources"] * 0.0001  #COST_OF_LIVING
+        df["resources"] = df["resources"].clip(lower = MIN_RESOURCES)
+        return df
+
     def find_random_receiver_id(df, sender_id):
         return random.choice(df.index[df.index != sender_id])
     
@@ -54,10 +77,16 @@ def single_iteration(df) -> pd.DataFrame:
         return random.choices(candidates, weights=weights, k=1)[0]
     
     def _is_capable_of_giving(row) -> bool:
-        return (row["resources"] > GIVING_FLOOR and random.uniform(0,1) < row["generosity_score"])
+        return (row["resources"] > GIVING_FLOOR 
+                and random.uniform(0,1) < _effective_generosity(row)
+                                             #row["generosity_score"]
+                )
 
     def _is_capable_of_receiving(row) -> bool:
-        return (row["resources"] < RECEIVING_CEIL and random.uniform(0,1) < row["acceptance_score"])
+        return (row["resources"] < RECEIVING_CEIL 
+                and random.uniform(0,1) < max(1,_effective_acceptance(row)) 
+                #row["acceptance_score"]
+                )
 
     def generate_transfer_actions(df):
         actions = []
@@ -83,6 +112,7 @@ def single_iteration(df) -> pd.DataFrame:
 
     transfer_actions = generate_transfer_actions(df)
     df = perform_transfers(df, transfer_actions)
+    df = apply_living_cost(df)
 
     return df
 
@@ -98,7 +128,7 @@ def main():
     df = initialize_agents(n = 10)
     print(df.head(10))
     print("--"*10)
-    df_1 = multiple_iterations(df, n=1000)
+    df_1 = multiple_iterations(df, n=5000)
     print(df_1.head(10))
 
 
