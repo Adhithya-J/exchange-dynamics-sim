@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import random
 import shortuuid
+from collections import deque
 
 GIVING_FLOOR = 1
 RECEIVING_CEIL = 1e4
@@ -11,6 +12,7 @@ random.seed(42)
 np.random.seed(42)
 
 # initialization
+    
 def initialize_agents(n=100) -> pd.DataFrame:
     df = pd.DataFrame(columns=["id","generosity_score","acceptance_score","resources"])
     
@@ -25,6 +27,7 @@ def initialize_agents(n=100) -> pd.DataFrame:
         agent["generosity_score"] = random.choice(generosity_vals)
         agent["acceptance_score"] = random.choice(acceptance_vals)
         agent["resources"] = max_resources
+        agent["memory"] = deque(maxlen=5)
         agents.append(agent)
 
     df = pd.DataFrame(agents)
@@ -36,9 +39,19 @@ def single_iteration(df) -> pd.DataFrame:
     df = df.copy()
     agent_ids = list(df.index)
 
-    def find_random_receiver_id(sender_id, agent_ids):
+    def find_random_receiver_id(df, sender_id):
         return random.choice(df.index[df.index != sender_id])
     
+    def find_receiver_id(df, sender_id, memory_bonus=2.0):
+        candidates = [i for i in df.index if i != sender_id]
+        memory = df.loc[sender_id, "memory"]
+        weights = []
+        for c in candidates:
+            w = 1.0
+            if c in memory:
+                w+= memory_bonus * (len(memory) - memory.index(c)) / len(memory)
+            weights.append(w)
+        return random.choices(candidates, weights=weights, k=1)[0]
     
     def _is_capable_of_giving(row) -> bool:
         return (row["resources"] > GIVING_FLOOR and random.uniform(0,1) < row["generosity_score"])
@@ -50,7 +63,7 @@ def single_iteration(df) -> pd.DataFrame:
         actions = []
         for id in df.index:        
             if _is_capable_of_giving(df.loc[id]): 
-                receiver = find_random_receiver_id(id, agent_ids)
+                receiver = find_receiver_id(df,id) # find_random_receiver_id(df,id) #  #
                 if _is_capable_of_receiving(df.loc[receiver,:]):
                     actions.append((id, receiver))
         return actions
@@ -58,10 +71,12 @@ def single_iteration(df) -> pd.DataFrame:
     def perform_transfers(df, actions) -> pd.DataFrame:
         
         resources = df["resources"].copy()
-        
+        memory = df["memory"].copy()
+
         for giver, receiver in actions:
             resources[giver] -= 1
             resources[receiver] += 1
+            memory[receiver].append(giver)
 
         df["resources"] = resources        
         return df
@@ -83,7 +98,7 @@ def main():
     df = initialize_agents(n = 10)
     print(df.head(10))
     print("--"*10)
-    df_1 = multiple_iterations(df, n=10_000)
+    df_1 = multiple_iterations(df, n=1000)
     print(df_1.head(10))
 
 
