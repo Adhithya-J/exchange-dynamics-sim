@@ -46,8 +46,26 @@ config = {
 class BaseAgent(ABC):
     def __init__(self):
         pass
+
+    @abstractmethod
     def to_dict(self):
         pass
+
+class BaseResourceSimulation(ABC):
+    def __init__(self):
+        pass
+    @abstractmethod
+    def initialize_agents(self):
+        pass
+    
+    @abstractmethod
+    def run_iteration(self):
+        pass
+
+    @abstractmethod
+    def run(self):
+        pass
+
 
 class Agent(BaseAgent):
 
@@ -69,28 +87,105 @@ class Agent(BaseAgent):
             }
 
 
+class ResourceSimulation(BaseResourceSimulation):
+    def __init__(self, config):
+        self.config = self.config
+        
+        random.seed(config["ENV_INIT"]["SEED"])
+        np.random.seed(config["ENV_INIT"]["SEED"])
+
+    def initialize_agents(self):
+        generosity_vals = np.linspace(0, 1, 11)
+        acceptance_vals = np.linspace(0, 1, 11)
+        agents = []
+        for _ in range(self.config["ENV_INIT"]["N_AGENTS"]):
+            agent = Agent(id =shortuuid.uuid(), 
+                    generosity_score=float(np.random.choice(generosity_vals, size=1)), 
+                    acceptance_score=float(np.random.choice(acceptance_vals, size=1)), 
+                    initial_resources= self.config["ENV_INIT"]["MAX_RESOURCES"], 
+                    memory_size=self.config["MEMORY"]["MEMORY_SIZE"])
+            agents.append(agent)
+        df = pd.DataFrame(agents)
+        df = df.set_index("id")            
+
+        return df
+
+    def run_iteration(self):
+        return
+
+
+    def run(self):
+
+        return 
+
 
 random.seed(config["ENV_INIT"]["SEED"])
 np.random.seed(config["ENV_INIT"]["SEED"])
 
 # initialization
 
-def calculate_gini(narray):
+class MetricsCalculator:
 
-    for i in narray:
-        if i<0:
-            return None
+    @staticmethod    
+    def _calculate_gini(values):
 
-    numerator = 0
-    for i in narray:
-        for j in narray:    
-            numerator += abs(i-j)
-    denominator = 2 * len(narray) * sum(narray)
-    
-    if denominator == 0:
-        return None
+        if not values:
+            raise ValueError("Input array must not be empty")     
 
-    return numerator / denominator
+        if any(i<0 for i in values):
+            raise ValueError("Gini is undefined for negative values")
+
+        numerator = 0
+        n = len(values)
+        for i in values:
+            for j in values:    
+                numerator += abs(i-j)
+        denominator = 2 * n * sum(values)
+        
+        if denominator == 0:
+            return 0
+
+        return numerator / denominator
+
+    @staticmethod
+    def calculate_statistics(df : pd.DataFrame):
+        resources = df["resources"].values
+        return {
+            "gini": MetricsCalculator._calculate_gini(resources)
+            ,"mean": np.mean(resources)
+            ,"median": np.median(resources)
+            ,"std": np.std(resources)
+            ,"min" : np.min(resources)
+            ,"max" : np.max(resources)
+            ,"total" : np.sum(resources)
+        }
+
+
+class AffordabilityCalculator:
+
+    def __init__(self, config):
+        self.config = config
+
+    def _affordability(self, resources):
+
+        low=self.config["AFFORDABILITY"]["RESOURCE_MIN"]
+        high=self.config["AFFORDABILITY"]["RESOURCE_MAX"]
+        if resources < low:
+            return self.config["AFFORDABILITY"]["LOWER_LIMIT"]
+        if resources > high:
+            return self.config["AFFORDABILITY"]["UPPER_LIMIT"]
+        return (resources - low) / (high - low)
+
+
+    def effective_generosity(self, row):
+        return max(row["generosity_score"] * self._affordability(row["resources"]) # to ensure it is within the specified range during initialization
+                   ,self.config["AGENTS_INIT"]["GENEROSITY_RANGE"][0]
+        )
+
+    def effective_acceptance(self, row):
+        return min(row["acceptance_score"] * (2 - self._affordability(row["resources"]))
+                   ,self.config["AGENTS_INIT"]["ACCEPTANCE_RANGE"][1]
+        )
 
 
 
