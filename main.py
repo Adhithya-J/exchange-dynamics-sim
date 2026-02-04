@@ -8,7 +8,7 @@ from collections import deque
 config = {
     "ENV_INIT":{
             "N_AGENTS" : 10
-            ,"N_ITERATIONS": 500
+            ,"N_ITERATIONS": 5000
             ,"MAX_RESOURCES": 1_000
             ,"MIN_RESOURCES": 0.0 # floor for resources
             ,"SEED": 42
@@ -33,7 +33,7 @@ config = {
 
     }
     ,"MEMORY": {
-        "MEMORY_SIZE": 5
+        "MEMORY_SIZE": 10
         ,"DEFAULT_WEIGHT": 1.0
         ,"MEMORY_BONUS": 3.0
     }
@@ -46,6 +46,24 @@ random.seed(config["ENV_INIT"]["SEED"])
 np.random.seed(config["ENV_INIT"]["SEED"])
 
 # initialization
+
+def calculate_gini(narray):
+
+    for i in narray:
+        if i<0:
+            return None
+
+    numerator = 0
+    for i in narray:
+        for j in narray:    
+            numerator += abs(i-j)
+    denominator = 2 * len(narray) * sum(narray)
+    
+    if denominator == 0:
+        return None
+
+    return numerator / denominator
+
 
 
 def initialize_agents(n=config["ENV_INIT"]["N_AGENTS"]) -> pd.DataFrame:
@@ -81,7 +99,7 @@ def single_iteration(df) -> pd.DataFrame:
             return config["AFFORDABILITY"]["UPPER_LIMIT"]
         return (resources - low) / (high - low)
 
-    
+
     def _effective_generosity(row):
         return max(row["generosity_score"] * _affordability(row["resources"]) # to ensure it is within the specified range during initialization
                    ,config["AGENTS_INIT"]["GENEROSITY_RANGE"][0]
@@ -94,7 +112,7 @@ def single_iteration(df) -> pd.DataFrame:
 
 
     def apply_living_cost(df):
-        df["resources"] -= 0 # df["resources"] * 0.001  #COST_OF_LIVING
+        df["resources"] -= df["resources"] * config["AGENTS_INIT"]["COST_OF_LIVING"]
         df["resources"] = df["resources"].clip(lower = config["ENV_INIT"]["MIN_RESOURCES"])
         return df
 
@@ -150,6 +168,8 @@ def multiple_iterations(df, n=config["ENV_INIT"]["N_ITERATIONS"]):
     
     for i in range(n):
         df = single_iteration(df)
+        if i%100 == 0:
+            print(calculate_gini(df["resources"]))
 
     return df
 
