@@ -4,6 +4,7 @@ import numpy as np
 import random
 import shortuuid
 from collections import deque
+from abc import ABC, abstractmethod
 
 config = {
     "ENV_INIT":{
@@ -40,6 +41,33 @@ config = {
     
 
 }
+
+
+class BaseAgent(ABC):
+    def __init__(self):
+        pass
+    def to_dict(self):
+        pass
+
+class Agent(BaseAgent):
+
+    def __init__(self, id, generosity_score, acceptance_score, initial_resources, memory_size):
+        super().__init__()
+        self.id = id
+        self.generosity_score = generosity_score
+        self.acceptance_score = acceptance_score
+        self.resources = initial_resources
+        self.memory : deque = deque(maxlen=memory_size)
+
+    def to_dict(self):
+        return {
+                "id":  self.id
+                ,"generosity_score" :self.generosity_score
+                ,"acceptance_score": self.acceptance_score
+                , "resources" : self.resources
+                , "memory" : self.memory
+            }
+
 
 
 random.seed(config["ENV_INIT"]["SEED"])
