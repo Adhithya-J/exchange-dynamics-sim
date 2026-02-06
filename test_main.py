@@ -1,5 +1,5 @@
 from collections import deque
-from main import Agent, MetricsCalculator, AffordabilityCalculator
+from main import Agent, MetricsCalculator, AffordabilityCalculator, FindReceiver
 import math
 
 class TestMetricsCalculator:
@@ -119,17 +119,89 @@ class TestAgent:
         assert agent_dict["resources"] == 1000 
         assert isinstance(agent_dict["memory"], deque)
 
-def main():
-    print("Tests started")
-    test_metrics = TestMetricsCalculator()
-    test_metrics.test_gini_calculation()
-    test_affordability = TestAffordabilityCalculator()
-    test_affordability.test_affordability_check()
-    test_affordability.test_effective_generosity()
-    test_affordability.test_effective_generosity()
-    
-    test_agent = TestAgent()
-    test_agent.test_agent_initialization()
-    test_agent.test_to_dict()
+class TestFindReceiver():
+    config = {
 
-    print("Tests passed")
+            "ENV_INIT": {
+                "RANDOM_SAMPLING_RANGE":(0,1)
+            },
+            "AGENTS_INIT": {
+                "GENEROSITY_RANGE":(0,1)
+                ,"ACCEPTANCE_RANGE":(0,1)
+                ,"RECEIVING_CEIL": 1e4 # for resources
+
+            },
+            "MEMORY": {
+                "DEFAULT_WEIGHT":1.0,
+                "MEMORY_BONUS": 3.0
+            },
+            "AFFORDABILITY" : {
+                "RESOURCE_MIN":50
+                ,"RESOURCE_MAX": 300
+                ,"LOWER_LIMIT": 0.0
+                ,"UPPER_LIMIT":1.0
+            }
+        }
+    def test_is_capable_of_receiving():
+        find_receiver = FindReceiver()
+        test_cases = [({"resources":300, "acceptance_score": 1},True)
+                      {{"resources"}}
+
+        pass
+
+    def test_find_random_receiver_id():
+        pass
+
+    def test_find_random_receiver_id():
+        pass
+
+
+class FindReceiver():
+    
+    def __init__(self, df, config, affordability_check=AffordabilityCalculator):
+        self.df = df
+        self.config = config
+        self.affordability_check = affordability_check(config)
+
+    def _is_capable_of_receiving(self,row) -> bool:
+        {"resources":300, "memory":[],}
+        return (row["resources"] < config["AGENTS_INIT"]["RECEIVING_CEIL"] 
+                and random.uniform(*config["ENV_INIT"]["RANDOM_SAMPLING_RANGE"]) < self.affordability_check.effective_acceptance() 
+                )
+
+    def find_random_receiver_id(self, sender_id):
+        receiver_id = random.choice(self.df.index[self.df.index != sender_id])
+        if self._is_capable_of_receiving(self.df.at[receiver_id]):
+            return receiver_id
+        return None
+
+    def find_receiver_id(self, sender_id, memory_bonus=config["MEMORY"]["MEMORY_BONUS"]):
+        candidates = [i for i in self.df.index if i != sender_id]
+        memory = self.df.loc[sender_id, "memory"]
+        weights = []
+        for c in candidates:
+            w = config["MEMORY"]["DEFAULT_WEIGHT"]
+            if c in memory:
+                w+= memory_bonus * (len(memory) - memory.index(c)) / len(memory)
+            weights.append(w)
+        receiver_id =  random.choices(candidates, weights=weights, k=1)[0]
+        if self._is_capable_of_receiving(self.df.at[receiver_id]):
+            return receiver_id
+        return None
+    
+
+
+# def main():
+#     print("Tests started")
+#     test_metrics = TestMetricsCalculator()
+#     test_metrics.test_gini_calculation()
+#     test_affordability = TestAffordabilityCalculator()
+#     test_affordability.test_affordability_check()
+#     test_affordability.test_effective_generosity()
+#     test_affordability.test_effective_acceptance()
+    
+#     test_agent = TestAgent()
+#     test_agent.test_agent_initialization()
+#     test_agent.test_to_dict()
+
+#     print("Tests passed")

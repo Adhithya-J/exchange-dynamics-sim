@@ -42,6 +42,9 @@ config = {
 
 }
 
+class Config:
+    pass
+
 
 class BaseAgent(ABC):
     def __init__(self):
@@ -66,16 +69,94 @@ class BaseResourceSimulation(ABC):
     def run(self):
         pass
 
+class AffordabilityStrategy(ABC):
+
+    @abstractmethod
+    def calculate(self):
+        pass
+
+    @abstractmethod
+    def effective_generosity(self):
+        pass
+
+    @abstractmethod
+    def effective_acceptance(self):
+        pass
+
+
+class BasicAffordabilityStrategy(AffordabilityStrategy)
+
+    def calculate(self, agent):
+        low=agent.config["AFFORDABILITY"]["RESOURCE_MIN"]
+        high=agent.config["AFFORDABILITY"]["RESOURCE_MAX"]
+        if agent.resources < low:
+            return agent.config["AFFORDABILITY"]["LOWER_LIMIT"]
+        if agent.resources > high:
+            return agent.config["AFFORDABILITY"]["UPPER_LIMIT"]
+        return (agent.resources - low) / (high - low)
+
+
+
 
 class Agent(BaseAgent):
 
-    def __init__(self, id, generosity_score, acceptance_score, initial_resources, memory_size):
+    def __init__(self, id, generosity, acceptance, initial_resources, config, affordability_strategy):
         super().__init__()
         self.id = id
-        self.generosity_score = generosity_score
-        self.acceptance_score = acceptance_score
+        self.base_generosity = generosity
+        self.base_acceptance = acceptance
         self.resources = initial_resources
-        self.memory : deque = deque(maxlen=memory_size)
+        self.config = config
+        self.memory : deque = deque(maxlen=config["MEMORY"]["MEMORY_SIZE"])
+        
+        self.affordability_strategy = affordability_strategy
+
+
+
+    @property
+    def is_alive(self):
+        return self.resources > self.config["ENV_INIT"]["RESOURCE_MIN"]
+    
+    @property
+    def can_give(self, config):
+        return self.resources > self.config["AGENTS_INIT"]["GIVING_FLOOR"]
+
+    @property
+    def can_receive(self, config):
+        return self.resources < self.config["AGENTS_INIT"]["RECEIVING_CEIL"]
+    
+    def calculate_affordability(self):
+        return self.affordability_strategy.calculate()
+
+
+    def effective_generosity(self):
+        return max(self.base_generosity * self.calculate_affordability(self.resources) # to ensure it is within the specified range during initialization
+                   ,self.config["AGENTS_INIT"]["GENEROSITY_RANGE"][0]
+        )
+
+    def effective_acceptance(self, row):
+        return min(row["acceptance_score"] * (2 - self._affordability(row["resources"]))
+                   ,self.config["AGENTS_INIT"]["ACCEPTANCE_RANGE"][1]
+        )
+
+    def decide_if_giving(self):
+        if self.can_give():
+
+
+
+        pass
+
+    def decide_if_receiving(self):
+        pass
+
+    def choose_receiver(self):
+        pass
+
+    def pay_rent(self):
+        raise NotImplementedError
+    
+    def receive_wage(self):
+        raise NotImplementedError
 
     def to_dict(self):
         return {
@@ -89,7 +170,12 @@ class Agent(BaseAgent):
 
 class ResourceSimulation(BaseResourceSimulation):
     def __init__(self, config):
-        self.config = self.config
+        self.config = config
+        self.agents_df = None
+        self.metrics_history = []
+        self.metrics_calculator = MetricsCalculator(config)
+        self.affordability_calculator = AffordabilityCalculator()
+
         
         random.seed(config["ENV_INIT"]["SEED"])
         np.random.seed(config["ENV_INIT"]["SEED"])
@@ -98,17 +184,19 @@ class ResourceSimulation(BaseResourceSimulation):
         generosity_vals = np.linspace(0, 1, 11)
         acceptance_vals = np.linspace(0, 1, 11)
         agents = []
-        for _ in range(self.config["ENV_INIT"]["N_AGENTS"]):
-            agent = Agent(id =shortuuid.uuid(), 
-                    generosity_score=float(np.random.choice(generosity_vals, size=1)), 
-                    acceptance_score=float(np.random.choice(acceptance_vals, size=1)), 
-                    initial_resources= self.config["ENV_INIT"]["MAX_RESOURCES"], 
-                    memory_size=self.config["MEMORY"]["MEMORY_SIZE"])
-            agents.append(agent)
-        df = pd.DataFrame(agents)
-        df = df.set_index("id")            
 
-        return df
+        for _ in range(self.config["ENV_INIT"]["N_AGENTS"]):
+            agent = Agent(
+                id =shortuuid.uuid(), 
+                generosity_score=float(np.random.choice(generosity_vals, size=1)), 
+                acceptance_score=float(np.random.choice(acceptance_vals, size=1)), 
+                initial_resources= self.config["ENV_INIT"]["MAX_RESOURCES"], 
+                memory_size=self.config["MEMORY"]["MEMORY_SIZE"])
+            agents.append(agent)
+        self.agents_df = pd.DataFrame(agents)
+        agents_df = self.agents_df.set_index("id")            
+
+        return self.agents_df
 
     def run_iteration(self):
         return
@@ -189,26 +277,43 @@ class AffordabilityCalculator:
 
 
 
-def initialize_agents(n=config["ENV_INIT"]["N_AGENTS"]) -> pd.DataFrame:
-    df = pd.DataFrame(columns=["id","generosity_score","acceptance_score","resources"])
-    
-    generosity_vals = np.linspace(0,1,11) #range(11)
-    acceptance_vals = np.linspace(0,1,11) #[1,]
+class FindReceiver():
+
+    def __init__(self, df, config, affordability_check=AffordabilityCalculator):
+        self.df = df
+        self.config = config
+        self.affordability_check = affordability_check(config)
+
+    def _is_capable_of_receiving(self,row) -> bool:
+        return (row["resources"] < self.config["AGENTS_INIT"]["RECEIVING_CEIL"] 
+                and random.uniform(*self.config["ENV_INIT"]["RANDOM_SAMPLING_RANGE"]) < self.affordability_check.effective_acceptance() 
+                )
+
+    def find_random_receiver_id(self, sender_id):
+        receiver_id = random.choice(self.df.index[self.df.index != sender_id])
+        if self._is_capable_of_receiving(self.df.at[receiver_id]):
+            return receiver_id
+        return None
+
+    def find_receiver_id(self, sender_id, memory_bonus):
+        if not memory_bonus:
+            memory_bonus=config["MEMORY"]["MEMORY_BONUS"]
+        candidates = [i for i in self.df.index if i != sender_id]
+        memory = self.df.loc[sender_id, "memory"]
+        weights = []
+        for c in candidates:
+            w = self.config["MEMORY"]["DEFAULT_WEIGHT"]
+            if c in memory:
+                w+= memory_bonus * (len(memory) - memory.index(c)) / len(memory)
+            weights.append(w)
+        receiver_id =  random.choices(candidates, weights=weights, k=1)[0]
+        if self._is_capable_of_receiving(self.df.at[receiver_id]):
+            return receiver_id
+        return None
     
 
-    agents = []
-    for i in range(n):
-        agent = {}
-        agent["id"] = shortuuid.uuid()
-        agent["generosity_score"] = float(np.random.choice(generosity_vals, size=1))
-        agent["acceptance_score"] = float(np.random.choice(acceptance_vals, size=1))
-        agent["resources"] = config["ENV_INIT"]["MAX_RESOURCES"]
-        agent["memory"] = deque(maxlen=config["MEMORY"]["MEMORY_SIZE"])
-        agents.append(agent)
+    
 
-    df = pd.DataFrame(agents)
-    df = df.set_index("id")
-    return df
 
 
 def single_iteration(df) -> pd.DataFrame:
