@@ -55,7 +55,7 @@ inspect `metrics_history` or the returned DataFrame.
 - `config.yaml` - default simulation parameters.
 - `main.py` - agents, simulation lifecycle, affordability, and metrics.
 - `utils/` - shared helpers, including YAML configuration loading.
-- `test_main.py` - unit and behavior tests for the model.
+- `tests/` - unit and behavior tests for the model.
 - `requirements.txt` - runtime and test dependencies.
 
 ## Limitations
