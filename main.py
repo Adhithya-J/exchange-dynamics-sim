@@ -33,29 +33,34 @@ class Agent:
         acceptance_score: float,
         initial_resources: float,
         memory_size: int = 10,
+        resource_floor: float = 0.0,
     ) -> None:
         self.id = id
         self.generosity_score = float(generosity_score)
         self.acceptance_score = float(acceptance_score)
         self.resources = float(initial_resources)
+        self.resource_floor = float(resource_floor)
         self.memory: deque[str] = deque(maxlen=memory_size)
 
     @property
     def is_alive(self) -> bool:
-        return self.resources > 0
+        """Whether the agent has resources strictly above the death floor."""
+
+        return self.resources > self.resource_floor
 
     def can_give(self, giving_floor: float, transfer_size: float) -> bool:
         """Return whether a transfer can leave the agent above the giving floor."""
 
         return (
-            self.resources >= transfer_size
+            self.is_alive
+            and self.resources >= transfer_size
             and self.resources - transfer_size >= giving_floor
         )
 
     def can_receive(self, receiving_ceil: float, transfer_size: float) -> bool:
         """Return whether a transfer would keep the agent below its ceiling."""
 
-        return self.resources + transfer_size <= receiving_ceil
+        return self.is_alive and self.resources + transfer_size <= receiving_ceil
 
     def to_dict(self) -> dict[str, Any]:
         """Return a serializable snapshot of the agent."""
@@ -65,6 +70,7 @@ class Agent:
             "generosity_score": self.generosity_score,
             "acceptance_score": self.acceptance_score,
             "resources": self.resources,
+            "alive": self.is_alive,
             "memory": list(self.memory),
         }
 
@@ -146,6 +152,7 @@ class ResourceSimulation:
         self.metrics_history: list[dict[str, Any]] = []
         self.agent_history: list[dict[str, Any]] = []
         self.total_transfers = 0
+        self.total_transfer_volume = 0.0
 
     def initialize_agents(self) -> list[Agent]:
         """Create the initial population using the configured random seed."""
@@ -154,6 +161,7 @@ class ResourceSimulation:
         acceptance_range = self.config["AGENTS"]["ACCEPTANCE"]
         memory_size = self.config["MEMORY"]["SIZE"]
         initial_resources = self.config["SIMULATION"]["INITIAL_RESOURCES"]
+        resource_floor = self.config["SIMULATION"]["RESOURCE_FLOOR"]
         count = self.config["SIMULATION"]["AGENTS"]
 
         self.agents = [
@@ -163,12 +171,14 @@ class ResourceSimulation:
                 acceptance_score=self.random.uniform(*acceptance_range),
                 initial_resources=initial_resources,
                 memory_size=memory_size,
+                resource_floor=resource_floor,
             )
             for index in range(count)
         ]
         self.metrics_history = []
         self.agent_history = []
         self.total_transfers = 0
+        self.total_transfer_volume = 0.0
         self._record_agent_snapshot(iteration=0)
         return self.agents
 
@@ -192,14 +202,35 @@ class ResourceSimulation:
                 return agent
         raise KeyError(f"Unknown agent: {agent_id}")
 
-    def _find_receiver(self, sender: Agent) -> Agent | None:
-        transfer_size = self.config["SIMULATION"]["TRANSFER_AMOUNT"]
+    def _transfer_amount_bounds(self) -> tuple[float, float]:
+        """Return the configured minimum and maximum transfer amounts."""
+
+        simulation_settings = self.config["SIMULATION"]
+        if "TRANSFER_AMOUNT_RANGE" in simulation_settings:
+            lower, upper = simulation_settings["TRANSFER_AMOUNT_RANGE"]
+        else:
+            # Keep compatibility with configurations that still use the old
+            # fixed transfer amount.
+            lower = upper = simulation_settings["TRANSFER_AMOUNT"]
+        lower = float(lower)
+        upper = float(upper)
+        if lower <= 0 or upper < lower:
+            raise ValueError(
+                "TRANSFER_AMOUNT_RANGE must contain positive values in ascending order"
+            )
+        return lower, upper
+
+    def _find_receiver(
+        self, sender: Agent, minimum_transfer: float | None = None
+    ) -> Agent | None:
+        if minimum_transfer is None:
+            minimum_transfer, _ = self._transfer_amount_bounds()
         receiving_ceil = self.config["AGENTS"]["MAX_RESOURCES_AFTER_RECEIVING"]
         candidates = [
             agent
             for agent in self.agents
             if agent.id != sender.id
-            and agent.can_receive(receiving_ceil, transfer_size)
+            and agent.can_receive(receiving_ceil, minimum_transfer)
         ]
         if not candidates:
             return None
@@ -229,41 +260,52 @@ class ResourceSimulation:
             weights.append(weight)
         return self.random.choices(candidates, weights=weights, k=1)[0]
 
-    def _can_give(self, agent: Agent) -> bool:
-        transfer_size = self.config["SIMULATION"]["TRANSFER_AMOUNT"]
+    def _can_give(self, agent: Agent, transfer_size: float) -> bool:
         giving_floor = self.config["AGENTS"]["MIN_RESOURCES_AFTER_GIVING"]
         return (
             agent.can_give(giving_floor, transfer_size)
             and self.random.random() < self.affordability.effective_generosity(agent)
         )
 
-    def _can_receive(self, agent: Agent) -> bool:
-        transfer_size = self.config["SIMULATION"]["TRANSFER_AMOUNT"]
+    def _can_receive(self, agent: Agent, transfer_size: float) -> bool:
         receiving_ceil = self.config["AGENTS"]["MAX_RESOURCES_AFTER_RECEIVING"]
         return (
             agent.can_receive(receiving_ceil, transfer_size)
             and self.random.random() < self.affordability.effective_acceptance(agent)
         )
 
-    def _generate_transfer_actions(self) -> list[tuple[str, str]]:
+    def _generate_transfer_actions(self) -> list[tuple[str, str, float]]:
+        minimum_transfer, maximum_transfer = self._transfer_amount_bounds()
+        giving_floor = self.config["AGENTS"]["MIN_RESOURCES_AFTER_GIVING"]
+        receiving_ceil = self.config["AGENTS"]["MAX_RESOURCES_AFTER_RECEIVING"]
         actions = []
         for sender in self.agents:
-            if not self._can_give(sender):
+            if not sender.is_alive or not self._can_give(sender, minimum_transfer):
                 continue
-            receiver = self._find_receiver(sender)
-            if receiver is not None and self._can_receive(receiver):
-                actions.append((sender.id, receiver.id))
+            receiver = self._find_receiver(sender, minimum_transfer)
+            if receiver is None:
+                continue
+
+            feasible_maximum = min(
+                maximum_transfer,
+                sender.resources - giving_floor,
+                receiving_ceil - receiver.resources,
+            )
+            if feasible_maximum < minimum_transfer:
+                continue
+            transfer_size = self.random.uniform(minimum_transfer, feasible_maximum)
+            if self._can_receive(receiver, transfer_size):
+                actions.append((sender.id, receiver.id, transfer_size))
         return actions
 
     def _perform_transfers(
-        self, actions: Iterable[tuple[str, str]]
-    ) -> list[tuple[str, str]]:
-        transfer_size = self.config["SIMULATION"]["TRANSFER_AMOUNT"]
+        self, actions: Iterable[tuple[str, str, float]]
+    ) -> list[tuple[str, str, float]]:
         giving_floor = self.config["AGENTS"]["MIN_RESOURCES_AFTER_GIVING"]
         receiving_ceil = self.config["AGENTS"]["MAX_RESOURCES_AFTER_RECEIVING"]
         completed = []
 
-        for giver_id, receiver_id in actions:
+        for giver_id, receiver_id, transfer_size in actions:
             giver = self._agent_by_id(giver_id)
             receiver = self._agent_by_id(receiver_id)
             if not giver.can_give(giving_floor, transfer_size):
@@ -273,14 +315,19 @@ class ResourceSimulation:
             giver.resources -= transfer_size
             receiver.resources += transfer_size
             receiver.memory.append(giver.id)
-            completed.append((giver.id, receiver.id))
+            completed.append((giver.id, receiver.id, transfer_size))
         return completed
 
     def _apply_living_cost(self) -> None:
         cost = self.config["AGENTS"]["LIVING_COST"]
         minimum = self.config["SIMULATION"]["RESOURCE_FLOOR"]
         for agent in self.agents:
-            agent.resources = max(minimum, agent.resources * (1 - cost))
+            if not agent.is_alive:
+                continue
+            agent.resources *= 1 - cost
+            if agent.resources <= minimum:
+                # Reaching the floor is death, not a resource top-up.
+                agent.resources = minimum
 
     def to_frame(self) -> pd.DataFrame:
         """Return the current agent state as a dataframe for analysis."""
@@ -290,6 +337,7 @@ class ResourceSimulation:
             "generosity_score",
             "acceptance_score",
             "resources",
+            "alive",
             "memory",
         ]
         if not self.agents:
@@ -308,7 +356,7 @@ class ResourceSimulation:
         ]
         return pd.DataFrame(self.agent_history, columns=columns)
 
-    def run_iteration(self) -> list[tuple[str, str]]:
+    def run_iteration(self) -> list[tuple[str, str, float]]:
         """Run one transfer-and-living-cost step and return completed transfers."""
 
         if not self.agents:
@@ -318,12 +366,16 @@ class ResourceSimulation:
         self._apply_living_cost()
         iteration = len(self.metrics_history) + 1
         self.total_transfers += len(completed)
+        transfer_volume = sum(amount for _, _, amount in completed)
+        self.total_transfer_volume += transfer_volume
         statistics = MetricsCalculator.calculate_statistics(self.to_frame())
         statistics.update(
             {
                 "iteration": iteration,
                 "transfers": len(completed),
                 "total_transfers": self.total_transfers,
+                "transfer_volume": transfer_volume,
+                "total_transfer_volume": self.total_transfer_volume,
             }
         )
         self.metrics_history.append(statistics)

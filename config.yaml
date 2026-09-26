@@ -9,8 +9,8 @@ SIMULATION:
   RESOURCE_FLOOR: 0.0
   # Random seed; changing it creates a different run.
   RANDOM_SEED: 42
-  # Resources moved per transfer; higher means larger transfers.
-  TRANSFER_AMOUNT: 1.0
+  # Transfers draw a variable amount from this inclusive range.
+  TRANSFER_AMOUNT_RANGE: [1.0, 10.0]
 
 AGENTS:
   # Giving chance range [0, 1]; 0 never gives and 1 always tries.

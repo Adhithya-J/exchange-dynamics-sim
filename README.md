@@ -2,8 +2,10 @@
 
 An experimental agent-based simulation of resource sharing and inequality.
 Agents have different generosity and acceptance tendencies. During each
-iteration, agents may transfer a fixed amount of resources to another agent,
-remember previous givers, and pay a proportional cost of living.
+iteration, living agents may transfer a variable amount of resources to another
+living agent, remember previous givers, and pay a proportional cost of living.
+An agent that reaches the configured resource floor is dead and no longer
+participates in transfers.
 
 ## Status
 
@@ -18,15 +20,18 @@ Supported Python versions: 3.11 through 3.14.
 Each agent has:
 
 - a resource balance;
+- a resource floor below which the agent is dead;
 - a generosity score, which controls the chance of giving;
 - an acceptance score, which controls the chance of receiving; and
 - short-term memory of agents that previously transferred resources to them.
 
 Affordability is derived from the agent's resource balance. Agents below the
 configured resource range become less likely to give, while acceptance is
-weighted in the opposite direction. A transfer is made only when it respects
-the giving floor and receiving ceiling. After transfers, every agent pays the
-configured cost of living.
+weighted in the opposite direction. Transfer amounts are sampled from the
+configured range and capped by the giving floor and receiving ceiling. A
+transfer is made only when both agents are alive. After transfers, every
+living agent pays the configured cost of living; reaching the resource floor
+does not create a resource top-up.
 
 The simulation records mean, median, standard deviation, total resources, and
 the Gini coefficient after each iteration. The source of truth is a list of
