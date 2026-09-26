@@ -14,35 +14,9 @@ from typing import Any, Iterable
 import numpy as np
 import pandas as pd
 
+from utils import load_config
 
-CONFIG: dict[str, dict[str, Any]] = {
-    "ENV_INIT": {
-        "N_AGENTS": 10,
-        "N_ITERATIONS": 5_000,
-        "MAX_RESOURCES": 1_000.0,
-        "MIN_RESOURCES": 0.0,
-        "SEED": 42,
-        "RESOURCE_TRANSFER_SIZE": 1.0,
-    },
-    "AGENTS_INIT": {
-        "GENEROSITY_RANGE": (0.0, 1.0),
-        "ACCEPTANCE_RANGE": (0.0, 1.0),
-        "GIVING_FLOOR": 1.0,
-        "RECEIVING_CEIL": 10_000.0,
-        "COST_OF_LIVING": 0.001,
-    },
-    "AFFORDABILITY": {
-        "RESOURCE_MIN": 50.0,
-        "RESOURCE_MAX": 300.0,
-        "LOWER_LIMIT": 0.0,
-        "UPPER_LIMIT": 1.0,
-    },
-    "MEMORY": {
-        "MEMORY_SIZE": 10,
-        "DEFAULT_WEIGHT": 1.0,
-        "MEMORY_BONUS": 3.0,
-    },
-}
+CONFIG: dict[str, dict[str, Any]] = load_config()
 
 # Keep the old lowercase name as a small compatibility convenience for users
 # who imported the original module-level configuration.
