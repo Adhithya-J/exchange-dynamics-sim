@@ -1,25 +1,43 @@
-ENV_INIT:
-  N_AGENTS: 10
-  N_ITERATIONS: 5000
-  MAX_RESOURCES: 1000.0
-  MIN_RESOURCES: 0.0
-  SEED: 42
-  RESOURCE_TRANSFER_SIZE: 1.0
+SIMULATION:
+  # Agents in the run; more agents create more variety.
+  AGENTS: 10
+  # Transfer-and-cost steps; more steps show longer-term change.
+  ITERATIONS: 5000
+  # Starting resources per agent; higher means more initial wealth.
+  INITIAL_RESOURCES: 1000.0
+  # Resource floor after costs; higher protects more wealth.
+  RESOURCE_FLOOR: 0.0
+  # Random seed; changing it creates a different run.
+  RANDOM_SEED: 42
+  # Resources moved per transfer; higher means larger transfers.
+  TRANSFER_AMOUNT: 1.0
 
-AGENTS_INIT:
-  GENEROSITY_RANGE: [0.0, 1.0]
-  ACCEPTANCE_RANGE: [0.0, 1.0]
-  GIVING_FLOOR: 1.0
-  RECEIVING_CEIL: 10000.0
-  COST_OF_LIVING: 0.001
+AGENTS:
+  # Giving chance range [0, 1]; 0 never gives and 1 always tries.
+  GENEROSITY: [0.0, 1.0]
+  # Receiving chance range [0, 1]; 0 never accepts and 1 always tries.
+  ACCEPTANCE: [1.0, 1.0]
+  # Resources kept after giving; higher makes giving harder.
+  MIN_RESOURCES_AFTER_GIVING: 1.0
+  # Resources allowed after receiving; higher allows more accumulation.
+  MAX_RESOURCES_AFTER_RECEIVING: 10000.0
+  # Fraction lost per iteration [0, 1]; 0 means no loss.
+  LIVING_COST: 0.0
 
+# Turns resources into effective giving and acceptance chances.
 AFFORDABILITY:
-  RESOURCE_MIN: 50.0
-  RESOURCE_MAX: 300.0
-  LOWER_LIMIT: 0.0
-  UPPER_LIMIT: 1.0
+  # Resources at or below this value get the minimum score.
+  MIN_RESOURCES: 50.0
+  # Resources at or above this value get the maximum score.
+  MAX_RESOURCES: 300.0
+  # Minimum score [0, 1] used below MIN_RESOURCES.
+  MIN_SCORE: 0.0
+  # Maximum score [0, 1] used above MAX_RESOURCES.
+  MAX_SCORE: 1.0
 
+# Controls how much past exchanges affect recipient selection.
 MEMORY:
-  MEMORY_SIZE: 10
-  DEFAULT_WEIGHT: 1.0
-  MEMORY_BONUS: 3.0
+  # Number of previous givers remembered; higher means longer memory.
+  SIZE: 10
+  # Memory preference [0, 1]; 0 ignores memory and 1 relies on it.
+  PREFERENCE_FRACTION: 0.5

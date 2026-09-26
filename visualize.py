@@ -47,8 +47,8 @@ def _summary_annotation(
 ) -> dict[str, object]:
     """Build the in-chart summary card."""
 
-    environment = simulation.config["ENV_INIT"]
-    agent_settings = simulation.config["AGENTS_INIT"]
+    simulation_settings = simulation.config["SIMULATION"]
+    agent_settings = simulation.config["AGENTS"]
     return {
         "x": 0.99,
         "y": 1.16,
@@ -65,8 +65,8 @@ def _summary_annotation(
             f"Gini: {summary['gini']:.3f}<br>"
             f"Total: {summary['total']:,.1f}<br>"
             f"Total transfers: {int(summary['total_transfers'])}<br><br>"
-            f"Initial resources: {environment['MAX_RESOURCES']:,.1f} per agent<br>"
-            f"Living cost: {agent_settings['COST_OF_LIVING'] * 100:.2f}% per iteration"
+            f"Initial resources: {simulation_settings['INITIAL_RESOURCES']:,.1f} per agent<br>"
+            f"Living cost: {agent_settings['LIVING_COST'] * 100:.2f}% per iteration"
         ),
         "bgcolor": "rgba(255, 255, 255, 0.94)",
         "bordercolor": "#9ca3af",
