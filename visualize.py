@@ -32,6 +32,7 @@ def _summary_for_iteration(
         ]
         summary = MetricsCalculator.calculate_statistics(resources)
         summary["transfers"] = 0
+        summary["total_transfers"] = 0
         return summary
 
     return next(
@@ -41,9 +42,13 @@ def _summary_for_iteration(
     )
 
 
-def _summary_annotation(summary: dict[str, float], iteration: int) -> dict[str, object]:
+def _summary_annotation(
+    summary: dict[str, float], iteration: int, simulation: ResourceSimulation
+) -> dict[str, object]:
     """Build the in-chart summary card."""
 
+    environment = simulation.config["ENV_INIT"]
+    agent_settings = simulation.config["AGENTS_INIT"]
     return {
         "x": 0.99,
         "y": 1.16,
@@ -59,7 +64,9 @@ def _summary_annotation(summary: dict[str, float], iteration: int) -> dict[str, 
             f"Median: {summary['median']:,.1f}<br>"
             f"Gini: {summary['gini']:.3f}<br>"
             f"Total: {summary['total']:,.1f}<br>"
-            f"Transfers: {int(summary['transfers'])}"
+            f"Total transfers: {int(summary['total_transfers'])}<br><br>"
+            f"Initial resources: {environment['MAX_RESOURCES']:,.1f} per agent<br>"
+            f"Living cost: {agent_settings['COST_OF_LIVING'] * 100:.2f}% per iteration"
         ),
         "bgcolor": "rgba(255, 255, 255, 0.94)",
         "bordercolor": "#9ca3af",
@@ -134,7 +141,7 @@ def build_figure(simulation: ResourceSimulation) -> go.Figure:
             go.Frame(
                 name=str(iteration),
                 layout=go.Layout(
-                    annotations=[_summary_annotation(summary, iteration)],
+                    annotations=[_summary_annotation(summary, iteration, simulation)],
                     shapes=[_iteration_marker(iteration)],
                 ),
             )
@@ -172,7 +179,9 @@ def build_figure(simulation: ResourceSimulation) -> go.Figure:
         },
         hovermode="closest",
         legend={"title": {"text": "Agents"}},
-        annotations=[_summary_annotation(first_summary, first_iteration)],
+        annotations=[
+            _summary_annotation(first_summary, first_iteration, simulation)
+        ],
         shapes=[_iteration_marker(first_iteration)],
         sliders=[
             {

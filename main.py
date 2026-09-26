@@ -145,6 +145,7 @@ class ResourceSimulation:
         self.agents: list[Agent] = []
         self.metrics_history: list[dict[str, Any]] = []
         self.agent_history: list[dict[str, Any]] = []
+        self.total_transfers = 0
 
     def initialize_agents(self) -> list[Agent]:
         """Create the initial population using the configured random seed."""
@@ -167,6 +168,7 @@ class ResourceSimulation:
         ]
         self.metrics_history = []
         self.agent_history = []
+        self.total_transfers = 0
         self._record_agent_snapshot(iteration=0)
         return self.agents
 
@@ -303,8 +305,15 @@ class ResourceSimulation:
         completed = self._perform_transfers(actions)
         self._apply_living_cost()
         iteration = len(self.metrics_history) + 1
+        self.total_transfers += len(completed)
         statistics = MetricsCalculator.calculate_statistics(self.to_frame())
-        statistics.update({"iteration": iteration, "transfers": len(completed)})
+        statistics.update(
+            {
+                "iteration": iteration,
+                "transfers": len(completed),
+                "total_transfers": self.total_transfers,
+            }
+        )
         self.metrics_history.append(statistics)
         self._record_agent_snapshot(iteration)
         return completed
