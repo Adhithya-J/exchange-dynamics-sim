@@ -42,8 +42,14 @@ python -m venv .venv
 
 python -m pip install -r requirements.txt
 python main.py
+python visualize.py --iterations 500
 python -m pytest -q
 ```
+
+`visualize.py` creates a self-contained `simulation.html` Plotly chart. Open it
+in a browser to inspect each agent's resource balance over time and move the
+iteration slider. The summary card in the chart updates with the selected
+iteration.
 
 The random seed and model parameters are defined in `config.yaml` and loaded
 through `utils.load_config`. For interactive use, construct
@@ -56,6 +62,7 @@ inspect `metrics_history` or the returned DataFrame.
 - `main.py` - agents, simulation lifecycle, affordability, and metrics.
 - `utils/` - shared helpers, including YAML configuration loading.
 - `tests/` - unit and behavior tests for the model.
+- `visualize.py` - interactive Plotly visualization.
 - `requirements.txt` - runtime and test dependencies.
 
 ## Limitations

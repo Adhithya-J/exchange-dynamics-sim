@@ -137,6 +137,7 @@ class TestResourceSimulation:
         assert sum(agent.resources for agent in simulation.agents) == 40
         assert any(agent.memory for agent in simulation.agents)
         assert len(simulation.metrics_history) == 1
+        assert simulation.metrics_history[-1]["total_transfers"] == len(transfers)
 
     def test_receiving_ceiling_is_not_exceeded(self):
         config = make_config()
