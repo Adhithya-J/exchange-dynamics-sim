@@ -11,6 +11,8 @@ This is a small research-style simulation project. It is intended to make the
 rules and measurements easy to inspect, not to model a real economy or make
 economic predictions.
 
+Supported Python versions: 3.11 through 3.14.
+
 ## Model
 
 Each agent has:
