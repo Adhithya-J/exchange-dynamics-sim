@@ -1,308 +1,326 @@
-import pandas as pd
-import matplotlib.pyplot as plt
-import numpy as np
-import random
-import shortuuid
+"""A small agent-based simulation of resource sharing.
+
+The simulation keeps agents as ordinary Python objects. Pandas is used only
+for presenting the current state and calculating summary statistics.
+"""
+
+from __future__ import annotations
+
 from collections import deque
-from abc import ABC, abstractmethod
+from copy import deepcopy
+from random import Random
+from typing import Any, Iterable
 
-config = {
-    "ENV_INIT":{
-            "N_AGENTS" : 10
-            ,"N_ITERATIONS": 5000
-            ,"MAX_RESOURCES": 1_000
-            ,"MIN_RESOURCES": 0.0 # floor for resources
-            ,"SEED": 42
-            ,"RANDOM_SAMPLING_RANGE": (0,1)
-            ,"RESOURCE_TRANSFER_SIZE": 1.0
-            }
+import numpy as np
+import pandas as pd
 
-    ,"AGENTS_INIT": {
-        "GENEROSITY_RANGE": (0,1)
-        ,"ACCEPTANCE_RANGE": (0,1)
-        ,"GIVING_FLOOR": 1
-        ,"RECEIVING_CEIL": 1e4
-        ,"COST_OF_LIVING": 0.001 # assume food and other expenses? # let this be uniform for now
 
-        }
-    ,"AFFORDABILITY":
-    {   "RESOURCE_MIN": 50
-        ,"RESOURCE_MAX": 300
-        ,"LOWER_LIMIT": 0.0
-        ,"UPPER_LIMIT": 1.0
-        
-
-    }
-    ,"MEMORY": {
-        "MEMORY_SIZE": 10
-        ,"DEFAULT_WEIGHT": 1.0
-        ,"MEMORY_BONUS": 3.0
-    }
-    
-
+CONFIG: dict[str, dict[str, Any]] = {
+    "ENV_INIT": {
+        "N_AGENTS": 10,
+        "N_ITERATIONS": 5_000,
+        "MAX_RESOURCES": 1_000.0,
+        "MIN_RESOURCES": 0.0,
+        "SEED": 42,
+        "RESOURCE_TRANSFER_SIZE": 1.0,
+    },
+    "AGENTS_INIT": {
+        "GENEROSITY_RANGE": (0.0, 1.0),
+        "ACCEPTANCE_RANGE": (0.0, 1.0),
+        "GIVING_FLOOR": 1.0,
+        "RECEIVING_CEIL": 10_000.0,
+        "COST_OF_LIVING": 0.001,
+    },
+    "AFFORDABILITY": {
+        "RESOURCE_MIN": 50.0,
+        "RESOURCE_MAX": 300.0,
+        "LOWER_LIMIT": 0.0,
+        "UPPER_LIMIT": 1.0,
+    },
+    "MEMORY": {
+        "MEMORY_SIZE": 10,
+        "DEFAULT_WEIGHT": 1.0,
+        "MEMORY_BONUS": 3.0,
+    },
 }
 
-
-class BaseAgent(ABC):
-    def __init__(self):
-        pass
-
-    @abstractmethod
-    def to_dict(self):
-        pass
-
-class BaseResourceSimulation(ABC):
-    def __init__(self):
-        pass
-    @abstractmethod
-    def initialize_agents(self):
-        pass
-    
-    @abstractmethod
-    def run_iteration(self):
-        pass
-
-    @abstractmethod
-    def run(self):
-        pass
+# Keep the old lowercase name as a small compatibility convenience for users
+# who imported the original module-level configuration.
+config = CONFIG
 
 
-class Agent(BaseAgent):
+class Agent:
+    """An individual with resources, social tendencies, and recipient memory."""
 
-    def __init__(self, id, generosity_score, acceptance_score, initial_resources, memory_size):
-        super().__init__()
+    def __init__(
+        self,
+        id: str,
+        generosity_score: float,
+        acceptance_score: float,
+        initial_resources: float,
+        memory_size: int = 10,
+    ) -> None:
         self.id = id
-        self.generosity_score = generosity_score
-        self.acceptance_score = acceptance_score
-        self.resources = initial_resources
-        self.memory : deque = deque(maxlen=memory_size)
+        self.generosity_score = float(generosity_score)
+        self.acceptance_score = float(acceptance_score)
+        self.resources = float(initial_resources)
+        self.memory: deque[str] = deque(maxlen=memory_size)
 
-    def to_dict(self):
+    @property
+    def is_alive(self) -> bool:
+        return self.resources > 0
+
+    def can_give(self, giving_floor: float, transfer_size: float) -> bool:
+        """Return whether a transfer can leave the agent above the giving floor."""
+
+        return (
+            self.resources >= transfer_size
+            and self.resources - transfer_size >= giving_floor
+        )
+
+    def can_receive(self, receiving_ceil: float, transfer_size: float) -> bool:
+        """Return whether a transfer would keep the agent below its ceiling."""
+
+        return self.resources + transfer_size <= receiving_ceil
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a serializable snapshot of the agent."""
+
         return {
-                "id":  self.id
-                ,"generosity_score" :self.generosity_score
-                ,"acceptance_score": self.acceptance_score
-                , "resources" : self.resources
-                , "memory" : self.memory
-            }
-
-
-class ResourceSimulation(BaseResourceSimulation):
-    def __init__(self, config):
-        self.config = self.config
-        
-        random.seed(config["ENV_INIT"]["SEED"])
-        np.random.seed(config["ENV_INIT"]["SEED"])
-
-    def initialize_agents(self):
-        generosity_vals = np.linspace(0, 1, 11)
-        acceptance_vals = np.linspace(0, 1, 11)
-        agents = []
-        for _ in range(self.config["ENV_INIT"]["N_AGENTS"]):
-            agent = Agent(id =shortuuid.uuid(), 
-                    generosity_score=float(np.random.choice(generosity_vals, size=1)), 
-                    acceptance_score=float(np.random.choice(acceptance_vals, size=1)), 
-                    initial_resources= self.config["ENV_INIT"]["MAX_RESOURCES"], 
-                    memory_size=self.config["MEMORY"]["MEMORY_SIZE"])
-            agents.append(agent)
-        df = pd.DataFrame(agents)
-        df = df.set_index("id")            
-
-        return df
-
-    def run_iteration(self):
-        return
-
-
-    def run(self):
-
-        return 
-
-
-random.seed(config["ENV_INIT"]["SEED"])
-np.random.seed(config["ENV_INIT"]["SEED"])
-
-# initialization
-
-class MetricsCalculator:
-
-    @staticmethod    
-    def _calculate_gini(values):
-
-        if not values:
-            raise ValueError("Input array must not be empty")     
-
-        if any(i<0 for i in values):
-            raise ValueError("Gini is undefined for negative values")
-
-        numerator = 0
-        n = len(values)
-        for i in values:
-            for j in values:    
-                numerator += abs(i-j)
-        denominator = 2 * n * sum(values)
-        
-        if denominator == 0:
-            return 0
-
-        return numerator / denominator
-
-    @staticmethod
-    def calculate_statistics(df : pd.DataFrame):
-        resources = df["resources"].values
-        return {
-            "gini": MetricsCalculator._calculate_gini(resources)
-            ,"mean": np.mean(resources)
-            ,"median": np.median(resources)
-            ,"std": np.std(resources)
-            ,"min" : np.min(resources)
-            ,"max" : np.max(resources)
-            ,"total" : np.sum(resources)
+            "id": self.id,
+            "generosity_score": self.generosity_score,
+            "acceptance_score": self.acceptance_score,
+            "resources": self.resources,
+            "memory": list(self.memory),
         }
 
 
 class AffordabilityCalculator:
+    """Convert resources into a normalized affordability score."""
 
-    def __init__(self, config):
+    def __init__(self, config: dict[str, dict[str, Any]]) -> None:
         self.config = config
 
-    def _affordability(self, resources):
-
-        low=self.config["AFFORDABILITY"]["RESOURCE_MIN"]
-        high=self.config["AFFORDABILITY"]["RESOURCE_MAX"]
-        if resources < low:
+    def affordability(self, resources: float) -> float:
+        low = self.config["AFFORDABILITY"]["RESOURCE_MIN"]
+        high = self.config["AFFORDABILITY"]["RESOURCE_MAX"]
+        if high <= low:
+            raise ValueError("RESOURCE_MAX must be greater than RESOURCE_MIN")
+        if resources <= low:
             return self.config["AFFORDABILITY"]["LOWER_LIMIT"]
-        if resources > high:
+        if resources >= high:
             return self.config["AFFORDABILITY"]["UPPER_LIMIT"]
         return (resources - low) / (high - low)
 
+    def effective_generosity(self, agent: Agent) -> float:
+        score = agent.generosity_score * self.affordability(agent.resources)
+        lower_limit = self.config["AGENTS_INIT"]["GENEROSITY_RANGE"][0]
+        upper_limit = self.config["AGENTS_INIT"]["GENEROSITY_RANGE"][1]
+        return float(np.clip(score, lower_limit, upper_limit))
 
-    def effective_generosity(self, row):
-        return max(row["generosity_score"] * self._affordability(row["resources"]) # to ensure it is within the specified range during initialization
-                   ,self.config["AGENTS_INIT"]["GENEROSITY_RANGE"][0]
-        )
-
-    def effective_acceptance(self, row):
-        return min(row["acceptance_score"] * (2 - self._affordability(row["resources"]))
-                   ,self.config["AGENTS_INIT"]["ACCEPTANCE_RANGE"][1]
-        )
-
-
-
-def initialize_agents(n=config["ENV_INIT"]["N_AGENTS"]) -> pd.DataFrame:
-    df = pd.DataFrame(columns=["id","generosity_score","acceptance_score","resources"])
-    
-    generosity_vals = np.linspace(0,1,11) #range(11)
-    acceptance_vals = np.linspace(0,1,11) #[1,]
-    
-
-    agents = []
-    for i in range(n):
-        agent = {}
-        agent["id"] = shortuuid.uuid()
-        agent["generosity_score"] = float(np.random.choice(generosity_vals, size=1))
-        agent["acceptance_score"] = float(np.random.choice(acceptance_vals, size=1))
-        agent["resources"] = config["ENV_INIT"]["MAX_RESOURCES"]
-        agent["memory"] = deque(maxlen=config["MEMORY"]["MEMORY_SIZE"])
-        agents.append(agent)
-
-    df = pd.DataFrame(agents)
-    df = df.set_index("id")
-    return df
+    def effective_acceptance(self, agent: Agent) -> float:
+        score = agent.acceptance_score * (2 - self.affordability(agent.resources))
+        lower_limit = self.config["AGENTS_INIT"]["ACCEPTANCE_RANGE"][0]
+        upper_limit = self.config["AGENTS_INIT"]["ACCEPTANCE_RANGE"][1]
+        return float(np.clip(score, lower_limit, upper_limit))
 
 
-def single_iteration(df) -> pd.DataFrame:
-    df = df.copy()
-    agent_ids = list(df.index)
+class MetricsCalculator:
+    """Calculate inequality and resource statistics."""
 
-    def _affordability(resources, low=config["AFFORDABILITY"]["RESOURCE_MIN"], high=config["AFFORDABILITY"]["RESOURCE_MAX"]):
-        if resources < low:
-            return config["AFFORDABILITY"]["LOWER_LIMIT"]
-        if resources > high:
-            return config["AFFORDABILITY"]["UPPER_LIMIT"]
-        return (resources - low) / (high - low)
+    @staticmethod
+    def calculate_gini(values: Iterable[float]) -> float:
+        values_array = np.asarray(list(values), dtype=float)
+        if values_array.size == 0:
+            raise ValueError("Input array must not be empty")
+        if np.any(values_array < 0):
+            raise ValueError("Gini is undefined for negative values")
+
+        total = values_array.sum()
+        if total == 0:
+            return 0.0
+
+        differences = np.abs(values_array[:, None] - values_array[None, :])
+        return float(differences.sum() / (2 * values_array.size * total))
+
+    @staticmethod
+    def calculate_statistics(df: pd.DataFrame) -> dict[str, float]:
+        if "resources" not in df:
+            raise ValueError("DataFrame must contain a resources column")
+        resources = df["resources"].to_numpy(dtype=float)
+        if resources.size == 0:
+            raise ValueError("Cannot calculate statistics for an empty DataFrame")
+        return {
+            "gini": MetricsCalculator.calculate_gini(resources),
+            "mean": float(np.mean(resources)),
+            "median": float(np.median(resources)),
+            "std": float(np.std(resources)),
+            "min": float(np.min(resources)),
+            "max": float(np.max(resources)),
+            "total": float(np.sum(resources)),
+        }
 
 
-    def _effective_generosity(row):
-        return max(row["generosity_score"] * _affordability(row["resources"]) # to ensure it is within the specified range during initialization
-                   ,config["AGENTS_INIT"]["GENEROSITY_RANGE"][0]
-        )
+class ResourceSimulation:
+    """Run resource transfers between a collection of agents."""
 
-    def _effective_acceptance(row):
-        return min(row["acceptance_score"] * (2 - _affordability(row["resources"]))
-                   ,config["AGENTS_INIT"]["ACCEPTANCE_RANGE"][1]
-        )
+    def __init__(self, config: dict[str, dict[str, Any]] | None = None) -> None:
+        self.config = deepcopy(config or CONFIG)
+        self.random = Random(self.config["ENV_INIT"]["SEED"])
+        self.affordability = AffordabilityCalculator(self.config)
+        self.agents: list[Agent] = []
+        self.metrics_history: list[dict[str, float]] = []
 
+    def initialize_agents(self) -> list[Agent]:
+        """Create the initial population using the configured random seed."""
 
-    def apply_living_cost(df):
-        df["resources"] -= df["resources"] * config["AGENTS_INIT"]["COST_OF_LIVING"]
-        df["resources"] = df["resources"].clip(lower = config["ENV_INIT"]["MIN_RESOURCES"])
-        return df
+        generosity_range = self.config["AGENTS_INIT"]["GENEROSITY_RANGE"]
+        acceptance_range = self.config["AGENTS_INIT"]["ACCEPTANCE_RANGE"]
+        memory_size = self.config["MEMORY"]["MEMORY_SIZE"]
+        initial_resources = self.config["ENV_INIT"]["MAX_RESOURCES"]
+        count = self.config["ENV_INIT"]["N_AGENTS"]
 
-    def find_random_receiver_id(df, sender_id):
-        return random.choice(df.index[df.index != sender_id])
-    
-    def find_receiver_id(df, sender_id, memory_bonus=config["MEMORY"]["MEMORY_BONUS"]):
-        candidates = [i for i in df.index if i != sender_id]
-        memory = df.loc[sender_id, "memory"]
+        self.agents = [
+            Agent(
+                id=f"agent-{index + 1:03d}",
+                generosity_score=self.random.uniform(*generosity_range),
+                acceptance_score=self.random.uniform(*acceptance_range),
+                initial_resources=initial_resources,
+                memory_size=memory_size,
+            )
+            for index in range(count)
+        ]
+        self.metrics_history = []
+        return self.agents
+
+    def _agent_by_id(self, agent_id: str) -> Agent:
+        for agent in self.agents:
+            if agent.id == agent_id:
+                return agent
+        raise KeyError(f"Unknown agent: {agent_id}")
+
+    def _find_receiver(self, sender: Agent) -> Agent | None:
+        transfer_size = self.config["ENV_INIT"]["RESOURCE_TRANSFER_SIZE"]
+        receiving_ceil = self.config["AGENTS_INIT"]["RECEIVING_CEIL"]
+        candidates = [
+            agent
+            for agent in self.agents
+            if agent.id != sender.id
+            and agent.can_receive(receiving_ceil, transfer_size)
+        ]
+        if not candidates:
+            return None
+
+        default_weight = self.config["MEMORY"]["DEFAULT_WEIGHT"]
+        memory_bonus = self.config["MEMORY"]["MEMORY_BONUS"]
+        remembered = list(sender.memory)
         weights = []
-        for c in candidates:
-            w = config["MEMORY"]["DEFAULT_WEIGHT"]
-            if c in memory:
-                w+= memory_bonus * (len(memory) - memory.index(c)) / len(memory)
-            weights.append(w)
-        return random.choices(candidates, weights=weights, k=1)[0]
-    
-    def _is_capable_of_giving(row) -> bool:
-        return (row["resources"] > config["AGENTS_INIT"]["GIVING_FLOOR"] 
-                and random.uniform(*config["ENV_INIT"]["RANDOM_SAMPLING_RANGE"]) < _effective_generosity(row)
-                )
+        for candidate in candidates:
+            weight = default_weight
+            if candidate.id in remembered:
+                # More recent remembered givers receive a larger preference.
+                recency = remembered.index(candidate.id) + 1
+                weight += memory_bonus * recency / len(remembered)
+            weights.append(weight)
+        return self.random.choices(candidates, weights=weights, k=1)[0]
 
-    def _is_capable_of_receiving(row) -> bool:
-        return (row["resources"] < config["AGENTS_INIT"]["RECEIVING_CEIL"] 
-                and random.uniform(*config["ENV_INIT"]["RANDOM_SAMPLING_RANGE"]) < _effective_acceptance(row) 
-                )
+    def _can_give(self, agent: Agent) -> bool:
+        transfer_size = self.config["ENV_INIT"]["RESOURCE_TRANSFER_SIZE"]
+        giving_floor = self.config["AGENTS_INIT"]["GIVING_FLOOR"]
+        return (
+            agent.can_give(giving_floor, transfer_size)
+            and self.random.random() < self.affordability.effective_generosity(agent)
+        )
 
-    def generate_transfer_actions(df):
+    def _can_receive(self, agent: Agent) -> bool:
+        transfer_size = self.config["ENV_INIT"]["RESOURCE_TRANSFER_SIZE"]
+        receiving_ceil = self.config["AGENTS_INIT"]["RECEIVING_CEIL"]
+        return (
+            agent.can_receive(receiving_ceil, transfer_size)
+            and self.random.random() < self.affordability.effective_acceptance(agent)
+        )
+
+    def _generate_transfer_actions(self) -> list[tuple[str, str]]:
         actions = []
-        for id in df.index:        
-            if _is_capable_of_giving(df.loc[id]): 
-                receiver = find_receiver_id(df,id) # find_random_receiver_id(df,id) #  #
-                if _is_capable_of_receiving(df.loc[receiver,:]):
-                    actions.append((id, receiver))
+        for sender in self.agents:
+            if not self._can_give(sender):
+                continue
+            receiver = self._find_receiver(sender)
+            if receiver is not None and self._can_receive(receiver):
+                actions.append((sender.id, receiver.id))
         return actions
-        
-    def perform_transfers(df, actions) -> pd.DataFrame:
-        
-        for giver, receiver in actions:
-            df.at[giver, "resources"] -= config["ENV_INIT"]["RESOURCE_TRANSFER_SIZE"]
-            df.at[receiver, "resources"] += config["ENV_INIT"]["RESOURCE_TRANSFER_SIZE"]
-            df.at[receiver, "memory"].append(giver)
 
-        return df
+    def _perform_transfers(
+        self, actions: Iterable[tuple[str, str]]
+    ) -> list[tuple[str, str]]:
+        transfer_size = self.config["ENV_INIT"]["RESOURCE_TRANSFER_SIZE"]
+        giving_floor = self.config["AGENTS_INIT"]["GIVING_FLOOR"]
+        receiving_ceil = self.config["AGENTS_INIT"]["RECEIVING_CEIL"]
+        completed = []
 
-    transfer_actions = generate_transfer_actions(df)
-    df = perform_transfers(df, transfer_actions)
-    df = apply_living_cost(df)
+        for giver_id, receiver_id in actions:
+            giver = self._agent_by_id(giver_id)
+            receiver = self._agent_by_id(receiver_id)
+            if not giver.can_give(giving_floor, transfer_size):
+                continue
+            if not receiver.can_receive(receiving_ceil, transfer_size):
+                continue
+            giver.resources -= transfer_size
+            receiver.resources += transfer_size
+            receiver.memory.append(giver.id)
+            completed.append((giver.id, receiver.id))
+        return completed
 
-    return df
+    def _apply_living_cost(self) -> None:
+        cost = self.config["AGENTS_INIT"]["COST_OF_LIVING"]
+        minimum = self.config["ENV_INIT"]["MIN_RESOURCES"]
+        for agent in self.agents:
+            agent.resources = max(minimum, agent.resources * (1 - cost))
 
-def multiple_iterations(df, n=config["ENV_INIT"]["N_ITERATIONS"]):
-    
-    for i in range(n):
-        df = single_iteration(df)
-        if i%100 == 0:
-            print(calculate_gini(df["resources"]))
+    def to_frame(self) -> pd.DataFrame:
+        """Return the current agent state as a dataframe for analysis."""
 
-    return df
+        columns = [
+            "id",
+            "generosity_score",
+            "acceptance_score",
+            "resources",
+            "memory",
+        ]
+        if not self.agents:
+            return pd.DataFrame(columns=columns).set_index("id")
+        return pd.DataFrame([agent.to_dict() for agent in self.agents]).set_index("id")
+
+    def run_iteration(self) -> list[tuple[str, str]]:
+        """Run one transfer-and-living-cost step and return completed transfers."""
+
+        if not self.agents:
+            self.initialize_agents()
+        actions = self._generate_transfer_actions()
+        completed = self._perform_transfers(actions)
+        self._apply_living_cost()
+        self.metrics_history.append(MetricsCalculator.calculate_statistics(self.to_frame()))
+        return completed
+
+    def run(self, iterations: int | None = None) -> pd.DataFrame:
+        """Run the configured number of iterations and return the final state."""
+
+        if not self.agents:
+            self.initialize_agents()
+        count = self.config["ENV_INIT"]["N_ITERATIONS"] if iterations is None else iterations
+        if count < 0:
+            raise ValueError("iterations must not be negative")
+        for _ in range(count):
+            self.run_iteration()
+        return self.to_frame()
 
 
-def main():
-    df = initialize_agents()
-    print(df.head(10))
-    print("--"*10)
-    df_1 = multiple_iterations(df)
-    print(df_1.head(10))
+def main() -> None:
+    simulation = ResourceSimulation()
+    final_state = simulation.run()
+    print(final_state.head())
+    print("\nFinal statistics:")
+    print(simulation.metrics_history[-1])
 
 
 if __name__ == "__main__":
