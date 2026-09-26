@@ -143,7 +143,8 @@ class ResourceSimulation:
         self.random = Random(self.config["ENV_INIT"]["SEED"])
         self.affordability = AffordabilityCalculator(self.config)
         self.agents: list[Agent] = []
-        self.metrics_history: list[dict[str, float]] = []
+        self.metrics_history: list[dict[str, Any]] = []
+        self.agent_history: list[dict[str, Any]] = []
 
     def initialize_agents(self) -> list[Agent]:
         """Create the initial population using the configured random seed."""
@@ -165,7 +166,21 @@ class ResourceSimulation:
             for index in range(count)
         ]
         self.metrics_history = []
+        self.agent_history = []
+        self._record_agent_snapshot(iteration=0)
         return self.agents
+
+    def _record_agent_snapshot(self, iteration: int) -> None:
+        """Record the state needed to visualize every agent over time."""
+
+        for agent in self.agents:
+            self.agent_history.append(
+                {
+                    "iteration": iteration,
+                    "id": agent.id,
+                    "resources": agent.resources,
+                }
+            )
 
     def _agent_by_id(self, agent_id: str) -> Agent:
         for agent in self.agents:
@@ -265,6 +280,16 @@ class ResourceSimulation:
             return pd.DataFrame(columns=columns).set_index("id")
         return pd.DataFrame([agent.to_dict() for agent in self.agents]).set_index("id")
 
+    def agent_history_frame(self) -> pd.DataFrame:
+        """Return one row per agent and iteration for visualization."""
+
+        columns = [
+            "iteration",
+            "id",
+            "resources",
+        ]
+        return pd.DataFrame(self.agent_history, columns=columns)
+
     def run_iteration(self) -> list[tuple[str, str]]:
         """Run one transfer-and-living-cost step and return completed transfers."""
 
@@ -273,7 +298,11 @@ class ResourceSimulation:
         actions = self._generate_transfer_actions()
         completed = self._perform_transfers(actions)
         self._apply_living_cost()
-        self.metrics_history.append(MetricsCalculator.calculate_statistics(self.to_frame()))
+        iteration = len(self.metrics_history) + 1
+        statistics = MetricsCalculator.calculate_statistics(self.to_frame())
+        statistics.update({"iteration": iteration, "transfers": len(completed)})
+        self.metrics_history.append(statistics)
+        self._record_agent_snapshot(iteration)
         return completed
 
     def run(self, iterations: int | None = None) -> pd.DataFrame:
