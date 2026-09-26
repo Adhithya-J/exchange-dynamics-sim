@@ -179,6 +179,8 @@ class ResourceSimulation:
                     "iteration": iteration,
                     "id": agent.id,
                     "resources": agent.resources,
+                    "generosity_score": agent.generosity_score,
+                    "acceptance_score": agent.acceptance_score,
                 }
             )
 
@@ -287,6 +289,8 @@ class ResourceSimulation:
             "iteration",
             "id",
             "resources",
+            "generosity_score",
+            "acceptance_score",
         ]
         return pd.DataFrame(self.agent_history, columns=columns)
 
