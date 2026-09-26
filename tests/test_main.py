@@ -73,7 +73,7 @@ class TestAffordabilityCalculator:
 
     def test_invalid_resource_range_is_rejected(self):
         config = make_config()
-        config["AFFORDABILITY"]["RESOURCE_MAX"] = 50
+        config["AFFORDABILITY"]["MAX_RESOURCES"] = 50
 
         with pytest.raises(ValueError, match="greater"):
             AffordabilityCalculator(config).affordability(100)
@@ -105,7 +105,7 @@ class TestAgent:
 class TestResourceSimulation:
     def test_initialization_is_deterministic(self):
         config = make_config()
-        config["ENV_INIT"]["N_AGENTS"] = 3
+        config["SIMULATION"]["AGENTS"] = 3
 
         first = ResourceSimulation(config)
         second = ResourceSimulation(config)
@@ -119,13 +119,13 @@ class TestResourceSimulation:
 
     def test_iteration_preserves_resources_and_records_memory(self):
         config = make_config()
-        config["ENV_INIT"].update({"N_AGENTS": 4, "MAX_RESOURCES": 10})
-        config["AGENTS_INIT"].update(
+        config["SIMULATION"].update({"AGENTS": 4, "INITIAL_RESOURCES": 10})
+        config["AGENTS"].update(
             {
-                "GENEROSITY_RANGE": (1.0, 1.0),
-                "ACCEPTANCE_RANGE": (1.0, 1.0),
-                "GIVING_FLOOR": 0.0,
-                "COST_OF_LIVING": 0.0,
+                "GENEROSITY": (1.0, 1.0),
+                "ACCEPTANCE": (1.0, 1.0),
+                "MIN_RESOURCES_AFTER_GIVING": 0.0,
+                "LIVING_COST": 0.0,
             }
         )
 
@@ -141,14 +141,14 @@ class TestResourceSimulation:
 
     def test_receiving_ceiling_is_not_exceeded(self):
         config = make_config()
-        config["ENV_INIT"].update({"N_AGENTS": 3, "MAX_RESOURCES": 1})
-        config["AGENTS_INIT"].update(
+        config["SIMULATION"].update({"AGENTS": 3, "INITIAL_RESOURCES": 1})
+        config["AGENTS"].update(
             {
-                "GENEROSITY_RANGE": (1.0, 1.0),
-                "ACCEPTANCE_RANGE": (1.0, 1.0),
-                "GIVING_FLOOR": 0.0,
-                "RECEIVING_CEIL": 2.0,
-                "COST_OF_LIVING": 0.0,
+                "GENEROSITY": (1.0, 1.0),
+                "ACCEPTANCE": (1.0, 1.0),
+                "MIN_RESOURCES_AFTER_GIVING": 0.0,
+                "MAX_RESOURCES_AFTER_RECEIVING": 2.0,
+                "LIVING_COST": 0.0,
             }
         )
 
@@ -159,13 +159,13 @@ class TestResourceSimulation:
 
     def test_living_cost_reduces_resources_after_transfer(self):
         config = make_config()
-        config["ENV_INIT"].update({"N_AGENTS": 2, "MAX_RESOURCES": 10})
-        config["AGENTS_INIT"].update(
+        config["SIMULATION"].update({"AGENTS": 2, "INITIAL_RESOURCES": 10})
+        config["AGENTS"].update(
             {
-                "GENEROSITY_RANGE": (1.0, 1.0),
-                "ACCEPTANCE_RANGE": (1.0, 1.0),
-                "GIVING_FLOOR": 0.0,
-                "COST_OF_LIVING": 0.1,
+                "GENEROSITY": (1.0, 1.0),
+                "ACCEPTANCE": (1.0, 1.0),
+                "MIN_RESOURCES_AFTER_GIVING": 0.0,
+                "LIVING_COST": 0.1,
             }
         )
 
@@ -174,6 +174,85 @@ class TestResourceSimulation:
 
         assert math.isclose(simulation.metrics_history[-1]["total"], 18.0)
 
+    def test_agents_at_resource_floor_are_dead_and_inactive(self):
+        config = make_config()
+        config["SIMULATION"].update(
+            {
+                "AGENTS": 2,
+                "INITIAL_RESOURCES": 1,
+                "RESOURCE_FLOOR": 0.0,
+                "TRANSFER_AMOUNT_RANGE": (1.0, 1.0),
+            }
+        )
+        config["AGENTS"].update(
+            {
+                "MIN_RESOURCES_AFTER_GIVING": 0.0,
+                "MAX_RESOURCES_AFTER_RECEIVING": 10.0,
+            }
+        )
+
+        simulation = ResourceSimulation(config)
+        simulation.initialize_agents()
+        simulation._perform_transfers([("agent-001", "agent-002", 1.0)])
+
+        assert not simulation.agents[0].is_alive
+        assert simulation.agents[0].resources == 0.0
+        assert not simulation.agents[0].can_receive(10.0, 1.0)
+        assert simulation.agents[1].is_alive
+
+    def test_transfer_amounts_are_variable_and_conserve_resources(self):
+        config = make_config()
+        config["SIMULATION"].update(
+            {
+                "AGENTS": 4,
+                "INITIAL_RESOURCES": 10,
+                "TRANSFER_AMOUNT_RANGE": (1.0, 5.0),
+            }
+        )
+        config["AGENTS"].update(
+            {
+                "GENEROSITY": (1.0, 1.0),
+                "ACCEPTANCE": (1.0, 1.0),
+                "MIN_RESOURCES_AFTER_GIVING": 0.0,
+                "LIVING_COST": 0.0,
+            }
+        )
+
+        simulation = ResourceSimulation(config)
+        simulation.initialize_agents()
+        transfers = simulation.run_iteration()
+
+        assert transfers
+        assert all(1.0 <= amount <= 5.0 for _, _, amount in transfers)
+        assert math.isclose(sum(agent.resources for agent in simulation.agents), 40.0)
+
+    def test_living_cost_does_not_top_up_agents_to_floor(self):
+        config = make_config()
+        config["SIMULATION"].update(
+            {
+                "AGENTS": 1,
+                "INITIAL_RESOURCES": 1.0,
+                "RESOURCE_FLOOR": 1.0,
+                "TRANSFER_AMOUNT_RANGE": (1.0, 1.0),
+            }
+        )
+        config["AGENTS"]["LIVING_COST"] = 0.1
+
+        simulation = ResourceSimulation(config)
+        simulation.run(iterations=1)
+
+        assert simulation.agents[0].resources == 1.0
+        assert not simulation.agents[0].is_alive
+
     def test_negative_iterations_are_rejected(self):
         with pytest.raises(ValueError, match="negative"):
             ResourceSimulation().run(iterations=-1)
+
+    def test_memory_fraction_must_be_between_zero_and_one(self):
+        config = make_config()
+        config["MEMORY"]["PREFERENCE_FRACTION"] = 1.1
+        simulation = ResourceSimulation(config)
+        simulation.initialize_agents()
+
+        with pytest.raises(ValueError, match="between 0 and 1"):
+            simulation._find_receiver(simulation.agents[0])
