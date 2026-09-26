@@ -218,7 +218,7 @@ class ResourceSimulation:
         for candidate in candidates:
             weight = default_weight
             if candidate.id in remembered:
-                # More recent recipients receive a larger preference.
+                # More recent remembered givers receive a larger preference.
                 recency = remembered.index(candidate.id) + 1
                 weight += memory_bonus * recency / len(remembered)
             weights.append(weight)
