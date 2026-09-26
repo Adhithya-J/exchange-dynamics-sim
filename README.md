@@ -45,14 +45,16 @@ python main.py
 python -m pytest -q
 ```
 
-The random seed and model parameters are defined in `CONFIG` in `main.py`.
-For interactive use, construct `ResourceSimulation` with a copied and edited
-configuration, call `run()`, and inspect `metrics_history` or the returned
-DataFrame.
+The random seed and model parameters are defined in `config.yaml` and loaded
+through `utils.load_config`. For interactive use, construct
+`ResourceSimulation` with a copied and edited configuration, call `run()`, and
+inspect `metrics_history` or the returned DataFrame.
 
 ## Project structure
 
+- `config.yaml` - default simulation parameters.
 - `main.py` - agents, simulation lifecycle, affordability, and metrics.
+- `utils/` - shared helpers, including YAML configuration loading.
 - `test_main.py` - unit and behavior tests for the model.
 - `requirements.txt` - runtime and test dependencies.
 
