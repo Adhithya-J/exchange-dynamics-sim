@@ -91,6 +91,14 @@ def build_figure(simulation: ResourceSimulation) -> go.Figure:
 
     agent_ids = list(agent_history["id"].drop_duplicates())
     iterations = sorted(agent_history["iteration"].unique().tolist())
+    last_iteration = iterations[-1]
+    if last_iteration > 500:
+        step = max(5, int(last_iteration / 100 / 5 + 0.5) * 5)
+        slider_iterations = list(range(iterations[0], last_iteration + 1, step))
+        if slider_iterations[-1] != last_iteration:
+            slider_iterations.append(last_iteration)
+    else:
+        slider_iterations = iterations
     colors = qualitative.Plotly
     color_by_agent = {
         agent_id: colors[index % len(colors)]
@@ -116,7 +124,7 @@ def build_figure(simulation: ResourceSimulation) -> go.Figure:
         return traces
 
     frames = []
-    for iteration in iterations:
+    for iteration in slider_iterations:
         summary = _summary_for_iteration(simulation, agent_history, iteration)
         frames.append(
             go.Frame(
@@ -182,7 +190,7 @@ def build_figure(simulation: ResourceSimulation) -> go.Figure:
                             },
                         ],
                     }
-                    for iteration in iterations
+                    for iteration in slider_iterations
                 ],
             }
         ],
