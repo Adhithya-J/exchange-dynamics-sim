@@ -172,7 +172,7 @@ class TestResourceSimulation:
         simulation = ResourceSimulation(config)
         simulation.run(iterations=1)
 
-        assert math.isclose(simulation.metrics_history[-1]["total"], 18.0)
+        assert math.isclose(simulation.metrics_history[-1]["total"], 19.8)
 
     def test_agents_at_resource_floor_are_dead_and_inactive(self):
         config = make_config()

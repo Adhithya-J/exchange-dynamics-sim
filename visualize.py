@@ -66,7 +66,7 @@ def _summary_annotation(
             f"Total: {summary['total']:,.1f}<br>"
             f"Total transfers: {int(summary['total_transfers'])}<br><br>"
             f"Initial resources: {simulation_settings['INITIAL_RESOURCES']:,.1f} per agent<br>"
-            f"Living cost: {agent_settings['LIVING_COST'] * 100:.2f}% per iteration"
+            f"Living cost: {agent_settings['LIVING_COST']:,.1f} per iteration"
         ),
         "bgcolor": "rgba(255, 255, 255, 0.94)",
         "bordercolor": "#9ca3af",

@@ -324,7 +324,7 @@ class ResourceSimulation:
         for agent in self.agents:
             if not agent.is_alive:
                 continue
-            agent.resources *= 1 - cost
+            agent.resources -= cost
             if agent.resources <= minimum:
                 # Reaching the floor is death, not a resource top-up.
                 agent.resources = minimum
