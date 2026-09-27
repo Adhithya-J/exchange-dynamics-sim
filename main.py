@@ -99,7 +99,7 @@ class AffordabilityCalculator:
         return float(np.clip(score, lower_limit, upper_limit))
 
     def effective_acceptance(self, agent: Agent) -> float:
-        score = agent.acceptance_score * (1.0 - self.affordability(agent.resources))
+        score = agent.acceptance_score * (2.0 - self.affordability(agent.resources))
         lower_limit = self.config["AGENTS"]["ACCEPTANCE"][0]
         upper_limit = self.config["AGENTS"]["ACCEPTANCE"][1]
         return float(np.clip(score, lower_limit, upper_limit))
