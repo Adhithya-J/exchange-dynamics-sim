@@ -66,7 +66,7 @@ def _summary_annotation(
             f"Total: {summary['total']:,.1f}<br>"
             f"Total transfers: {int(summary['total_transfers'])}<br><br>"
             f"Initial resources: {simulation_settings['INITIAL_RESOURCES']:,.1f} per agent<br>"
-            f"Living cost: {agent_settings['LIVING_COST'] * 100:.2f}% per iteration"
+            f"Living cost: {agent_settings['LIVING_COST']:,.1f} per iteration"
         ),
         "bgcolor": "rgba(255, 255, 255, 0.94)",
         "bordercolor": "#9ca3af",
@@ -116,19 +116,20 @@ def build_figure(simulation: ResourceSimulation) -> go.Figure:
         traces = []
         for agent_id in agent_ids:
             agent = agent_history[agent_history["id"] == agent_id]
+            gen_score = float(agent["generosity_score"].iloc[0])
+            acc_score = float(agent["acceptance_score"].iloc[0])
             traces.append(
                 go.Scatter(
                     x=agent["iteration"],
                     y=agent["resources"],
-                    customdata=agent[["generosity_score", "acceptance_score"]],
                     mode="lines",
                     name=agent_id,
                     line={"color": color_by_agent[agent_id], "width": 2},
                     hovertemplate=(
                         f"{agent_id}<br>"
                         "Resources: %{y:,.2f}<br>"
-                        "Altruism / generosity: %{customdata[0]:.2f}<br>"
-                        "Acceptance: %{customdata[1]:.2f}<extra></extra>"
+                        f"Altruism / generosity: {gen_score:.2f}<br>"
+                        f"Acceptance: {acc_score:.2f}<extra></extra>"
                     ),
                 )
             )
@@ -175,7 +176,7 @@ def build_figure(simulation: ResourceSimulation) -> go.Figure:
         },
         yaxis={
             "title": "Resources",
-            "range": [max(0, minimum_resources - y_padding), maximum_resources + y_padding],
+            "range": [minimum_resources - y_padding, maximum_resources + y_padding],
         },
         hovermode="closest",
         legend={"title": {"text": "Agents"}},

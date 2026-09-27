@@ -84,13 +84,15 @@ class AffordabilityCalculator:
     def affordability(self, resources: float) -> float:
         low = self.config["AFFORDABILITY"]["MIN_RESOURCES"]
         high = self.config["AFFORDABILITY"]["MAX_RESOURCES"]
+        min_score = self.config["AFFORDABILITY"]["MIN_SCORE"]
+        max_score = self.config["AFFORDABILITY"]["MAX_SCORE"]
         if high <= low:
             raise ValueError("MAX_RESOURCES must be greater than MIN_RESOURCES")
         if resources <= low:
-            return self.config["AFFORDABILITY"]["MIN_SCORE"]
+            return min_score
         if resources >= high:
-            return self.config["AFFORDABILITY"]["MAX_SCORE"]
-        return (resources - low) / (high - low)
+            return max_score
+        return min_score + (max_score - min_score) * (resources - low) / (high - low)
 
     def effective_generosity(self, agent: Agent) -> float:
         score = agent.generosity_score * self.affordability(agent.resources)
@@ -99,7 +101,7 @@ class AffordabilityCalculator:
         return float(np.clip(score, lower_limit, upper_limit))
 
     def effective_acceptance(self, agent: Agent) -> float:
-        score = agent.acceptance_score * (2 - self.affordability(agent.resources))
+        score = agent.acceptance_score * (2.0 - self.affordability(agent.resources))
         lower_limit = self.config["AGENTS"]["ACCEPTANCE"][0]
         upper_limit = self.config["AGENTS"]["ACCEPTANCE"][1]
         return float(np.clip(score, lower_limit, upper_limit))
@@ -239,24 +241,30 @@ class ResourceSimulation:
         if not 0 <= memory_fraction <= 1:
             raise ValueError("PREFERENCE_FRACTION must be between 0 and 1")
 
-        remembered = list(sender.memory)
         remembered_candidates = [
-            candidate for candidate in candidates if candidate.id in remembered
+            candidate for candidate in candidates if candidate.id in sender.memory
         ]
         if not remembered_candidates or memory_fraction == 0:
             return self.random.choice(candidates)
 
-        recency_total = sum(
-            remembered.index(candidate.id) + 1
+        candidate_memory_scores: dict[str, float] = {}
+        for idx, agent_id in enumerate(sender.memory):
+            candidate_memory_scores[agent_id] = (
+                candidate_memory_scores.get(agent_id, 0.0) + (idx + 1)
+            )
+
+        total_memory_score = sum(
+            candidate_memory_scores[candidate.id]
             for candidate in remembered_candidates
         )
+
         uniform_share = (1 - memory_fraction) / len(candidates)
         weights = []
         for candidate in candidates:
             weight = uniform_share
-            if candidate in remembered_candidates:
-                recency = remembered.index(candidate.id) + 1
-                weight += memory_fraction * recency / recency_total
+            if candidate.id in candidate_memory_scores:
+                memory_share = candidate_memory_scores[candidate.id] / total_memory_score
+                weight += memory_fraction * memory_share
             weights.append(weight)
         return self.random.choices(candidates, weights=weights, k=1)[0]
 
@@ -274,12 +282,25 @@ class ResourceSimulation:
             and self.random.random() < self.affordability.effective_acceptance(agent)
         )
 
-    def _generate_transfer_actions(self) -> list[tuple[str, str, float]]:
+    def _execute_transfer(
+        self, giver: Agent, receiver: Agent, transfer_size: float
+    ) -> tuple[str, str, float]:
+        giver.resources -= transfer_size
+        receiver.resources += transfer_size
+        receiver.memory.append(giver.id)
+        return (giver.id, receiver.id, transfer_size)
+
+    def _process_transfers(self) -> list[tuple[str, str, float]]:
+        """Process transfer actions sequentially in randomized order with immediate updates."""
         minimum_transfer, maximum_transfer = self._transfer_amount_bounds()
         giving_floor = self.config["AGENTS"]["MIN_RESOURCES_AFTER_GIVING"]
         receiving_ceil = self.config["AGENTS"]["MAX_RESOURCES_AFTER_RECEIVING"]
-        actions = []
-        for sender in self.agents:
+        completed = []
+
+        senders = list(self.agents)
+        self.random.shuffle(senders)
+
+        for sender in senders:
             if not sender.is_alive or not self._can_give(sender, minimum_transfer):
                 continue
             receiver = self._find_receiver(sender, minimum_transfer)
@@ -295,8 +316,10 @@ class ResourceSimulation:
                 continue
             transfer_size = self.random.uniform(minimum_transfer, feasible_maximum)
             if self._can_receive(receiver, transfer_size):
-                actions.append((sender.id, receiver.id, transfer_size))
-        return actions
+                completed.append(
+                    self._execute_transfer(sender, receiver, transfer_size)
+                )
+        return completed
 
     def _perform_transfers(
         self, actions: Iterable[tuple[str, str, float]]
@@ -312,10 +335,7 @@ class ResourceSimulation:
                 continue
             if not receiver.can_receive(receiving_ceil, transfer_size):
                 continue
-            giver.resources -= transfer_size
-            receiver.resources += transfer_size
-            receiver.memory.append(giver.id)
-            completed.append((giver.id, receiver.id, transfer_size))
+            completed.append(self._execute_transfer(giver, receiver, transfer_size))
         return completed
 
     def _apply_living_cost(self) -> None:
@@ -324,7 +344,7 @@ class ResourceSimulation:
         for agent in self.agents:
             if not agent.is_alive:
                 continue
-            agent.resources *= 1 - cost
+            agent.resources -= cost
             if agent.resources <= minimum:
                 # Reaching the floor is death, not a resource top-up.
                 agent.resources = minimum
@@ -361,8 +381,7 @@ class ResourceSimulation:
 
         if not self.agents:
             self.initialize_agents()
-        actions = self._generate_transfer_actions()
-        completed = self._perform_transfers(actions)
+        completed = self._process_transfers()
         self._apply_living_cost()
         iteration = len(self.metrics_history) + 1
         self.total_transfers += len(completed)

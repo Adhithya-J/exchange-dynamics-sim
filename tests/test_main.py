@@ -78,6 +78,18 @@ class TestAffordabilityCalculator:
         with pytest.raises(ValueError, match="greater"):
             AffordabilityCalculator(config).affordability(100)
 
+    def test_affordability_custom_min_max_scores(self):
+        config = make_config()
+        config["AFFORDABILITY"]["MIN_SCORE"] = 0.1
+        config["AFFORDABILITY"]["MAX_SCORE"] = 0.9
+        config["AFFORDABILITY"]["MIN_RESOURCES"] = 100
+        config["AFFORDABILITY"]["MAX_RESOURCES"] = 200
+        calc = AffordabilityCalculator(config)
+
+        assert math.isclose(calc.affordability(100), 0.1)
+        assert math.isclose(calc.affordability(150), 0.5)
+        assert math.isclose(calc.affordability(200), 0.9)
+
 
 class TestAgent:
     def test_initialization_and_serialization(self):
@@ -172,7 +184,7 @@ class TestResourceSimulation:
         simulation = ResourceSimulation(config)
         simulation.run(iterations=1)
 
-        assert math.isclose(simulation.metrics_history[-1]["total"], 18.0)
+        assert math.isclose(simulation.metrics_history[-1]["total"], 19.8)
 
     def test_agents_at_resource_floor_are_dead_and_inactive(self):
         config = make_config()
@@ -256,3 +268,23 @@ class TestResourceSimulation:
 
         with pytest.raises(ValueError, match="between 0 and 1"):
             simulation._find_receiver(simulation.agents[0])
+
+    def test_memory_recency_and_frequency_weighting(self):
+        config = make_config()
+        config["MEMORY"]["PREFERENCE_FRACTION"] = 1.0
+        simulation = ResourceSimulation(config)
+
+        sender = Agent("sender", 1.0, 1.0, 100)
+        c1 = Agent("c1", 1.0, 1.0, 100)
+        c2 = Agent("c2", 1.0, 1.0, 100)
+        simulation.agents = [sender, c1, c2]
+
+        sender.memory.append("c1")  # idx 0 -> score 1
+        sender.memory.append("c2")  # idx 1 -> score 2
+        sender.memory.append("c2")  # idx 2 -> score 3 (c2 total = 5, c1 total = 1)
+
+        chosen = [simulation._find_receiver(sender) for _ in range(600)]
+        c2_count = sum(1 for agent in chosen if agent.id == "c2")
+        c1_count = sum(1 for agent in chosen if agent.id == "c1")
+
+        assert c2_count > c1_count * 3
