@@ -256,3 +256,23 @@ class TestResourceSimulation:
 
         with pytest.raises(ValueError, match="between 0 and 1"):
             simulation._find_receiver(simulation.agents[0])
+
+    def test_memory_recency_and_frequency_weighting(self):
+        config = make_config()
+        config["MEMORY"]["PREFERENCE_FRACTION"] = 1.0
+        simulation = ResourceSimulation(config)
+
+        sender = Agent("sender", 1.0, 1.0, 100)
+        c1 = Agent("c1", 1.0, 1.0, 100)
+        c2 = Agent("c2", 1.0, 1.0, 100)
+        simulation.agents = [sender, c1, c2]
+
+        sender.memory.append("c1")  # idx 0 -> score 1
+        sender.memory.append("c2")  # idx 1 -> score 2
+        sender.memory.append("c2")  # idx 2 -> score 3 (c2 total = 5, c1 total = 1)
+
+        chosen = [simulation._find_receiver(sender) for _ in range(600)]
+        c2_count = sum(1 for agent in chosen if agent.id == "c2")
+        c1_count = sum(1 for agent in chosen if agent.id == "c1")
+
+        assert c2_count > c1_count * 3

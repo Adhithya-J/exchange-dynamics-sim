@@ -239,24 +239,30 @@ class ResourceSimulation:
         if not 0 <= memory_fraction <= 1:
             raise ValueError("PREFERENCE_FRACTION must be between 0 and 1")
 
-        remembered = list(sender.memory)
         remembered_candidates = [
-            candidate for candidate in candidates if candidate.id in remembered
+            candidate for candidate in candidates if candidate.id in sender.memory
         ]
         if not remembered_candidates or memory_fraction == 0:
             return self.random.choice(candidates)
 
-        recency_total = sum(
-            remembered.index(candidate.id) + 1
+        candidate_memory_scores: dict[str, float] = {}
+        for idx, agent_id in enumerate(sender.memory):
+            candidate_memory_scores[agent_id] = (
+                candidate_memory_scores.get(agent_id, 0.0) + (idx + 1)
+            )
+
+        total_memory_score = sum(
+            candidate_memory_scores[candidate.id]
             for candidate in remembered_candidates
         )
+
         uniform_share = (1 - memory_fraction) / len(candidates)
         weights = []
         for candidate in candidates:
             weight = uniform_share
-            if candidate in remembered_candidates:
-                recency = remembered.index(candidate.id) + 1
-                weight += memory_fraction * recency / recency_total
+            if candidate.id in candidate_memory_scores:
+                memory_share = candidate_memory_scores[candidate.id] / total_memory_score
+                weight += memory_fraction * memory_share
             weights.append(weight)
         return self.random.choices(candidates, weights=weights, k=1)[0]
 
