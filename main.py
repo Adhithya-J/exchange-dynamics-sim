@@ -280,12 +280,25 @@ class ResourceSimulation:
             and self.random.random() < self.affordability.effective_acceptance(agent)
         )
 
-    def _generate_transfer_actions(self) -> list[tuple[str, str, float]]:
+    def _execute_transfer(
+        self, giver: Agent, receiver: Agent, transfer_size: float
+    ) -> tuple[str, str, float]:
+        giver.resources -= transfer_size
+        receiver.resources += transfer_size
+        receiver.memory.append(giver.id)
+        return (giver.id, receiver.id, transfer_size)
+
+    def _process_transfers(self) -> list[tuple[str, str, float]]:
+        """Process transfer actions sequentially in randomized order with immediate updates."""
         minimum_transfer, maximum_transfer = self._transfer_amount_bounds()
         giving_floor = self.config["AGENTS"]["MIN_RESOURCES_AFTER_GIVING"]
         receiving_ceil = self.config["AGENTS"]["MAX_RESOURCES_AFTER_RECEIVING"]
-        actions = []
-        for sender in self.agents:
+        completed = []
+
+        senders = list(self.agents)
+        self.random.shuffle(senders)
+
+        for sender in senders:
             if not sender.is_alive or not self._can_give(sender, minimum_transfer):
                 continue
             receiver = self._find_receiver(sender, minimum_transfer)
@@ -301,8 +314,10 @@ class ResourceSimulation:
                 continue
             transfer_size = self.random.uniform(minimum_transfer, feasible_maximum)
             if self._can_receive(receiver, transfer_size):
-                actions.append((sender.id, receiver.id, transfer_size))
-        return actions
+                completed.append(
+                    self._execute_transfer(sender, receiver, transfer_size)
+                )
+        return completed
 
     def _perform_transfers(
         self, actions: Iterable[tuple[str, str, float]]
@@ -318,10 +333,7 @@ class ResourceSimulation:
                 continue
             if not receiver.can_receive(receiving_ceil, transfer_size):
                 continue
-            giver.resources -= transfer_size
-            receiver.resources += transfer_size
-            receiver.memory.append(giver.id)
-            completed.append((giver.id, receiver.id, transfer_size))
+            completed.append(self._execute_transfer(giver, receiver, transfer_size))
         return completed
 
     def _apply_living_cost(self) -> None:
@@ -367,8 +379,7 @@ class ResourceSimulation:
 
         if not self.agents:
             self.initialize_agents()
-        actions = self._generate_transfer_actions()
-        completed = self._perform_transfers(actions)
+        completed = self._process_transfers()
         self._apply_living_cost()
         iteration = len(self.metrics_history) + 1
         self.total_transfers += len(completed)
