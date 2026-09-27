@@ -78,6 +78,18 @@ class TestAffordabilityCalculator:
         with pytest.raises(ValueError, match="greater"):
             AffordabilityCalculator(config).affordability(100)
 
+    def test_affordability_custom_min_max_scores(self):
+        config = make_config()
+        config["AFFORDABILITY"]["MIN_SCORE"] = 0.1
+        config["AFFORDABILITY"]["MAX_SCORE"] = 0.9
+        config["AFFORDABILITY"]["MIN_RESOURCES"] = 100
+        config["AFFORDABILITY"]["MAX_RESOURCES"] = 200
+        calc = AffordabilityCalculator(config)
+
+        assert math.isclose(calc.affordability(100), 0.1)
+        assert math.isclose(calc.affordability(150), 0.5)
+        assert math.isclose(calc.affordability(200), 0.9)
+
 
 class TestAgent:
     def test_initialization_and_serialization(self):

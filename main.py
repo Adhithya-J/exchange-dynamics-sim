@@ -84,13 +84,15 @@ class AffordabilityCalculator:
     def affordability(self, resources: float) -> float:
         low = self.config["AFFORDABILITY"]["MIN_RESOURCES"]
         high = self.config["AFFORDABILITY"]["MAX_RESOURCES"]
+        min_score = self.config["AFFORDABILITY"]["MIN_SCORE"]
+        max_score = self.config["AFFORDABILITY"]["MAX_SCORE"]
         if high <= low:
             raise ValueError("MAX_RESOURCES must be greater than MIN_RESOURCES")
         if resources <= low:
-            return self.config["AFFORDABILITY"]["MIN_SCORE"]
+            return min_score
         if resources >= high:
-            return self.config["AFFORDABILITY"]["MAX_SCORE"]
-        return (resources - low) / (high - low)
+            return max_score
+        return min_score + (max_score - min_score) * (resources - low) / (high - low)
 
     def effective_generosity(self, agent: Agent) -> float:
         score = agent.generosity_score * self.affordability(agent.resources)
