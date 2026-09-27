@@ -69,7 +69,7 @@ class TestAffordabilityCalculator:
         assert self.calculator.effective_generosity(poor) == 0.0
         assert self.calculator.effective_generosity(wealthy) == 1.0
         assert self.calculator.effective_acceptance(poor) == 1.0
-        assert self.calculator.effective_acceptance(wealthy) == 1.0
+        assert self.calculator.effective_acceptance(wealthy) == 0.0
 
     def test_invalid_resource_range_is_rejected(self):
         config = make_config()

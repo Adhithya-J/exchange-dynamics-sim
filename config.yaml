@@ -16,7 +16,7 @@ AGENTS:
   # Giving chance range [0, 1]; 0 never gives and 1 always tries.
   GENEROSITY: [0.0, 1.0]
   # Receiving chance range [0, 1]; 0 never accepts and 1 always tries.
-  ACCEPTANCE: [1.0, 1.0]
+  ACCEPTANCE: [0.0, 1.0]
   # Resources kept after giving; higher makes giving harder.
   MIN_RESOURCES_AFTER_GIVING: 1.0
   # Resources allowed after receiving; higher allows more accumulation.
