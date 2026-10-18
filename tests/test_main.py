@@ -50,6 +50,14 @@ class TestMetricsCalculator:
         assert result["max"] == 3.0
         assert result["total"] == 6.0
 
+    def test_statistics_rejects_missing_resources_column(self):
+        with pytest.raises(ValueError, match="resources column"):
+            MetricsCalculator.calculate_statistics(pd.DataFrame({"foo": [1, 2]}))
+
+    def test_statistics_rejects_empty_dataframe(self):
+        with pytest.raises(ValueError, match="empty DataFrame"):
+            MetricsCalculator.calculate_statistics(pd.DataFrame({"resources": []}))
+
 
 class TestAffordabilityCalculator:
     def setup_method(self):
@@ -288,3 +296,35 @@ class TestResourceSimulation:
         c1_count = sum(1 for agent in chosen if agent.id == "c1")
 
         assert c2_count > c1_count * 3
+
+    def test_transfer_amount_bounds_fallback_to_fixed_amount(self):
+        config = make_config()
+        del config["SIMULATION"]["TRANSFER_AMOUNT_RANGE"]
+        config["SIMULATION"]["TRANSFER_AMOUNT"] = 7.5
+        simulation = ResourceSimulation(config)
+
+        assert simulation._transfer_amount_bounds() == (7.5, 7.5)
+
+    def test_transfer_amount_bounds_invalid_sequence_rejected(self):
+        config = make_config()
+        config["SIMULATION"]["TRANSFER_AMOUNT_RANGE"] = [1.0]
+        simulation = ResourceSimulation(config)
+
+        with pytest.raises(ValueError, match="sequence of two values"):
+            simulation._transfer_amount_bounds()
+
+    def test_transfer_amount_bounds_invalid_ordering_rejected(self):
+        config = make_config()
+        config["SIMULATION"]["TRANSFER_AMOUNT_RANGE"] = [10.0, 2.0]
+        simulation = ResourceSimulation(config)
+
+        with pytest.raises(ValueError, match="ascending order"):
+            simulation._transfer_amount_bounds()
+
+    def test_transfer_amount_bounds_non_positive_rejected(self):
+        config = make_config()
+        config["SIMULATION"]["TRANSFER_AMOUNT_RANGE"] = [0.0, 5.0]
+        simulation = ResourceSimulation(config)
+
+        with pytest.raises(ValueError, match="positive values"):
+            simulation._transfer_amount_bounds()

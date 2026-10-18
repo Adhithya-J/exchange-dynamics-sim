@@ -17,6 +17,7 @@ import plotly.graph_objects as go
 from plotly.colors import qualitative
 
 from main import CONFIG, MetricsCalculator, ResourceSimulation
+from utils import load_config
 
 
 def _summary_for_iteration(
@@ -171,7 +172,11 @@ def build_figure(simulation: ResourceSimulation) -> go.Figure:
         margin={"l": 70, "r": 40, "t": 135, "b": 80},
         xaxis={
             "title": "Iteration",
-            "range": [iterations[0], iterations[-1]],
+            "range": (
+                [iterations[0] - 0.5, iterations[-1] + 0.5]
+                if iterations[0] == iterations[-1]
+                else [iterations[0], iterations[-1]]
+            ),
             "fixedrange": False,
         },
         yaxis={
@@ -213,11 +218,13 @@ def build_figure(simulation: ResourceSimulation) -> go.Figure:
 
 
 def create_visualization(
-    output: str | Path = "simulation.html", iterations: int | None = None
+    output: str | Path = "simulation.html",
+    iterations: int | None = None,
+    config: dict[str, Any] | None = None,
 ) -> Path:
     """Run the configured simulation and write an interactive HTML chart."""
 
-    simulation = ResourceSimulation(CONFIG)
+    simulation = ResourceSimulation(config or CONFIG)
     simulation.run(iterations=iterations)
     output_path = Path(output)
     figure = build_figure(simulation)
@@ -236,8 +243,15 @@ def main() -> None:
         default=None,
         help="Override the configured number of iterations",
     )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to custom YAML configuration file",
+    )
     args = parser.parse_args()
-    output_path = create_visualization(args.output, args.iterations)
+    cfg = load_config(args.config) if args.config else None
+    output_path = create_visualization(args.output, args.iterations, config=cfg)
     print(f"Interactive visualization written to {output_path}")
 
 
