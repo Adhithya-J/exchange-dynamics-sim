@@ -209,7 +209,12 @@ class ResourceSimulation:
 
         simulation_settings = self.config["SIMULATION"]
         if "TRANSFER_AMOUNT_RANGE" in simulation_settings:
-            lower, upper = simulation_settings["TRANSFER_AMOUNT_RANGE"]
+            bounds = simulation_settings["TRANSFER_AMOUNT_RANGE"]
+            if not isinstance(bounds, (list, tuple)) or len(bounds) != 2:
+                raise ValueError(
+                    "TRANSFER_AMOUNT_RANGE must be a sequence of two values"
+                )
+            lower, upper = bounds
         else:
             # Keep compatibility with configurations that still use the old
             # fixed transfer amount.
@@ -415,8 +420,25 @@ class ResourceSimulation:
 
 
 def main() -> None:
-    simulation = ResourceSimulation()
-    final_state = simulation.run()
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to custom YAML configuration file",
+    )
+    parser.add_argument(
+        "--iterations",
+        type=int,
+        default=None,
+        help="Override the configured number of iterations",
+    )
+    args = parser.parse_args()
+    cfg = load_config(args.config) if args.config else None
+    simulation = ResourceSimulation(cfg)
+    final_state = simulation.run(iterations=args.iterations)
     print(final_state.head())
     print("\nFinal statistics:")
     print(simulation.metrics_history[-1])
