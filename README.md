@@ -2,7 +2,7 @@
 
 ![Simulation output after 500 iterations](docs/simulation-output.png)
 
-*Default configuration, 500 iterations. The interactive chart starts at iteration 0.*
+*Default configuration, 1,000 iterations. The interactive chart starts at iteration 0.*
 
 An experimental agent-based simulation of resource sharing and inequality.
 Agents have different generosity and acceptance tendencies. During each
