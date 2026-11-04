@@ -1,6 +1,6 @@
 # Exchange Dynamics Simulation
 
-![Simulation output after 1,000 iterations](docs/simulation-output.png)
+![Simulation output after 1,000 iterations](docs/simulation-output-1000.png)
 
 *Default configuration, 1,000 iterations. The interactive chart starts at iteration 0.*
 
