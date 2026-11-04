@@ -1,5 +1,9 @@
 # Exchange Dynamics Simulation
 
+![Simulation output after 500 iterations](docs/simulation-output.png)
+
+*Default configuration, 500 iterations. The interactive chart starts at iteration 0.*
+
 An experimental agent-based simulation of resource sharing and inequality.
 Agents have different generosity and acceptance tendencies. During each
 iteration, living agents may transfer a variable amount of resources to another
@@ -58,11 +62,6 @@ configuration file and `--iterations <n>` to override the run length.
 in a browser to inspect each agent's resource balance over time and move the
 iteration slider. The summary card in the chart updates with the selected
 iteration.
-
-Here is a snapshot of the chart after 500 iterations with the default
-configuration:
-
-![Simulation output after 500 iterations](docs/simulation-output.png)
 
 The random seed and model parameters are defined in `config.yaml` and loaded
 through `utils.load_config`. For interactive use, construct
