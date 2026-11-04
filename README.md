@@ -3,7 +3,7 @@
 An experimental agent-based simulation of resource sharing and inequality.
 Agents have different generosity and acceptance tendencies. During each
 iteration, living agents may transfer a variable amount of resources to another
-living agent, remember previous givers, and pay a proportional cost of living.
+living agent, remember previous givers, and pay a fixed cost of living.
 An agent that reaches the configured resource floor is dead and no longer
 participates in transfers.
 
@@ -46,10 +46,13 @@ python -m venv .venv
 # macOS/Linux: source .venv/bin/activate
 
 python -m pip install -r requirements.txt
-python main.py
+python main.py --iterations 500
 python visualize.py --iterations 500
 python -m pytest -q
 ```
+
+Both `main.py` and `visualize.py` support `--config <path>` to load a custom YAML
+configuration file and `--iterations <n>` to override the run length.
 
 `visualize.py` creates a self-contained `simulation.html` Plotly chart. Open it
 in a browser to inspect each agent's resource balance over time and move the
