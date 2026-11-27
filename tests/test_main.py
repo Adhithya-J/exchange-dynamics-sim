@@ -177,7 +177,7 @@ class TestResourceSimulation:
 
         assert max(agent.resources for agent in simulation.agents) <= 2.0
 
-    def test_living_cost_reduces_resources_after_transfer(self):
+    def test_living_cost_is_recycled_after_transfer(self):
         config = make_config()
         config["SIMULATION"].update({"AGENTS": 2, "INITIAL_RESOURCES": 10})
         config["AGENTS"].update(
@@ -188,11 +188,16 @@ class TestResourceSimulation:
                 "LIVING_COST": 0.1,
             }
         )
+        config["COMMONS"]["FUND_REDISTRIBUTION"] = 1.0
 
         simulation = ResourceSimulation(config)
         simulation.run(iterations=1)
 
-        assert math.isclose(simulation.metrics_history[-1]["total"], 19.8)
+        metrics = simulation.metrics_history[-1]
+        assert math.isclose(metrics["total"], 20.0)
+        assert math.isclose(metrics["living_cost_paid"], 0.2)
+        assert math.isclose(metrics["dividend_paid"], 0.2)
+        assert math.isclose(metrics["commons_fund"], 0.0)
 
     def test_agents_at_resource_floor_are_dead_and_inactive(self):
         config = make_config()

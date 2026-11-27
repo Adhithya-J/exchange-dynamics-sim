@@ -60,6 +60,27 @@ MARKET:
   # Sellers hold goods rather than sell below this price. 0 sells at any price.
   SELLER_RESERVATION_PRICE: 0.0
 
+# Natural-resource commons and the village fund. Money is not destroyed:
+# subsistence payments move to the fund, which pays a dividend back to living
+# agents. Goods can also be extracted from the commons, less efficiently than
+# buying them.
+COMMONS:
+  # Initial and maximum raw goods in the commons.
+  INITIAL_GOODS: 500.0
+  CAPACITY: 500.0
+  # Raw goods regenerated per iteration.
+  REGENERATION: 5.0
+  # Usable goods per raw unit extracted. Below 1 means waste/degradation.
+  EXTRACTION_EFFICIENCY: 0.5
+  # Maximum usable goods one agent can extract per iteration.
+  EXTRACTION_LIMIT: 5.0
+  # Money-equivalent effort cost of one extracted good. Buy while the market
+  # price is at or below this; extract first when the price is higher.
+  EXTRACTION_COST: 1.0
+  # Share of the collected fund returned to living agents each iteration.
+  # 0.0 keeps the money in the commons; 1.0 rebates all subsistence money.
+  FUND_REDISTRIBUTION: 0.0
+
 # Environmental shocks and simple adaptation. Off by default.
 SHOCKS:
   ENABLED: false

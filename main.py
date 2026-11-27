@@ -69,6 +69,18 @@ DEFAULT_SHOCK_SETTINGS: dict[str, Any] = {
     "ADAPTATION_RATE": 0.05,
 }
 
+# Commons settings used when a custom configuration omits the section. A missing
+# section has no natural stock, but still recycles money so it is not destroyed.
+DEFAULT_COMMONS_SETTINGS: dict[str, Any] = {
+    "INITIAL_GOODS": 0.0,
+    "CAPACITY": 0.0,
+    "REGENERATION": 0.0,
+    "EXTRACTION_EFFICIENCY": 0.5,
+    "EXTRACTION_LIMIT": 0.0,
+    "EXTRACTION_COST": 0.0,
+    "FUND_REDISTRIBUTION": 0.0,
+}
+
 
 class Agent:
     """An individual with resources, social tendencies, and recipient memory."""
@@ -251,6 +263,17 @@ class ResourceSimulation:
         self._last_living_cost_due = 0.0
         self.extinction_iteration: int | None = None
         self.price = self._market_settings()["price"]
+        commons = self._commons_settings()
+        self.initial_commons_goods = commons["initial_goods"]
+        self.commons_goods = commons["initial_goods"]
+        self.commons_fund = 0.0
+        self._extracted_by_agent: dict[str, float] = {}
+        self._last_commons_metrics: dict[str, float] = {
+            "commons_regenerated": 0.0,
+            "commons_extracted": 0.0,
+            "commons_depleted": 0.0,
+            "commons_waste": 0.0,
+        }
 
     @staticmethod
     def _validated_range(value: Any, name: str) -> tuple[float, float]:
@@ -308,6 +331,49 @@ class ResourceSimulation:
             "consumption_range": consumption_range,
             "unmet_demand_penalty": unmet_penalty,
             "seller_reservation_price": seller_reservation,
+        }
+
+    def _commons_settings(self) -> dict[str, Any]:
+        """Return validated natural-commons and fund settings."""
+
+        configured = self.config.get("COMMONS") or {}
+        merged = {**DEFAULT_COMMONS_SETTINGS, **configured}
+        try:
+            initial_goods = float(merged["INITIAL_GOODS"])
+            capacity = float(merged["CAPACITY"])
+            regeneration = float(merged["REGENERATION"])
+            efficiency = float(merged["EXTRACTION_EFFICIENCY"])
+            extraction_limit = float(merged["EXTRACTION_LIMIT"])
+            extraction_cost = float(merged["EXTRACTION_COST"])
+            fund_redistribution = float(merged["FUND_REDISTRIBUTION"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("COMMONS settings must be numeric") from exc
+        if initial_goods < 0 or capacity < 0:
+            raise ValueError("COMMONS stock values must not be negative")
+        if capacity < initial_goods:
+            raise ValueError("COMMONS.CAPACITY must be at least INITIAL_GOODS")
+        if regeneration < 0:
+            raise ValueError("COMMONS.REGENERATION must not be negative")
+        if not 0 < efficiency <= 1:
+            raise ValueError(
+                "COMMONS.EXTRACTION_EFFICIENCY must be in (0, 1]"
+            )
+        if extraction_limit < 0:
+            raise ValueError("COMMONS.EXTRACTION_LIMIT must not be negative")
+        if extraction_cost < 0:
+            raise ValueError("COMMONS.EXTRACTION_COST must not be negative")
+        if not 0 <= fund_redistribution <= 1:
+            raise ValueError(
+                "COMMONS.FUND_REDISTRIBUTION must be between 0 and 1"
+            )
+        return {
+            "initial_goods": initial_goods,
+            "capacity": capacity,
+            "regeneration": regeneration,
+            "extraction_efficiency": efficiency,
+            "extraction_limit": extraction_limit,
+            "extraction_cost": extraction_cost,
+            "fund_redistribution": fund_redistribution,
         }
 
     def _trust_settings(self) -> dict[str, Any]:
@@ -992,6 +1058,17 @@ class ResourceSimulation:
         self._last_living_cost_due = 0.0
         self.extinction_iteration: int | None = None
         self.price = market["price"]
+        commons = self._commons_settings()
+        self.initial_commons_goods = commons["initial_goods"]
+        self.commons_goods = commons["initial_goods"]
+        self.commons_fund = 0.0
+        self._extracted_by_agent = {}
+        self._last_commons_metrics = {
+            "commons_regenerated": 0.0,
+            "commons_extracted": 0.0,
+            "commons_depleted": 0.0,
+            "commons_waste": 0.0,
+        }
         self.decision_log = []
         self._initialize_trust()
         self._record_agent_snapshot(iteration=0)
@@ -1360,8 +1437,26 @@ class ResourceSimulation:
             paid += before - agent.resources
             if not agent.is_alive:
                 self._log_death(agent, "living_cost")
+        # Subsistence payments are a transfer to the commons, not destruction.
+        self.commons_fund += paid
         self._last_living_cost_due = due_total
         return paid
+
+    def _distribute_commons_dividend(self) -> float:
+        """Return fund money to living agents and record the amount paid out."""
+
+        settings = self._commons_settings()
+        if self.commons_fund <= 0 or settings["fund_redistribution"] <= 0:
+            return 0.0
+        living = [agent for agent in self.agents if agent.is_alive]
+        if not living:
+            return 0.0
+        distributable = self.commons_fund * settings["fund_redistribution"]
+        share = distributable / len(living)
+        for agent in living:
+            agent.resources += share
+        self.commons_fund -= distributable
+        return distributable
 
     def _produce_goods(self) -> float:
         """Add this iteration's production and return the goods created."""
@@ -1376,11 +1471,107 @@ class ResourceSimulation:
             produced += amount
         return produced
 
+    def _extract_from_commons(
+        self, agent: Agent, requested: float
+    ) -> tuple[float, float, float]:
+        """Extract usable goods from the commons, returning usable/raw/waste."""
+
+        settings = self._commons_settings()
+        already = self._extracted_by_agent.get(agent.id, 0.0)
+        remaining_limit = max(
+            0.0, settings["extraction_limit"] - already
+        )
+        if requested <= 0 or remaining_limit <= 0 or self.commons_goods <= 0:
+            return 0.0, 0.0, 0.0
+        efficiency = settings["extraction_efficiency"]
+        usable = min(
+            requested, remaining_limit, self.commons_goods * efficiency
+        )
+        if usable <= 0:
+            return 0.0, 0.0, 0.0
+        raw = usable / efficiency
+        self.commons_goods = max(0.0, self.commons_goods - raw)
+        agent.goods += usable
+        self._extracted_by_agent[agent.id] = already + usable
+        return usable, raw, raw - usable
+
+    def _buy_from_market(
+        self,
+        buyer: Agent,
+        requested: float,
+        price: float,
+        participants: list[Agent],
+    ) -> tuple[float, float]:
+        """Buy up to ``requested`` goods and return (quantity, money spent)."""
+
+        floor = self.config["SIMULATION"]["RESOURCE_FLOOR"]
+        living_cost = max(0.0, self.config["AGENTS"]["LIVING_COST"])
+        receiving_ceil = self.config["AGENTS"]["MAX_RESOURCES_AFTER_RECEIVING"]
+        market = self._market_settings()
+        if price < market["seller_reservation_price"]:
+            return 0.0, 0.0
+        spendable = max(0.0, buyer.resources - floor - living_cost)
+        requested = min(requested, spendable / price)
+        if requested <= 0:
+            return 0.0, 0.0
+        traded = 0.0
+        volume = 0.0
+        sellers = [
+            seller
+            for seller in participants
+            if seller.id != buyer.id
+            and seller.goods > seller.consumption_need
+        ]
+        self.random.shuffle(sellers)
+        for seller in sellers:
+            if requested <= 0:
+                break
+            surplus = seller.goods - seller.consumption_need
+            seller_room = max(0.0, receiving_ceil - seller.resources)
+            quantity = min(
+                requested,
+                surplus,
+                spendable / price,
+                seller_room / price,
+            )
+            if quantity <= 0:
+                continue
+            cost = quantity * price
+            seller.goods -= quantity
+            buyer.goods += quantity
+            buyer.resources -= cost
+            seller.resources += cost
+            spendable -= cost
+            if not buyer.is_alive:
+                self._log_death(buyer, "market")
+            traded += quantity
+            volume += cost
+            requested -= quantity
+            self.trade_log.append(
+                {
+                    "iteration": self._current_iteration,
+                    "buyer": buyer.id,
+                    "seller": seller.id,
+                    "quantity": quantity,
+                    "price": price,
+                    "amount": cost,
+                }
+            )
+        return traded, volume
+
     def _run_market_cycle(self) -> dict[str, float]:
-        """Produce, trade, and consume goods, returning per-iteration totals."""
+        """Produce, trade, extract, and consume goods for one iteration."""
 
         settings = self._market_settings()
+        commons = self._commons_settings()
         self._last_unmet_by_agent = {}
+        self._extracted_by_agent = {}
+        self._last_commons_metrics = {
+            "commons_regenerated": 0.0,
+            "commons_extracted": 0.0,
+            "commons_depleted": 0.0,
+            "commons_waste": 0.0,
+        }
         empty_cycle = {
             "price": self.price,
             "goods_produced": 0.0,
@@ -1388,18 +1579,32 @@ class ResourceSimulation:
             "goods_traded": 0.0,
             "unmet_demand": 0.0,
             "trade_volume": 0.0,
+            "commons_goods": self.commons_goods,
+            "commons_regenerated": 0.0,
+            "commons_extracted": 0.0,
+            "commons_depleted": 0.0,
+            "commons_waste": 0.0,
         }
         if not settings["enabled"]:
             return empty_cycle
 
         price = self.price
+        penalty = settings["unmet_demand_penalty"]
         floor = self.config["SIMULATION"]["RESOURCE_FLOOR"]
         living_cost = max(0.0, self.config["AGENTS"]["LIVING_COST"])
         receiving_ceil = self.config["AGENTS"]["MAX_RESOURCES_AFTER_RECEIVING"]
-        penalty = settings["unmet_demand_penalty"]
+
+        regenerated = min(
+            max(0.0, commons["capacity"] - self.commons_goods),
+            commons["regeneration"],
+        )
+        self.commons_goods += regenerated
         produced = self._produce_goods()
         goods_traded = 0.0
         trade_volume = 0.0
+        extracted = 0.0
+        depleted = 0.0
+        waste = 0.0
 
         participants = [agent for agent in self.agents if agent.is_alive]
         total_demand = float(sum(agent.consumption_need for agent in participants))
@@ -1408,63 +1613,36 @@ class ResourceSimulation:
             shortfall = buyer.consumption_need - buyer.goods
             if shortfall <= 0:
                 continue
-            # Goods are worth at most the emergency cost of leaving demand
-            # unmet. A buyer refuses to trade when the price exceeds that value.
-            if price > penalty:
-                continue
-            # Sellers with a reservation price hold their goods when the market
-            # price is too low.
-            if price < settings["seller_reservation_price"]:
-                continue
-            # Keep back the fixed living cost so trade cannot spend the money
-            # the agent needs to survive the cost step.
-            spendable = max(0.0, buyer.resources - floor - living_cost)
-            requested = min(shortfall, spendable / price)
-            if requested <= 0:
-                continue
-            sellers = [
-                seller
-                for seller in participants
-                if seller.id != buyer.id
-                and seller.goods > seller.consumption_need
-            ]
-            self.random.shuffle(sellers)
-            for seller in sellers:
-                if requested <= 0:
-                    break
-                surplus = seller.goods - seller.consumption_need
-                # Market income counts against the same receiving ceiling as
-                # gifts, so trade cannot bypass the accumulation cap.
-                seller_room = max(0.0, receiving_ceil - seller.resources)
-                quantity = min(
-                    requested,
-                    surplus,
-                    spendable / price,
-                    seller_room / price,
+            can_buy = price <= penalty
+            # The market is preferred while its price is no higher than the
+            # effort-equivalent cost of extracting. Above that, extract first.
+            extract_first = price > commons["extraction_cost"]
+            if extract_first or not can_buy:
+                usable, raw, lost = self._extract_from_commons(buyer, shortfall)
+                extracted += usable
+                depleted += raw
+                waste += lost
+                shortfall -= usable
+                if shortfall > 0 and can_buy:
+                    bought, volume = self._buy_from_market(
+                        buyer, shortfall, price, participants
+                    )
+                    goods_traded += bought
+                    trade_volume += volume
+            else:
+                bought, volume = self._buy_from_market(
+                    buyer, shortfall, price, participants
                 )
-                if quantity <= 0:
-                    continue
-                cost = quantity * price
-                seller.goods -= quantity
-                buyer.goods += quantity
-                buyer.resources -= cost
-                seller.resources += cost
-                spendable -= cost
-                if not buyer.is_alive:
-                    self._log_death(buyer, "market")
-                goods_traded += quantity
-                trade_volume += cost
-                requested -= quantity
-                self.trade_log.append(
-                    {
-                        "iteration": self._current_iteration,
-                        "buyer": buyer.id,
-                        "seller": seller.id,
-                        "quantity": quantity,
-                        "price": price,
-                        "amount": cost,
-                    }
-                )
+                goods_traded += bought
+                trade_volume += volume
+                shortfall -= bought
+                if shortfall > 0:
+                    usable, raw, lost = self._extract_from_commons(
+                        buyer, shortfall
+                    )
+                    extracted += usable
+                    depleted += raw
+                    waste += lost
 
         consumed = 0.0
         unmet = 0.0
@@ -1480,9 +1658,7 @@ class ResourceSimulation:
 
         # Simple price discovery: excess demand raises next iteration's price,
         # excess inventory lowers it. Bounds keep the walk stable.
-        leftover = float(
-            sum(agent.goods for agent in participants)
-        )
+        leftover = float(sum(agent.goods for agent in participants))
         if settings["price_adjustment"] > 0 and total_demand > 0:
             imbalance = (unmet - leftover) / total_demand
             next_price = price * (1.0 + settings["price_adjustment"] * imbalance)
@@ -1492,6 +1668,12 @@ class ResourceSimulation:
                 )
             )
 
+        self._last_commons_metrics = {
+            "commons_regenerated": regenerated,
+            "commons_extracted": extracted,
+            "commons_depleted": depleted,
+            "commons_waste": waste,
+        }
         return {
             "price": price,
             "goods_produced": produced,
@@ -1499,6 +1681,8 @@ class ResourceSimulation:
             "goods_traded": goods_traded,
             "unmet_demand": unmet,
             "trade_volume": trade_volume,
+            "commons_goods": self.commons_goods,
+            **self._last_commons_metrics,
         }
 
     def to_frame(self) -> pd.DataFrame:
@@ -1552,6 +1736,7 @@ class ResourceSimulation:
         completed = self._process_transfers()
         market = self._run_market_cycle()
         living_cost_paid = self._apply_living_cost()
+        dividend_paid = self._distribute_commons_dividend()
         self._adapt_to_scarcity()
         self.total_transfers += len(completed)
         transfer_volume = sum(amount for _, _, amount in completed)
@@ -1574,6 +1759,10 @@ class ResourceSimulation:
                 "transfer_volume": transfer_volume,
                 "total_transfer_volume": self.total_transfer_volume,
                 "goods_total": float(sum(agent.goods for agent in self.agents)),
+                "goods_total_all": (
+                    float(sum(agent.goods for agent in self.agents))
+                    + self.commons_goods
+                ),
                 "alive": alive,
                 "altruism_volume": altruism_volume,
                 "gift_volume": transfer_volume,
@@ -1582,6 +1771,9 @@ class ResourceSimulation:
                 ),
                 "living_cost_paid": living_cost_paid,
                 "living_cost_due": self._last_living_cost_due,
+                "dividend_paid": dividend_paid,
+                "commons_fund": self.commons_fund,
+                "total_money": statistics["total"] + self.commons_fund,
                 "extinction_iteration": self.extinction_iteration,
                 **repayments,
                 **market,

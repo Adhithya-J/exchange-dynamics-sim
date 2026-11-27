@@ -1,8 +1,10 @@
 # Logic, Economic, Visual, and Game-Theory Audit
 
 > **Status:** Sections 1 (1.1–1.8) and 2 (2.1–2.5) have been fixed and are
-> covered by the test suite. The text below records the issues as they were
-> found, not the current implementation.
+> covered by the test suite. Money is now conserved through a commons fund, and
+> the commons is a real goods stock with extraction, so the old “money sink”
+> and “commons is total money” findings no longer apply. The text below records
+> the issues as they were found, not the current implementation.
 
 **Scope:** `main.py`, `replay.py`, `experiments.py`, `visualize.py`, `viewer/`, `config.yaml`, `MODEL.md`, `README.md`, `TRUST_SOCIETY_SCOPE.md`.
 

@@ -322,7 +322,20 @@ function startViewer(DATA) {
     return a + (b - a) * fraction;
   }
 
+  function commonsAt(time) {
+    const low = Math.floor(clamp(time, 0, N - 1));
+    const high = Math.min(N - 1, low + 1);
+    const fraction = clamp(time, 0, N - 1) - low;
+    const a = series.commons[low];
+    const b = series.commons[high];
+    return a + (b - a) * fraction;
+  }
+
   function stockRatio(time) {
+    if (series.commons && series.commons.length === N &&
+        series.commons.every(function (value) { return value != null; })) {
+      return clamp(commonsAt(time), 0, 1);
+    }
     return clamp(totalAt(time) / initialTotal, 0, 1);
   }
 

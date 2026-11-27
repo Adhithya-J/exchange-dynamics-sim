@@ -42,17 +42,40 @@ class TestConservation:
         assert transfers
         assert math.isclose(money_total(simulation), before)
 
-    def test_living_cost_is_the_only_money_sink(self):
+    def test_living_cost_is_recycled_through_the_commons_fund(self):
         config = make_config()
         config["SIMULATION"].update({"AGENTS": 3, "INITIAL_RESOURCES": 100.0})
         config["AGENTS"].update({"GENEROSITY": (0.0, 0.0), "LIVING_COST": 2.5})
+        config["COMMONS"]["FUND_REDISTRIBUTION"] = 1.0
 
         simulation = ResourceSimulation(config)
         simulation.initialize_agents()
 
         simulation.run_iteration()
 
-        assert math.isclose(money_total(simulation), 300.0 - 3 * 2.5)
+        metrics = simulation.metrics_history[-1]
+        assert math.isclose(metrics["living_cost_paid"], 7.5)
+        assert math.isclose(metrics["dividend_paid"], 7.5)
+        assert math.isclose(metrics["commons_fund"], 0.0)
+        assert math.isclose(metrics["total_money"], 300.0)
+        assert math.isclose(money_total(simulation), 300.0)
+
+    def test_fund_can_retain_part_of_the_subsistence_payment(self):
+        config = make_config()
+        config["SIMULATION"].update({"AGENTS": 2, "INITIAL_RESOURCES": 100.0})
+        config["AGENTS"].update({"GENEROSITY": (0.0, 0.0), "LIVING_COST": 5.0})
+        config["COMMONS"]["FUND_REDISTRIBUTION"] = 0.0
+
+        simulation = ResourceSimulation(config)
+        simulation.initialize_agents()
+
+        simulation.run_iteration()
+
+        metrics = simulation.metrics_history[-1]
+        assert math.isclose(metrics["living_cost_paid"], 10.0)
+        assert math.isclose(metrics["dividend_paid"], 0.0)
+        assert math.isclose(metrics["commons_fund"], 10.0)
+        assert math.isclose(metrics["total_money"], 200.0)
 
     def test_dead_agents_are_not_charged_living_cost(self):
         config = make_config()
@@ -129,18 +152,19 @@ class TestConservation:
 
             simulation = ResourceSimulation(config)
             simulation.initialize_agents()
-            previous_money = money_total(simulation)
-            previous_goods = 0.0
+            previous_money = money_total(simulation) + simulation.commons_fund
+            previous_goods = simulation.commons_goods
             for _ in range(10):
                 simulation.run_iteration()
                 metrics = simulation.metrics_history[-1]
-                current_money = money_total(simulation)
-                assert current_money <= previous_money + 1e-9
+                assert math.isclose(metrics["total_money"], previous_money)
                 assert math.isclose(
-                    metrics["goods_total"],
+                    metrics["goods_total_all"],
                     previous_goods
                     + metrics["goods_produced"]
-                    - metrics["goods_consumed"],
+                    + metrics["commons_regenerated"]
+                    - metrics["goods_consumed"]
+                    - metrics["commons_waste"],
                 )
                 assert all(
                     agent.resources >= 0.0 for agent in simulation.agents
@@ -157,8 +181,8 @@ class TestConservation:
                         for value in agent.beliefs.values()
                     )
                 assert metrics["outstanding_debt"] >= 0.0
-                previous_money = current_money
-                previous_goods = metrics["goods_total"]
+                previous_money = metrics["total_money"]
+                previous_goods = metrics["goods_total_all"]
 
     def test_living_cost_never_pushes_money_below_the_floor(self):
         config = make_config()

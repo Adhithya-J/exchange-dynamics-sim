@@ -40,6 +40,9 @@ def golden_config() -> dict:
             "LIVING_COST": 3.0,
         }
     )
+    # Let the fund retain subsistence payments so the fixture still exercises
+    # living-cost deaths and a non-zero fund balance.
+    config["COMMONS"]["FUND_REDISTRIBUTION"] = 0.0
     return config
 
 
@@ -183,11 +186,19 @@ def test_replay_conserves_money_from_ticks_alone():
     replay = build_replay(simulation)
 
     for previous, current in zip(replay["ticks"], replay["ticks"][1:]):
-        expected = previous["metrics"]["total"] - current["metrics"][
-            "living_cost_paid"
-        ]
-        assert current["metrics"]["total"] == pytest.approx(
-            expected, abs=1e-9
+        assert current["metrics"]["total_money"] == pytest.approx(
+            previous["metrics"]["total_money"], abs=1e-9
+        )
+        previous_goods = previous["metrics"].get("goods_total_all", 0.0)
+        expected_goods = (
+            previous_goods
+            + current["metrics"]["goods_produced"]
+            + current["metrics"]["commons_regenerated"]
+            - current["metrics"]["goods_consumed"]
+            - current["metrics"]["commons_waste"]
+        )
+        assert current["metrics"]["goods_total_all"] == pytest.approx(
+            expected_goods, abs=1e-9
         )
 
 

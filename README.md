@@ -3,8 +3,9 @@
 ![The Commons world view after 1,000 iterations](docs/commons-world.png)
 
 *Default configuration, 1,000 iterations. Every villager has a hut and a coin
-box around the central market square; the surrounding meadow commons thins as
-resources are consumed. Open `simulation.html` to replay the whole run.*
+box around the central market square; the surrounding meadow commons is a real
+renewable goods stock that thins when agents extract from it. Open
+`simulation.html` to replay the whole run.*
 
 An experimental agent-based simulation of resource sharing and inequality.
 Agents have different generosity and acceptance tendencies. During each
@@ -68,14 +69,36 @@ to expose the current state for analysis.
   receiving ceiling as gifts;
 - a seller with `SELLER_RESERVATION_PRICE` above the market price holds goods
   instead of selling;
+- a buyer with unmet demand can extract from the commons; extraction is limited
+  by `EXTRACTION_LIMIT`, loses `1 - EXTRACTION_EFFICIENCY` as waste, and is
+  preferred over buying only when the price is above `EXTRACTION_COST`;
 - the price starts at `PRICE` and moves each iteration from the balance of
   unmet demand and unsold goods (`PRICE_ADJUSTMENT`, `MIN_PRICE`, `MAX_PRICE`);
 - unsold goods stay in inventory.
 
-Transfers and market trades only move money between agents. Production creates
-goods, consumption destroys them, and the subsistence charge is the explicit
-money sink. `MODEL.md` documents the full ledger, and
-`tests/test_conservation.py` plus `tests/test_market.py` enforce it.
+Transfers, repayments, and market trades only move money between agents.
+Production and commons regeneration create goods, consumption and extraction
+waste destroy them, and subsistence payments move money to the commons fund.
+`MODEL.md` documents the full ledger, and `tests/test_conservation.py` plus
+`tests/test_market.py` enforce it.
+
+## Money and the commons
+
+Money is conserved. The four standard functions are represented:
+
+- **medium of exchange** for gifts, repayments, and market trades;
+- **unit of account** for prices, gifts, debts, and fines;
+- **store of value** because funds are not deleted — they move to
+  `commons_fund` and stay there until `FUND_REDISTRIBUTION` returns part of them
+  as a dividend;
+- **standard of deferred payment** because gift debts are fixed money amounts
+  due after `REPAY_DELAY`, survive default, and can be settled later.
+
+The commons is not a money mirror. It has a real goods stock that regenerates
+each iteration and is depleted by extraction. Agents with money buy while the
+market price is low; when the price exceeds `EXTRACTION_COST`, they forage from
+the commons first. Extraction is less efficient than production or trade, so it
+is a survival fallback rather than a free lunch.
 
 ## Altruism and reciprocity (optional)
 
@@ -156,14 +179,15 @@ it on both write and load. A replay contains:
   config, and enabled feature flags;
 - `agents`: stable ids, labels, colors, and initial traits;
 - `ticks`: one entry per iteration, with per-agent resources, goods, alive
-  status, risk tolerance, reputation, and summary metrics such as Gini and the
-  commons stock ratio;
+  status, risk tolerance, reputation, and summary metrics such as Gini,
+  `total_money`, `commons_fund`, `commons_goods`, and the commons stock ratio;
 - `events`: typed `gift`, `repayment`, `trade`, `death`, and `shock` records,
   each with a tick, phase, sequence number, and stable id.
 
 Deaths are recorded explicitly with their cause (`gift`, `repayment`, `market`,
-or `living_cost`) instead of being inferred from a resource crossing. The
-`living_cost_paid` metric records the only money sink, so total resources can be
+or `living_cost`) instead of being inferred from a resource crossing.
+`living_cost_paid` records money moved into the commons fund, and
+`total_money = total + commons_fund` is conserved, so the whole ledger can be
 reconciled from the replay alone.
 
 ## Standalone viewer
@@ -224,10 +248,10 @@ spend, or pay the living cost, so wealth is visible without changing the body
 size. A gold coin is drawn whenever money changes hands: gifts and repayments
 happen at the receiver's hut, while market trades happen in the central square.
 The outer meadow carries berry bushes and small ponds whose ripeness and water
-level mirror the village's remaining total resources, so the commons visibly
-thins as living costs consume them. Click a villager or a feed row to inspect
-them, and drag the timeline to scrub. When everyone dies, the timeline trims at
-extinction.
+level mirror the real commons goods stock. It thins when agents extract goods
+and recovers as the commons regenerates; it is no longer a mirror of money.
+Click a villager or a feed row to inspect them, and drag the timeline to scrub.
+When everyone dies, the timeline trims at extinction.
 
 The world is a presentation layer over the recorded events, not a change to
 who can interact: it replays the existing model and leaves conservation
@@ -259,10 +283,11 @@ inspect `metrics_history` or the returned DataFrame.
 
 ## Limitations
 
-The model has no wages, rent, births, or spatial network. The market uses a
-single good with a single adaptive price, shocks follow a fixed schedule, and
-trust updates are simple heuristics rather than estimated beliefs. Money is
-finite, so a long run eventually goes extinct; the default horizon stops before
-that point and `extinction_iteration` makes the event explicit. Its results
-depend on the chosen rules and random seed; treat it as an educational
+The model has no wages, births, or spatial network. The market uses a single
+good with a single adaptive price, the commons has one renewable stock, shocks
+follow a fixed schedule, and trust updates are simple heuristics rather than
+estimated beliefs. Money is conserved, but agents can still run out of it
+because payments accumulate in the commons fund. The default horizon stops
+before that point and `extinction_iteration` makes the event explicit. Its
+results depend on the chosen rules and random seed; treat it as an educational
 simulation and a base for further experiments.

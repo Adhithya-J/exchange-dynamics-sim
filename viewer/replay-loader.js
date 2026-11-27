@@ -55,6 +55,7 @@
     var gini = [];
     var alive = [];
     var total = [];
+    var commons = [];
 
     for (var t = 0; t < N; t += 1) {
       var tick = ticks[t];
@@ -89,6 +90,9 @@
           : Number(metrics.alive)
       );
       total.push(Number(metrics.total) || 0);
+      commons.push(
+        metrics.commons_ratio == null ? null : Number(metrics.commons_ratio)
+      );
     }
 
     var extinctionIteration = null;
@@ -188,7 +192,8 @@
         reputation: trustEnabled ? reputation : [],
         gini: gini,
         alive: alive,
-        total: total
+        total: total,
+        commons: commons
       },
       events: events,
       deaths: deaths,

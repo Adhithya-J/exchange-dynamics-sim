@@ -45,6 +45,15 @@ def shock_config() -> dict:
             "ADAPTATION_RATE": 0.05,
         }
     )
+    # These tests isolate production and unmet demand; no free extraction.
+    config["COMMONS"].update(
+        {
+            "INITIAL_GOODS": 0.0,
+            "CAPACITY": 0.0,
+            "REGENERATION": 0.0,
+            "EXTRACTION_LIMIT": 0.0,
+        }
+    )
     return config
 
 

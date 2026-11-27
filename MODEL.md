@@ -8,12 +8,30 @@ tests in `tests/test_conservation.py` in sync.
 
 | Unit | Stored on | Meaning |
 | --- | --- | --- |
-| Money | `Agent.resources` | Medium of exchange. It buys goods and pays subsistence costs. |
+| Money | `Agent.resources` | Medium of exchange, unit of account, and store of value. |
 | Goods | `Agent.goods` | Consumable output. Consuming a good avoids an emergency money cost. |
+| Commons goods | `ResourceSimulation.commons_goods` | Shared natural stock from which agents can extract goods. |
+| Commons fund | `ResourceSimulation.commons_fund` | Money received as subsistence payments and fines. It is never destroyed. |
 | Repayment probability | `Agent.repayment_probability` | Hidden trait: the chance this agent repays a due gift. |
 
 Money and goods are non-negative floats. An agent is dead when its money is at
 or below `SIMULATION.RESOURCE_FLOOR`.
+
+## Money and its four functions
+
+- **Medium of exchange:** gifts, repayments, and market trades all use money.
+- **Unit of account:** prices, gifts, debts, and fines are all quoted in money.
+- **Store of value:** money is conserved. Subsistence payments move to the
+  commons fund and stay there until `FUND_REDISTRIBUTION` returns part of the
+  fund to living agents.
+- **Standard of deferred payment:** a gift can create a money debt that is due
+  after `REPAY_DELAY`; the debt survives default, grows by
+  `DEFAULT_PENALTY_RATE`, and remains payable later.
+
+Money has no direct utility. It is valuable because it buys goods and because
+it is accepted for taxes, rent, gifts, and debt settlement. Its real purchasing
+power changes with the goods price and the state of the commons, as it would in
+a real economy.
 
 ## What makes goods valuable
 
@@ -23,26 +41,44 @@ living-cost step at `MARKET.UNMET_DEMAND_PENALTY` per unit. A good is therefore
 worth up to that penalty to a buyer: buying a good at a price below the penalty
 reduces the money the agent will lose to unmet demand.
 
-With `MARKET.ENABLED: false` every consumption need is zero, so the penalty is
-never charged and the simulation is the original transfer-only model.
+When the market price is high, an agent can instead extract goods from the
+commons. Extraction is less efficient than buying: `EXTRACTION_EFFICIENCY` of
+each raw unit becomes usable goods and the rest is waste. Each agent is limited
+to `EXTRACTION_LIMIT` usable goods per iteration. The commons regenerates
+`REGENERATION` raw goods per iteration up to `CAPACITY`.
+
+A rational buyer compares the market price with `EXTRACTION_COST`, the
+money-equivalent effort of extracting one good:
+
+- if `price <= EXTRACTION_COST`, buy first and extract only what the market
+  cannot supply;
+- if `price > EXTRACTION_COST`, extract first and buy only the remaining
+  shortfall;
+- if `price > UNMET_DEMAND_PENALTY`, do not buy at all.
+
+With `MARKET.ENABLED: false` every consumption need is zero, so no extraction
+occurs and the simulation is the original transfer-only model.
 
 ## Conservation ledger
 
 | Process | Money | Goods | Notes |
 | --- | --- | --- | --- |
 | Social transfer | conserved | unchanged | The giver loses exactly what the receiver gains. |
-| Repayment | conserved | unchanged | A debtor returns part of a earlier gift. |
+| Repayment | conserved | unchanged | A debtor returns part of an earlier gift. |
 | Production | unchanged | **source** | Living agents add `production_rate * production_modifier` goods. |
+| Commons regeneration | unchanged | **source** | The commons adds up to `REGENERATION` raw goods. |
 | Market trade | conserved | conserved | The buyer pays the seller; goods move with the payment. |
+| Extraction | unchanged | **moves + sink** | Usable goods move from commons to agent; the rest is waste (`commons_waste`). |
 | Consumption | unchanged | **sink** | Living agents destroy up to `consumption_need` goods. |
-| Subsistence cost | **sink** | unchanged | Each living agent is charged `LIVING_COST` plus `UNMET_DEMAND_PENALTY * unmet_demand`. |
+| Subsistence payment | **transfer** | unchanged | Each living agent pays `LIVING_COST + UNMET_DEMAND_PENALTY * unmet_demand` into `commons_fund`. |
+| Fund dividend | **transfer** | unchanged | `FUND_REDISTRIBUTION` of the fund is paid equally to living agents. |
 
 Every change in total money or goods must be attributable to one row above.
-Production is the only goods source, consumption is the only goods sink, and
-the subsistence charge is the only money sink. The charge is capped at what the
-agent can pay while staying at or above `RESOURCE_FLOOR`, so the exact money
-removed is recorded as `living_cost_paid`. `living_cost_due` records the nominal
-charge before that cap.
+Production and regeneration are the goods sources; consumption and extraction
+waste are the goods sinks. Subsistence payments and dividends only move money
+between agents and the fund. The charge is capped at what the agent can pay
+while staying at or above `RESOURCE_FLOOR`, so the exact money moved is recorded
+as `living_cost_paid`; `living_cost_due` records the nominal charge.
 
 ## Death rule
 
@@ -52,12 +88,14 @@ charge before that cap.
 - A death during the subsistence step is logged with cause `living_cost`; the
   cause covers both the fixed cost and the unmet-demand penalty.
 
-Money is finite and the subsistence charge is a sink, so every run eventually
-reaches extinction if it runs long enough. `ITERATIONS` defaults to 1000, which
-is below the extinction point for the checked-in seed and keeps final metrics
-meaningful. The metric `extinction_iteration` records the first iteration at
-which no agent is alive (`null` before then). Runs longer than that point report
-zero-valued wealth metrics, so experiments should treat extinction explicitly.
+Money is conserved, not destroyed, but agents can still run out of it: payments
+accumulate in the commons fund unless `FUND_REDISTRIBUTION` returns them. Every
+run can therefore still reach agent extinction if it runs long enough.
+`ITERATIONS` defaults to 1000, which is below the extinction point for the
+checked-in seed and keeps final metrics meaningful. The metric
+`extinction_iteration` records the first iteration at which no agent is alive
+(`null` before then). At extinction the fund may still hold money, so
+`total_money` can remain positive while `total` (agent money) is zero.
 
 ## Iteration order
 
@@ -65,11 +103,11 @@ zero-valued wealth metrics, so experiments should treat extinction explicitly.
 2. Decay trust and deliver delayed reputation observations.
 3. Pay due reciprocal repayments and update trust from the outcome.
 4. Social transfers between living agents.
-5. Goods production, if the market is enabled.
-6. Market trade for goods, if the market is enabled.
-7. Consumption of goods, if the market is enabled.
-8. Subsistence cost for every living agent (fixed cost plus unmet-demand
-   penalty).
+5. Commons regeneration, goods production, market trade, and extraction, if the
+   market is enabled.
+6. Consumption of goods, if the market is enabled.
+7. Subsistence cost for every living agent, paid into the commons fund.
+8. Dividend from the commons fund to living agents.
 9. Adaptation of risk tolerance.
 10. Metrics and agent snapshots.
 
@@ -82,18 +120,18 @@ its cause (`gift`, `repayment`, `market`, or `living_cost`). They are append-onl
 observations written after a step has been decided, so they cannot change the
 simulation. `agent_history` stores one row per agent and iteration, including
 resources, goods, risk tolerance, alive status, and public reputation when
-enabled. The `living_cost_paid` metric records the money removed by the
-subsistence sink each iteration, so total money can be reconciled from the logs
-as `previous_total - living_cost_paid`.
+enabled. The `living_cost_paid` metric records money moved into the commons fund
+each iteration. `total_money = total + commons_fund` is conserved, and
+`goods_total_all = goods_total + commons_goods` reconciles goods.
 
 `replay.py` packages those observations into a versioned JSON replay
 (`schema_version`, `meta`, `agents`, `ticks`, and typed `events`). The replay is
 the contract between the model and a renderer; it records state and events, not
 positions or drawing details. The world visualization reads the replay; huts,
 paths, coin boxes, and terrain are a presentation layer only, not part of the
-model. Its outer meadow is a visual mirror of total money (`series.total`), not
-an extra resource stock or a second ledger; the bushes and ponds thin only when
-the recorded total falls.
+model. Its outer meadow is driven by `commons_ratio`, the remaining natural
+goods stock, while the coin boxes and header money total use `stock_ratio`
+(total money including the fund).
 
 ## Minimal market rules
 
@@ -116,6 +154,9 @@ the simulation behaves exactly like the transfer-only model.
 - A seller's market income is capped by `MAX_RESOURCES_AFTER_RECEIVING`, the
   same ceiling that applies to gifts. A seller with `SELLER_RESERVATION_PRICE`
   above the market price holds goods instead of selling.
+- A buyer with unmet demand can extract from the commons. Extraction is limited
+  by `EXTRACTION_LIMIT`, loses `1 - EXTRACTION_EFFICIENCY` of each raw unit, and
+  is preferred over buying only when the price is above `EXTRACTION_COST`.
 - The price starts at `MARKET.PRICE` and adjusts once per iteration:
   `imbalance = (unmet_demand - leftover_goods) / total_demand`, then
   `next_price = price * (1 + PRICE_ADJUSTMENT * imbalance)`, clamped to
@@ -248,20 +289,26 @@ level, or `None` if it never does.
 
 ## Invariants
 
-1. A social transfer, repayment, or market trade never changes total money.
-2. Total goods change only by `produced - consumed`.
-3. Total money changes only by `-living_cost_paid`, where
-   `living_cost_paid = sum(min(living_cost_due_i, resources_i - floor))`.
-4. No agent's money becomes negative.
+1. A social transfer, repayment, market trade, subsistence payment, or dividend
+   never changes `total_money = total + commons_fund`.
+2. Total goods `goods_total_all = goods_total + commons_goods` change only by
+   `produced + regenerated - consumed - commons_waste`.
+3. Subsistence payments are capped by `resources - floor`; the amount moved is
+   `living_cost_paid`, and the nominal charge is `living_cost_due`.
+4. No agent's money, the commons stock, or the commons fund becomes negative.
 5. Dead agents do not participate in any step.
 6. Trust beliefs and public reputation always stay within [0, 1].
 7. The trust layer never changes money or goods totals.
 8. Market prices stay within `[MIN_PRICE, MAX_PRICE]`.
 9. Outstanding debt and written-off debt are never negative, and an
    outstanding debt is settled or written off, never silently dropped.
+10. Extracted usable goods plus extraction waste equal the raw commons goods
+    removed.
 
 ## Open decisions
 
+- Use the commons fund to pay for commons regeneration or public works instead
+  of holding it as a sovereign-fund balance.
 - Pass stranded goods to other agents when an owner dies.
 - Decide whether production should respond to the market price.
 - Decide whether private beliefs should fully replace the legacy memory deque.

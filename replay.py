@@ -107,6 +107,7 @@ def build_replay(simulation: ResourceSimulation) -> dict[str, Any]:
     initial_total = float(
         sum(float(row["resources"]) for row in history_by_tick[0].values())
     )
+    initial_commons = float(getattr(simulation, "initial_commons_goods", 0.0))
     initial_resources = initial_total / len(agent_ids)
     agent_metadata = _agent_metadata(simulation, history_by_tick[0])
 
@@ -120,8 +121,18 @@ def build_replay(simulation: ResourceSimulation) -> dict[str, Any]:
             metrics = _metrics_from_rows(rows)
         metrics = _jsonable(metrics)
         metrics.setdefault("iteration", iteration)
+        if iteration == 0:
+            # The tick-zero row is reconstructed from agent snapshots; restore
+            # the commons state that the snapshot does not carry.
+            metrics["commons_goods"] = initial_commons
+            metrics["goods_total_all"] = float(metrics.get("goods_total", 0.0)) + initial_commons
+            metrics["total_money"] = float(metrics.get("total", 0.0))
         metrics["stock_ratio"] = _stock_ratio(
-            float(metrics.get("total", 0.0)), initial_total
+            float(metrics.get("total_money", metrics.get("total", 0.0))),
+            initial_total,
+        )
+        metrics["commons_ratio"] = _stock_ratio(
+            float(metrics.get("commons_goods", 0.0)), initial_commons
         )
         ticks.append(
             {
@@ -246,6 +257,11 @@ def _metrics_from_rows(rows: dict[str, dict[str, Any]]) -> dict[str, Any]:
     )
     statistics["living_cost_paid"] = 0.0
     statistics["living_cost_due"] = 0.0
+    statistics["dividend_paid"] = 0.0
+    statistics["commons_fund"] = 0.0
+    statistics["commons_goods"] = 0.0
+    statistics["total_money"] = statistics["total"]
+    statistics["goods_total_all"] = statistics["goods_total"]
     statistics["extinction_iteration"] = None
     return statistics
 
