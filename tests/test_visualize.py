@@ -136,7 +136,7 @@ def test_world_html_embeds_a_versioned_replay():
     assert "build_world_payload" not in html
 
 
-def test_world_html_is_self_contained_and_embeds_data():
+def test_world_html_inlines_viewer_and_embeds_data():
     sim = ResourceSimulation(gift_config())
     sim.run(iterations=4)
 
@@ -146,5 +146,6 @@ def test_world_html_is_self_contained_and_embeds_data():
     assert "__PAGE_TITLE__" not in html
     assert "The Commons" in html
     assert "commonsReplay" in html
-    assert "https://" not in html
+    assert "fonts.googleapis.com" in html
     assert "<script src=" not in html
+    assert "/*__INLINE_REPLAY__*/" not in html

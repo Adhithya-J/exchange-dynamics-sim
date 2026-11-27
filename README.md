@@ -162,7 +162,8 @@ python -m http.server 8000
 
 The **Open** button also loads a local `.json` or `.json.gz` replay directly, so
 the viewer works without a server. `visualize.py` still writes a single
-self-contained `simulation.html` by inlining the same viewer assets and replay.
+`simulation.html` by inlining the same viewer assets and replay; the typefaces
+load from Google Fonts and fall back to local serif/sans stacks offline.
 
 To capture reproducible frames, use the Playwright script in `viewer/`:
 

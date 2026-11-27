@@ -18,6 +18,31 @@ function startViewer(DATA) {
   const SANS = getComputedStyle(document.documentElement).getPropertyValue("--sans").trim();
   const TWO_PI = Math.PI * 2;
 
+  // Printed-ledger palette. Keep drawing colors here so the canvas reads like
+  // ink and flat pigment instead of a glossy dashboard.
+  const PALETTE = {
+    ink: "#1c1b18",
+    paper: "#f4efe6",
+    paperDeep: "#efe8da",
+    ground: "#efe8da",
+    groundPatch: "#e7ddca",
+    groundPatchDeep: "#e2d7c2",
+    path: "#ddd3c0",
+    gold: "#c88a1e",
+    water: "#2f6f73",
+    sage: "#4e6b50",
+    sageDry: "#8a8a66",
+    alert: "#b84a39",
+    stone: "#8c857b",
+    sack: "#c79a62",
+    hutWall: "#ede3d0",
+    door: "#6b4b2f",
+    skin: "#e6bd94",
+    shadow: "#d8cebc",
+    rule: "#d8d0c0",
+    white: "#fbf7ef"
+  };
+
   if (!A || !N) {
     document.getElementById("story").textContent = "There is nothing to replay.";
     return;
@@ -152,26 +177,18 @@ function startViewer(DATA) {
   coinSprite.height = 32;
   (function buildCoinSprite() {
     const c = coinSprite.getContext("2d");
-    const gradient = c.createRadialGradient(10, 9, 2, 16, 16, 15);
-    gradient.addColorStop(0, "#fff4b8");
-    gradient.addColorStop(0.42, "#f3c34a");
-    gradient.addColorStop(1, "#a96d0d");
-    c.fillStyle = gradient;
+    c.fillStyle = PALETTE.gold;
+    c.strokeStyle = PALETTE.ink;
+    c.lineWidth = 2;
     c.beginPath();
     c.arc(16, 16, 13, 0, TWO_PI);
     c.fill();
-    c.strokeStyle = "rgba(112, 72, 8, 0.85)";
-    c.lineWidth = 1.6;
     c.stroke();
-    c.strokeStyle = "rgba(112, 72, 8, 0.45)";
-    c.lineWidth = 1;
+    c.strokeStyle = "rgba(28, 27, 24, 0.55)";
+    c.lineWidth = 1.2;
     c.beginPath();
-    c.arc(16, 16, 8.3, 0, TWO_PI);
+    c.arc(16, 16, 8, 0, TWO_PI);
     c.stroke();
-    c.fillStyle = "rgba(255, 255, 255, 0.62)";
-    c.beginPath();
-    c.arc(11.5, 10.5, 3.4, 0, TWO_PI);
-    c.fill();
   })();
 
   let W = 0;
@@ -419,17 +436,21 @@ function startViewer(DATA) {
     context.closePath();
   }
 
-  function drawPill(context, text, x, y, fill, color, border) {
+  function drawTag(context, text, x, y, fill, color, border, mono) {
     context.save();
-    context.font = "600 10px " + MONO;
+    context.font = "500 10px " + (mono ? MONO : SANS);
     const width = context.measureText(text).width + 12;
-    context.fillStyle = fill || "rgba(252, 246, 235, 0.86)";
-    context.strokeStyle = border || "rgba(88, 67, 38, 0.16)";
+    context.fillStyle = fill || PALETTE.paper;
+    context.strokeStyle = border || PALETTE.ink;
     context.lineWidth = 1;
-    roundedRect(context, x - width / 2, y - 8, width, 16, 8);
-    context.fill();
-    context.stroke();
-    context.fillStyle = color || "rgba(44, 35, 21, 0.82)";
+    context.fillRect(x - width / 2, y - 8, width, 16);
+    context.strokeRect(
+      x - width / 2 + 0.5,
+      y - 7.5,
+      Math.max(1, width - 1),
+      15
+    );
+    context.fillStyle = color || PALETTE.ink;
     context.textAlign = "center";
     context.textBaseline = "middle";
     context.fillText(text, x, y + 0.5);
@@ -453,26 +474,38 @@ function startViewer(DATA) {
     context.save();
     context.translate(point.x, point.y);
 
-    context.fillStyle = "rgba(65, 48, 26, 0.13)";
-    context.beginPath();
-    context.ellipse(1, s * 0.68, s * 0.78, s * 0.24, 0, 0, TWO_PI);
-    context.fill();
+    // Solid offset shadow, like a two-colour print.
+    context.fillStyle = PALETTE.shadow;
+    context.fillRect(-s * 0.5 + 2, -s * 0.25 + 2, s, s * 0.88);
 
-    context.fillStyle = "#f0e4cc";
-    context.strokeStyle = "rgba(92, 70, 42, 0.42)";
-    context.lineWidth = 1.2;
-    roundedRect(context, -s * 0.5, -s * 0.25, s, s * 0.88, 3);
-    context.fill();
-    context.stroke();
+    context.fillStyle = PALETTE.hutWall;
+    context.strokeStyle = PALETTE.ink;
+    context.lineWidth = 1.5;
+    context.fillRect(-s * 0.5, -s * 0.25, s, s * 0.88);
+    context.strokeRect(-s * 0.5, -s * 0.25, s, s * 0.88);
 
-    context.fillStyle = "#6c4b2d";
+    context.fillStyle = PALETTE.door;
     context.fillRect(-s * 0.13, s * 0.25, s * 0.26, s * 0.38);
+    context.strokeStyle = PALETTE.ink;
+    context.lineWidth = 1;
+    context.strokeRect(-s * 0.13, s * 0.25, s * 0.26, s * 0.38);
 
-    context.fillStyle = "rgba(255, 209, 105, 0.85)";
+    context.fillStyle = PALETTE.gold;
     context.fillRect(-s * 0.38, s * 0.03, s * 0.15, s * 0.16);
+    context.strokeRect(-s * 0.38, s * 0.03, s * 0.15, s * 0.16);
+
+    // Roof, with the same solid offset as the wall.
+    context.fillStyle = PALETTE.shadow;
+    context.beginPath();
+    context.moveTo(-s * 0.66 + 2, -s * 0.25 + 2);
+    context.lineTo(2, -s * 0.92 + 2);
+    context.lineTo(s * 0.66 + 2, -s * 0.25 + 2);
+    context.closePath();
+    context.fill();
 
     context.fillStyle = color;
-    context.strokeStyle = "rgba(70, 52, 30, 0.42)";
+    context.strokeStyle = PALETTE.ink;
+    context.lineWidth = 1.5;
     context.beginPath();
     context.moveTo(-s * 0.66, -s * 0.25);
     context.lineTo(0, -s * 0.92);
@@ -481,23 +514,34 @@ function startViewer(DATA) {
     context.fill();
     context.stroke();
 
-    context.strokeStyle = "rgba(255, 255, 255, 0.3)";
+    context.strokeStyle = "rgba(28, 27, 24, 0.55)";
     context.lineWidth = 1;
     context.beginPath();
-    context.moveTo(-s * 0.44, -s * 0.35);
+    context.moveTo(-s * 0.42, -s * 0.31);
     context.lineTo(0, -s * 0.78);
     context.stroke();
 
     context.restore();
 
-    // Put the owner's name on the outside of the ring so it never collides
-    // with the villager standing in front of the door.
-    const angle = homes[index].angle;
-    drawPill(context, agents[index].label,
-      point.x + Math.cos(angle) * s * 1.02,
-      point.y + Math.sin(angle) * s * 1.02,
-      "rgba(252, 246, 235, 0.82)", "rgba(44, 35, 21, 0.8)",
-      "rgba(88, 67, 38, 0.18)");
+  }
+
+  function drawHutLabels(context, tick) {
+    const s = clamp(unit() * 0.044, 18, 33);
+    for (let index = 0; index < A; index += 1) {
+      const point = screenPoint(homes[index]);
+      const angle = homes[index].angle;
+      const alive = aliveAt(index, tick);
+      context.save();
+      context.globalAlpha = alive ? 1 : 0.58;
+      drawTag(context, agents[index].label,
+        point.x + Math.cos(angle) * s * 1.02,
+        point.y + Math.sin(angle) * s * 1.02,
+        PALETTE.paper,
+        alive ? PALETTE.ink : PALETTE.stone,
+        alive ? PALETTE.ink : PALETTE.rule,
+        true);
+      context.restore();
+    }
   }
 
   function drawMarket(context) {
@@ -506,24 +550,26 @@ function startViewer(DATA) {
     const open = meta.market_enabled;
     context.save();
 
-    context.fillStyle = "rgba(203, 183, 143, 0.5)";
-    roundedRect(context, p.x - s * 4.0, p.y - s * 2.45, s * 8.0, s * 4.9, 12);
-    context.fill();
-    context.strokeStyle = "rgba(104, 80, 47, 0.22)";
-    context.lineWidth = 1;
-    context.stroke();
+    context.fillStyle = PALETTE.shadow;
+    context.fillRect(p.x - s * 4.0 + 2, p.y - s * 2.45 + 2, s * 8.0, s * 4.9);
+    context.fillStyle = PALETTE.paperDeep;
+    context.strokeStyle = PALETTE.ink;
+    context.lineWidth = 1.5;
+    context.fillRect(p.x - s * 4.0, p.y - s * 2.45, s * 8.0, s * 4.9);
+    context.strokeRect(p.x - s * 4.0, p.y - s * 2.45, s * 8.0, s * 4.9);
 
-    const awning = open ? ["#cf8550", "#6f9fc8", "#c96d63"] : ["#9a9384", "#8c8678", "#a19a89"];
+    const awning = open
+      ? [PALETTE.gold, PALETTE.water, PALETTE.alert]
+      : [PALETTE.stone, "#9b9488", "#a39c90"];
     for (let k = -1; k <= 1; k += 1) {
       const x = p.x + k * s * 2.35;
       const y = p.y + Math.abs(k) * s * 0.22;
 
-      context.fillStyle = "#e4d2ae";
-      context.strokeStyle = "rgba(100, 76, 44, 0.35)";
+      context.fillStyle = PALETTE.paper;
+      context.strokeStyle = PALETTE.ink;
       context.lineWidth = 1;
-      roundedRect(context, x - s * 0.55, y - s * 0.12, s * 1.1, s * 0.62, 2);
-      context.fill();
-      context.stroke();
+      context.fillRect(x - s * 0.55, y - s * 0.12, s * 1.1, s * 0.62);
+      context.strokeRect(x - s * 0.55, y - s * 0.12, s * 1.1, s * 0.62);
 
       context.fillStyle = awning[k + 1];
       context.beginPath();
@@ -533,21 +579,22 @@ function startViewer(DATA) {
       context.lineTo(x - s * 0.52, y - s * 0.62);
       context.closePath();
       context.fill();
+      context.strokeStyle = PALETTE.ink;
+      context.lineWidth = 1.2;
+      context.stroke();
 
-      context.fillStyle = "rgba(86, 61, 32, 0.38)";
+      context.fillStyle = PALETTE.ink;
       context.fillRect(x - s * 0.04, y + s * 0.12, s * 0.08, s * 0.38);
     }
 
     if (!open) {
-      context.fillStyle = "rgba(86, 76, 60, 0.18)";
-      roundedRect(context, p.x - s * 4.0, p.y - s * 2.45, s * 8.0, s * 4.9, 12);
-      context.fill();
+      context.fillStyle = "rgba(244, 239, 230, 0.58)";
+      context.fillRect(p.x - s * 4.0, p.y - s * 2.45, s * 8.0, s * 4.9);
     }
 
     context.restore();
-    drawPill(context, open ? "MARKET" : "MARKET - CLOSED", p.x, p.y - s * 2.7,
-      open ? "rgba(252, 246, 235, 0.9)" : "rgba(238, 234, 224, 0.9)",
-      "rgba(44, 35, 21, 0.8)", "rgba(88, 67, 38, 0.18)");
+    drawTag(context, open ? "Market" : "Market - closed", p.x, p.y - s * 2.7,
+      PALETTE.paper, open ? PALETTE.ink : PALETTE.muted, PALETTE.ink, false);
   }
 
   function buildBackground() {
@@ -558,12 +605,29 @@ function startViewer(DATA) {
     bg.setTransform(DPR, 0, 0, DPR, 0, 0);
     bg.clearRect(0, 0, W, H);
 
-    const ground = bg.createLinearGradient(0, 0, W, H);
-    ground.addColorStop(0, "#eef1df");
-    ground.addColorStop(0.5, "#e6e9d1");
-    ground.addColorStop(1, "#d9dfbc");
-    bg.fillStyle = ground;
+    // Flat parchment. The patches are deliberately large and low-contrast so
+    // the ground feels placed rather than mechanically tiled.
+    bg.fillStyle = PALETTE.ground;
     bg.fillRect(0, 0, W, H);
+
+    const patches = [
+      [0.17, 0.24, 0.21, 0.13],
+      [0.75, 0.20, 0.16, 0.10],
+      [0.27, 0.79, 0.24, 0.14],
+      [0.81, 0.73, 0.15, 0.11],
+      [0.52, 0.09, 0.13, 0.06]
+    ];
+    for (let i = 0; i < patches.length; i += 1) {
+      const patch = patches[i];
+      bg.fillStyle = i % 2 ? PALETTE.groundPatch : PALETTE.groundPatchDeep;
+      bg.globalAlpha = 0.32;
+      bg.beginPath();
+      bg.ellipse(
+        patch[0] * W, patch[1] * H, patch[2] * W, patch[3] * H, 0, 0, TWO_PI
+      );
+      bg.fill();
+    }
+    bg.globalAlpha = 1;
 
     let seed = 90210;
     function random() {
@@ -571,16 +635,15 @@ function startViewer(DATA) {
       return seed / 4294967296;
     }
 
+    // Sparse ink-and-sage marks for texture, never a glow or gradient.
     bg.save();
-    for (let i = 0; i < 110; i += 1) {
+    for (let i = 0; i < 90; i += 1) {
       const x = random() * W;
       const y = random() * H;
-      const alpha = 0.035 + random() * 0.07;
-      const radius = 0.5 + random() * 1.6;
-      bg.globalAlpha = alpha;
-      bg.fillStyle = "#6e7f4e";
-      if (random() > 0.74) {
-        bg.strokeStyle = "#6e7f4e";
+      bg.globalAlpha = 0.10 + random() * 0.10;
+      bg.fillStyle = i % 3 === 0 ? PALETTE.gold : PALETTE.sage;
+      if (random() > 0.78) {
+        bg.strokeStyle = PALETTE.sage;
         bg.lineWidth = 1;
         bg.beginPath();
         bg.moveTo(x - 2, y + 2);
@@ -590,19 +653,19 @@ function startViewer(DATA) {
         bg.stroke();
       } else {
         bg.beginPath();
-        bg.arc(x, y, radius, 0, TWO_PI);
+        bg.arc(x, y, 0.6 + random() * 1.1, 0, TWO_PI);
         bg.fill();
       }
     }
     bg.restore();
 
-    // Paths run from each hut to the near bank of the commons, then from the
-    // far bank to the market. No path crosses the water.
+    // Curved paths run from each hut to the near bank of the commons, then
+    // from the far bank to the market. No path crosses the water.
     const commonsPoint = screenPoint(COMMONS);
     const bankRadius = commonsRadius() * 1.16;
     bg.save();
-    bg.strokeStyle = "rgba(194, 170, 126, 0.48)";
-    bg.lineWidth = clamp(unit() * 0.012, 4, 9);
+    bg.strokeStyle = PALETTE.path;
+    bg.lineWidth = clamp(unit() * 0.011, 3.5, 8);
     bg.lineCap = "round";
     for (let i = 0; i < A; i += 1) {
       const home = screenPoint(homes[i]);
@@ -613,11 +676,9 @@ function startViewer(DATA) {
         x: commonsPoint.x + (dx / length) * bankRadius,
         y: commonsPoint.y + (dy / length) * bankRadius
       };
-      const bend = (i % 2 === 0 ? 1 : -1) * unit() * 0.015;
+      const bend = (i % 2 === 0 ? 1 : -1) * unit() * 0.018;
       drawPath(bg, home, bank, bend);
     }
-    bg.strokeStyle = "rgba(190, 165, 121, 0.42)";
-    bg.lineWidth = clamp(unit() * 0.014, 5, 10);
     const marketPoint = screenPoint(MARKET);
     const marketDx = marketPoint.x - commonsPoint.x;
     const marketDy = marketPoint.y - commonsPoint.y;
@@ -625,7 +686,7 @@ function startViewer(DATA) {
     drawPath(bg, {
       x: commonsPoint.x + (marketDx / marketLength) * bankRadius,
       y: commonsPoint.y + (marketDy / marketLength) * bankRadius
-    }, marketPoint, unit() * 0.01);
+    }, marketPoint, unit() * 0.012);
     bg.restore();
 
     // The dry basin and the full-pond guide ring stay put. The water itself is
@@ -633,13 +694,16 @@ function startViewer(DATA) {
     const c = screenPoint(COMMONS);
     const radius = commonsRadius();
     bg.save();
-    bg.fillStyle = "rgba(178, 158, 116, 0.55)";
+    bg.fillStyle = PALETTE.groundPatchDeep;
+    bg.strokeStyle = PALETTE.rule;
+    bg.lineWidth = 1.5;
     bg.beginPath();
     bg.ellipse(c.x, c.y, radius * 1.18, radius * 0.98, 0, 0, TWO_PI);
     bg.fill();
-    bg.strokeStyle = "rgba(255, 250, 235, 0.42)";
-    bg.setLineDash([4, 5]);
-    bg.lineWidth = 1.3;
+    bg.stroke();
+    bg.strokeStyle = "rgba(28, 27, 24, 0.28)";
+    bg.setLineDash([3, 6]);
+    bg.lineWidth = 1;
     bg.beginPath();
     bg.ellipse(c.x, c.y, radius * 0.95, radius * 0.78, 0, 0, TWO_PI);
     bg.stroke();
@@ -651,8 +715,8 @@ function startViewer(DATA) {
     drawMarket(bg);
 
     bg.save();
-    bg.fillStyle = "rgba(68, 82, 48, 0.38)";
-    bg.font = "600 9px " + MONO;
+    bg.fillStyle = PALETTE.muted;
+    bg.font = "500 10px " + SANS;
     bg.textAlign = "left";
     bg.textBaseline = "middle";
     bg.fillText("N", 18, H - 22);
@@ -673,26 +737,44 @@ function startViewer(DATA) {
 
     if (water > 1) {
       context.save();
-      context.fillStyle = "rgba(86, 148, 158, 0.92)";
+      context.fillStyle = PALETTE.water;
+      context.strokeStyle = PALETTE.ink;
+      context.lineWidth = 1.5;
       context.beginPath();
       context.ellipse(c.x, c.y, water, water * 0.78, 0, 0, TWO_PI);
       context.fill();
-      context.strokeStyle = "rgba(255, 255, 255, 0.65)";
-      context.lineWidth = 1.3;
       context.stroke();
 
-      context.strokeStyle = "rgba(255, 255, 255, 0.28)";
+      context.strokeStyle = "rgba(244, 239, 230, 0.34)";
       context.lineWidth = 1;
       for (let i = 1; i <= 2; i += 1) {
         context.beginPath();
-        context.ellipse(c.x, c.y, water * (0.28 + i * 0.2), water * (0.14 + i * 0.1), 0, 0, TWO_PI);
+        context.ellipse(
+          c.x,
+          c.y,
+          water * (0.28 + i * 0.2),
+          water * (0.14 + i * 0.1),
+          0,
+          0,
+          TWO_PI
+        );
         context.stroke();
       }
 
-      context.fillStyle = "rgba(255, 255, 255, 0.26)";
+      // A flat ripple line, not a glossy highlight.
+      context.strokeStyle = "rgba(244, 239, 230, 0.55)";
+      context.lineWidth = 1.2;
       context.beginPath();
-      context.ellipse(c.x - water * 0.25, c.y - water * 0.2, water * 0.32, water * 0.14, 0, 0, TWO_PI);
-      context.fill();
+      context.ellipse(
+        c.x - water * 0.18,
+        c.y - water * 0.12,
+        water * 0.3,
+        water * 0.12,
+        0,
+        Math.PI * 0.85,
+        Math.PI * 1.7
+      );
+      context.stroke();
       context.restore();
     }
 
@@ -700,10 +782,13 @@ function startViewer(DATA) {
       const bx = c.x + bush.ox * radius;
       const by = c.y + bush.oy * radius * 0.82;
       const bushRadius = radius * bush.size;
+      const lush = clamp((ratio - bush.threshold) / 0.45, 0, 1);
       const living = ratio > bush.threshold;
       context.save();
-      context.fillStyle = living ? "#5f8c55" : "#948d69";
-      context.strokeStyle = "rgba(70, 83, 48, 0.28)";
+      context.fillStyle = living
+        ? mixColor(PALETTE.sage, PALETTE.sageDry, 1 - lush)
+        : PALETTE.sageDry;
+      context.strokeStyle = PALETTE.ink;
       context.lineWidth = 1;
       context.beginPath();
       context.arc(bx, by, bushRadius, 0, TWO_PI);
@@ -716,18 +801,40 @@ function startViewer(DATA) {
         for (let b = 0; b < berries; b += 1) {
           const angle = b * 2.399963 + bush.threshold * 10;
           const distance = bushRadius * (0.28 + (b % 2) * 0.26);
-          context.fillStyle = b % 3 === 0 ? "#e8a33d" : "#cf5e52";
+          context.fillStyle = b % 3 === 0 ? PALETTE.gold : PALETTE.alert;
           context.beginPath();
-          context.arc(bx + Math.cos(angle) * distance, by + Math.sin(angle) * distance, 1.5, 0, TWO_PI);
+          context.arc(
+            bx + Math.cos(angle) * distance,
+            by + Math.sin(angle) * distance,
+            1.5,
+            0,
+            TWO_PI
+          );
           context.fill();
         }
       }
       context.restore();
     }
 
-    drawPill(context, "THE COMMONS " + Math.round(ratio * 100) + "%",
-      c.x, c.y + radius * 1.24, "rgba(252, 246, 235, 0.9)",
-      "rgba(44, 35, 21, 0.84)", "rgba(88, 67, 38, 0.2)");
+    drawTag(context, "Commons " + Math.round(ratio * 100) + "%",
+      c.x, c.y + radius * 1.24, PALETTE.paper, PALETTE.ink, PALETTE.ink, false);
+  }
+
+  function mixColor(from, to, amount) {
+    const t = clamp(amount, 0, 1);
+    const parse = function (hex) {
+      return [
+        parseInt(hex.slice(1, 3), 16),
+        parseInt(hex.slice(3, 5), 16),
+        parseInt(hex.slice(5, 7), 16)
+      ];
+    };
+    const a = parse(from);
+    const b = parse(to);
+    const channel = function (index) {
+      return Math.round(a[index] + (b[index] - a[index]) * t);
+    };
+    return "rgb(" + channel(0) + "," + channel(1) + "," + channel(2) + ")";
   }
 
   function drawSack(context, x, y, radius, ratio) {
@@ -735,14 +842,14 @@ function startViewer(DATA) {
     context.save();
     context.translate(x, y);
 
-    context.fillStyle = "rgba(55, 40, 20, 0.15)";
+    context.fillStyle = PALETTE.shadow;
     context.beginPath();
-    context.ellipse(1, r * 0.74, r * 0.85, r * 0.26, 0, 0, TWO_PI);
+    context.ellipse(2, r * 0.76, r * 0.82, r * 0.24, 0, 0, TWO_PI);
     context.fill();
 
-    context.fillStyle = "#c79a62";
-    context.strokeStyle = "rgba(110, 76, 38, 0.65)";
-    context.lineWidth = 1.2;
+    context.fillStyle = PALETTE.sack;
+    context.strokeStyle = PALETTE.ink;
+    context.lineWidth = 1.5;
     context.beginPath();
     context.moveTo(-r * 0.5, -r * 0.52);
     context.bezierCurveTo(-r * 1.02, r * 0.25, -r * 0.55, r * 0.82, 0, r * 0.82);
@@ -751,18 +858,26 @@ function startViewer(DATA) {
     context.fill();
     context.stroke();
 
-    context.strokeStyle = "rgba(110, 76, 38, 0.8)";
+    // Cinched neck and tie ends.
+    context.strokeStyle = PALETTE.ink;
     context.lineWidth = 2;
     context.beginPath();
     context.moveTo(-r * 0.48, -r * 0.52);
     context.lineTo(r * 0.48, -r * 0.52);
     context.stroke();
-
-    context.strokeStyle = "rgba(110, 76, 38, 0.28)";
     context.lineWidth = 1;
     context.beginPath();
-    context.moveTo(0, -r * 0.18);
-    context.lineTo(0, r * 0.7);
+    context.moveTo(-r * 0.2, -r * 0.52);
+    context.lineTo(-r * 0.34, -r * 0.74);
+    context.moveTo(r * 0.2, -r * 0.52);
+    context.lineTo(r * 0.34, -r * 0.74);
+    context.stroke();
+
+    context.strokeStyle = "rgba(28, 27, 24, 0.30)";
+    context.lineWidth = 1;
+    context.beginPath();
+    context.moveTo(0, -r * 0.2);
+    context.lineTo(0, r * 0.66);
     context.stroke();
 
     const coins = Math.round(clamp(ratio, 0, 1) * 5);
@@ -780,15 +895,16 @@ function startViewer(DATA) {
     const s = agentRadius() * 1.25;
     context.save();
     context.translate(x, y);
-    context.fillStyle = "rgba(55, 45, 31, 0.15)";
+
+    context.fillStyle = PALETTE.shadow;
     context.beginPath();
-    context.ellipse(1, s * 0.82, s * 0.85, s * 0.3, 0, 0, TWO_PI);
+    context.ellipse(2, s * 0.84, s * 0.82, s * 0.26, 0, 0, TWO_PI);
     context.fill();
 
-    context.globalAlpha = hovered ? 1 : 0.72;
-    context.fillStyle = "#9b917f";
-    context.strokeStyle = "rgba(62, 52, 38, 0.5)";
-    context.lineWidth = 1.2;
+    context.globalAlpha = hovered ? 1 : 0.9;
+    context.fillStyle = PALETTE.stone;
+    context.strokeStyle = PALETTE.ink;
+    context.lineWidth = 1.5;
     context.beginPath();
     context.moveTo(-s * 0.55, s * 0.45);
     context.lineTo(-s * 0.55, -s * 0.1);
@@ -798,7 +914,7 @@ function startViewer(DATA) {
     context.fill();
     context.stroke();
 
-    context.strokeStyle = "rgba(245, 238, 224, 0.55)";
+    context.strokeStyle = PALETTE.paper;
     context.lineWidth = 1.4;
     context.beginPath();
     context.moveTo(-s * 0.2, -s * 0.23);
@@ -808,10 +924,12 @@ function startViewer(DATA) {
     context.stroke();
 
     context.fillStyle = color;
-    context.globalAlpha = 0.72;
     context.beginPath();
-    context.arc(-s * 0.58, s * 0.58, s * 0.14, 0, TWO_PI);
+    context.arc(-s * 0.58, s * 0.58, s * 0.13, 0, TWO_PI);
     context.fill();
+    context.strokeStyle = PALETTE.ink;
+    context.lineWidth = 1;
+    context.stroke();
     context.restore();
   }
 
@@ -841,9 +959,9 @@ function startViewer(DATA) {
 
     context.save();
 
-    context.fillStyle = "rgba(55, 43, 26, 0.17)";
+    context.fillStyle = PALETTE.shadow;
     context.beginPath();
-    context.ellipse(position.x + 1, y + R * 1.12, R * 0.78, R * 0.25, 0, 0, TWO_PI);
+    context.ellipse(position.x + 2, y + R * 1.12, R * 0.78, R * 0.22, 0, 0, TWO_PI);
     context.fill();
 
     const sackX = position.x - face * R * 0.98;
@@ -856,8 +974,8 @@ function startViewer(DATA) {
     const leftFootX = position.x - R * 0.2 + stride;
     const rightFootX = position.x + R * 0.2 - stride;
 
-    context.strokeStyle = "#4c3824";
-    context.lineWidth = Math.max(2, R * 0.18);
+    context.strokeStyle = PALETTE.ink;
+    context.lineWidth = Math.max(1.5, R * 0.14);
     context.lineCap = "round";
     context.beginPath();
     context.moveTo(position.x - R * 0.17, y + R * 0.3);
@@ -866,7 +984,7 @@ function startViewer(DATA) {
     context.lineTo(rightFootX, footY - rightLift);
     context.stroke();
 
-    context.fillStyle = "#3e2e1e";
+    context.fillStyle = PALETTE.ink;
     context.beginPath();
     context.ellipse(leftFootX, footY - leftLift, R * 0.17, R * 0.09, 0, 0, TWO_PI);
     context.fill();
@@ -875,47 +993,37 @@ function startViewer(DATA) {
     context.fill();
 
     context.fillStyle = agent.color;
-    context.strokeStyle = "rgba(50, 38, 22, 0.45)";
-    context.lineWidth = 1.2;
-    roundedRect(context, position.x - R * 0.43, y - R * 0.68, R * 0.86, R * 1.05, R * 0.3);
+    context.strokeStyle = PALETTE.ink;
+    context.lineWidth = 1.5;
+    roundedRect(context, position.x - R * 0.43, y - R * 0.68, R * 0.86, R * 1.05, R * 0.22);
     context.fill();
     context.stroke();
 
-    context.strokeStyle = "rgba(255, 250, 238, 0.3)";
-    context.lineWidth = 1;
-    context.beginPath();
-    context.moveTo(position.x - R * 0.25, y - R * 0.55);
-    context.lineTo(position.x - R * 0.25, y + R * 0.15);
-    context.stroke();
-
-    context.fillStyle = "#e6bd94";
-    context.strokeStyle = "rgba(80, 56, 32, 0.38)";
-    context.lineWidth = 1.1;
+    context.fillStyle = PALETTE.skin;
+    context.strokeStyle = PALETTE.ink;
+    context.lineWidth = 1.5;
     context.beginPath();
     context.arc(position.x, y - R * 1.05, R * 0.42, 0, TWO_PI);
     context.fill();
     context.stroke();
 
-    context.fillStyle = "rgba(70, 48, 28, 0.85)";
+    context.fillStyle = PALETTE.ink;
     context.beginPath();
     context.arc(position.x, y - R * 1.15, R * 0.43, Math.PI, 0);
     context.fill();
 
-    context.fillStyle = "rgba(50, 36, 22, 0.8)";
     context.beginPath();
     context.arc(position.x - R * 0.14 + face * R * 0.04, y - R * 1.06, 0.9, 0, TWO_PI);
     context.arc(position.x + R * 0.14 + face * R * 0.04, y - R * 1.06, 0.9, 0, TWO_PI);
     context.fill();
 
-    // A small nose makes the walking direction readable even though the
-    // villagers are deliberately the same size and shape.
-    context.fillStyle = "rgba(184, 126, 84, 0.9)";
+    context.fillStyle = PALETTE.door;
     context.beginPath();
     context.arc(position.x + face * R * 0.3, y - R * 0.99, 0.8, 0, TWO_PI);
     context.fill();
 
     if (selected || hovered) {
-      context.strokeStyle = selected ? "#e8a33d" : "rgba(255, 250, 238, 0.9)";
+      context.strokeStyle = selected ? PALETTE.gold : PALETTE.ink;
       context.lineWidth = selected ? 2 : 1.5;
       context.setLineDash(selected ? [4, 3] : []);
       context.beginPath();
@@ -927,8 +1035,8 @@ function startViewer(DATA) {
     context.restore();
 
     if (selected || hovered) {
-      drawPill(context, agent.label, position.x, y - R * 2.05,
-        "rgba(28, 23, 16, 0.88)", "#f8efdd", "rgba(232, 163, 61, 0.5)");
+      drawTag(context, agent.label, position.x, y - R * 2.05,
+        PALETTE.paper, PALETTE.ink, PALETTE.ink, true);
     }
   }
 
@@ -989,19 +1097,29 @@ function startViewer(DATA) {
       const point = quadraticPoint(start, control, end, progress);
       const amount = Number(event[4]) || 0;
       const coinR = clamp(2.8 + Math.sqrt(amount) * 1.1, 3, 6.5);
+
+      // A faint printed trail behind the coin.
+      context.save();
+      context.strokeStyle = "rgba(200, 138, 30, 0.34)";
+      context.lineWidth = 1.5;
+      context.beginPath();
+      context.moveTo(start.x, start.y);
+      context.quadraticCurveTo(control.x, control.y, point.x, point.y);
+      context.stroke();
+      context.restore();
+
       context.drawImage(coinSprite, point.x - coinR, point.y - coinR, coinR * 2, coinR * 2);
 
       if (type === TRADE) {
         const goodsProgress = 1 - progress;
         const goodsPoint = quadraticPoint(start, control, end, goodsProgress);
         context.save();
-        context.fillStyle = "#9a6c3f";
-        context.strokeStyle = "rgba(76, 50, 24, 0.65)";
-        context.lineWidth = 1;
-        roundedRect(context, goodsPoint.x + 7, goodsPoint.y - 4, 8, 8, 1.5);
+        context.fillStyle = PALETTE.paperDeep;
+        context.strokeStyle = PALETTE.ink;
+        context.lineWidth = 1.5;
+        roundedRect(context, goodsPoint.x + 7, goodsPoint.y - 4, 8, 8, 0);
         context.fill();
         context.stroke();
-        context.strokeStyle = "rgba(255, 244, 220, 0.5)";
         context.beginPath();
         context.moveTo(goodsPoint.x + 7, goodsPoint.y);
         context.lineTo(goodsPoint.x + 15, goodsPoint.y);
@@ -1018,7 +1136,9 @@ function startViewer(DATA) {
     if (!shocks.length) return;
     const scarcity = shocks.some(function (shock) { return shock.type === "scarcity"; });
     ctx.save();
-    ctx.fillStyle = scarcity ? "rgba(168, 62, 45, 0.075)" : "rgba(57, 89, 172, 0.055)";
+    ctx.fillStyle = scarcity
+      ? "rgba(184, 74, 57, 0.05)"
+      : "rgba(47, 111, 115, 0.045)";
     ctx.fillRect(0, 0, W, H);
     ctx.restore();
   }
@@ -1030,6 +1150,7 @@ function startViewer(DATA) {
     const tick = Math.floor(clamp(state.t, 0, N - 1));
     drawShockTint(tick);
     drawCommons(ctx, stockRatio(state.t));
+    drawHutLabels(ctx, tick);
     drawAgents(ctx, state.t, now);
     drawEventParticles(ctx, state.t);
   }
@@ -1178,8 +1299,8 @@ function startViewer(DATA) {
     if (shocks.length) {
       const shock = shocks[0];
       shockBanner.textContent = shock.type === "scarcity"
-        ? "SCARCITY - production x" + formatNumber(Math.max(0, 1 - shock.magnitude), 2)
-        : "INFORMATION SHOCK - noisy reputation";
+        ? "Scarcity - production x" + formatNumber(Math.max(0, 1 - shock.magnitude), 2)
+        : "Information shock - noisy reputation";
       shockBanner.classList.add("visible");
       shockBanner.classList.toggle("info", shock.type !== "scarcity");
     } else {
@@ -1230,9 +1351,9 @@ function startViewer(DATA) {
       "<div class=\"panel-head\">" +
         "<div class=\"agent-head\"><span class=\"swatch\" style=\"background:" + agent.color + "\"></span>" +
           "<span>" + agent.id + "</span>" +
-          "<span class=\"pill " + (alive ? "" : "dead") + "\">" + (alive ? "alive" : "dead") + "</span>" +
+          "<span class=\"status " + (alive ? "" : "dead") + "\">" + (alive ? "alive" : "dead") + "</span>" +
         "</div>" +
-        "<button class=\"clear-btn\" id=\"clearSelection\">clear</button>" +
+        "<button class=\"clear-btn\" id=\"clearSelection\">Clear</button>" +
       "</div>" +
       "<div class=\"big-value\">" + formatNumber(coins, 1) + "<small>coins</small></div>" +
       "<div class=\"sack-meter\"><i style=\"width:" + (ratio * 100).toFixed(1) + "%\"></i></div>" +
@@ -1420,6 +1541,12 @@ function startViewer(DATA) {
 
     resizeWorld();
     renderUi(true);
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(function () {
+        buildBackground();
+        renderWorld(performance.now());
+      });
+    }
     if (!reduceMotion && end > 0) state.playing = true;
     updatePlayButton();
     requestAnimationFrame(frame);
