@@ -218,6 +218,10 @@ class ResourceSimulation:
         self.decision_log: list[dict[str, Any]] = []
         self._repayment_queue: list[dict[str, Any]] = []
         self.repayment_log: list[dict[str, Any]] = []
+        # Replay-friendly logs. They record exchanges that already happened and
+        # are never used to decide the next simulation step.
+        self.transfer_log: list[dict[str, Any]] = []
+        self.trade_log: list[dict[str, Any]] = []
         self.total_gifts = 0
         self.total_repayments = 0
         self.total_repayment_volume = 0.0
@@ -415,6 +419,15 @@ class ResourceSimulation:
                     "debtor": entry["debtor"],
                     "creditor": entry["creditor"],
                     "scheduled_amount": entry["amount"],
+                    "amount": amount,
+                }
+            )
+            self.transfer_log.append(
+                {
+                    "iteration": iteration,
+                    "type": "repayment",
+                    "giver": entry["debtor"],
+                    "receiver": entry["creditor"],
                     "amount": amount,
                 }
             )
@@ -834,6 +847,8 @@ class ResourceSimulation:
         self._current_iteration = 0
         self._repayment_queue = []
         self.repayment_log = []
+        self.transfer_log = []
+        self.trade_log = []
         self.total_gifts = 0
         self.total_repayments = 0
         self.total_repayment_volume = 0.0
@@ -860,6 +875,8 @@ class ResourceSimulation:
                     "generosity_score": agent.generosity_score,
                     "acceptance_score": agent.acceptance_score,
                     "risk_tolerance": agent.risk_tolerance,
+                    "alive": agent.is_alive,
+                    "reputation": self.reputation.get(agent.id),
                 }
             )
 
@@ -1025,6 +1042,15 @@ class ResourceSimulation:
         receiver.memory.append(giver.id)
         self._observe_reciprocation(giver, receiver)
         self._schedule_repayment(giver, receiver, transfer_size)
+        self.transfer_log.append(
+            {
+                "iteration": self._current_iteration,
+                "type": "gift",
+                "giver": giver.id,
+                "receiver": receiver.id,
+                "amount": transfer_size,
+            }
+        )
         return (giver.id, receiver.id, transfer_size)
 
     def _process_transfers(self) -> list[tuple[str, str, float]]:
@@ -1204,6 +1230,16 @@ class ResourceSimulation:
                 goods_traded += quantity
                 trade_volume += cost
                 requested -= quantity
+                self.trade_log.append(
+                    {
+                        "iteration": self._current_iteration,
+                        "buyer": buyer.id,
+                        "seller": seller.id,
+                        "quantity": quantity,
+                        "price": price,
+                        "amount": cost,
+                    }
+                )
 
         consumed = 0.0
         unmet = 0.0
@@ -1256,6 +1292,8 @@ class ResourceSimulation:
             "generosity_score",
             "acceptance_score",
             "risk_tolerance",
+            "alive",
+            "reputation",
         ]
         return pd.DataFrame(self.agent_history, columns=columns)
 

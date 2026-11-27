@@ -48,6 +48,20 @@ only move value between agents.
 9. Adaptation of risk tolerance.
 10. Metrics and agent snapshots.
 
+## Replay logs
+
+`transfer_log` records every completed gift and repayment (iteration, giver,
+receiver, amount, and kind). `trade_log` records every market trade (iteration,
+buyer, seller, quantity, price, and money). They are append-only observations
+written after a step has been decided, so they cannot change the simulation.
+`agent_history` stores one row per agent and iteration, including resources,
+goods, risk tolerance, alive status, and public reputation when enabled. The
+world visualization reads these logs and snapshots; positions in the world are
+a presentation layer only, not part of the model. Its commons pond is a visual
+mirror of total money (`series.total`), not an extra resource stock or a second
+ledger; it shrinks only when the recorded total falls, which in the default
+rules means the living-cost sink.
+
 ## Minimal market rules
 
 The market is optional and disabled by default; with `MARKET.ENABLED: false`

@@ -1,4 +1,7 @@
-"""Create an interactive Plotly view of a resource simulation.
+"""Create an interactive view of a resource simulation.
+
+By default this writes a self-contained animated world view. Pass
+``--plotly`` to create the original Plotly line chart instead.
 
 Run this module directly to create ``simulation.html``::
 
@@ -10,7 +13,9 @@ The generated file is self-contained and can be opened in a browser.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -19,6 +24,215 @@ from plotly.subplots import make_subplots
 
 from main import CONFIG, MetricsCalculator, ResourceSimulation
 from utils import load_config
+
+# Stable identity colors for the world view. The same color follows an agent
+# into every chart so selections stay legible across the animation.
+WORLD_AGENT_COLORS = [
+    "#2f6fed",
+    "#d97706",
+    "#0f9d76",
+    "#d6336c",
+    "#7c3aed",
+    "#0e7490",
+    "#ea580c",
+    "#65a30d",
+    "#9f1239",
+    "#475569",
+    "#a16207",
+    "#0891b2",
+]
+
+GIFT_EVENT = 0
+REPAYMENT_EVENT = 1
+TRADE_EVENT = 2
+
+
+def build_world_payload(simulation: ResourceSimulation) -> dict[str, object]:
+    """Build the compact JSON payload used by the animated world view."""
+
+    agent_history = simulation.agent_history_frame()
+    if agent_history.empty:
+        raise ValueError("The simulation must be initialized or run before plotting")
+
+    agent_ids = list(agent_history["id"].drop_duplicates())
+    agent_index = {agent_id: index for index, agent_id in enumerate(agent_ids)}
+    last_iteration = int(agent_history["iteration"].max())
+    iterations = list(range(last_iteration + 1))
+    metrics_by_iteration = {
+        int(metrics["iteration"]): metrics
+        for metrics in simulation.metrics_history
+    }
+
+    resources = [[0.0 for _ in agent_ids] for _ in iterations]
+    goods = [[0.0 for _ in agent_ids] for _ in iterations]
+    risk = [[0.0 for _ in agent_ids] for _ in iterations]
+    reputation = [[None for _ in agent_ids] for _ in iterations]
+    for row in simulation.agent_history:
+        iteration = int(row["iteration"])
+        if iteration < 0 or iteration > last_iteration:
+            continue
+        index = agent_index[row["id"]]
+        resources[iteration][index] = round(float(row["resources"]), 2)
+        goods[iteration][index] = round(float(row.get("goods", 0.0)), 2)
+        risk[iteration][index] = round(float(row.get("risk_tolerance", 0.5)), 3)
+        value = row.get("reputation")
+        reputation[iteration][index] = (
+            round(float(value), 3) if value is not None else None
+        )
+
+    def metric_series(key: str, initial: float = 0.0) -> list[float]:
+        values = [float(initial)]
+        for iteration in iterations[1:]:
+            metrics = metrics_by_iteration.get(iteration, {})
+            values.append(round(float(metrics.get(key, initial)), 4))
+        return values
+
+    initial_summary = _summary_for_iteration(
+        simulation, agent_history, iterations[0]
+    )
+    gini = metric_series("gini")
+    gini[0] = round(float(initial_summary["gini"]), 4)
+    alive = [int(value) for value in metric_series("alive", len(agent_ids))]
+    alive[0] = len(agent_ids)
+    total = metric_series("total")
+    total[0] = round(float(initial_summary["total"]), 2)
+
+    events: list[list[float | int]] = []
+    for entry in getattr(simulation, "transfer_log", []):
+        if entry["giver"] not in agent_index or entry["receiver"] not in agent_index:
+            continue
+        event_type = (
+            GIFT_EVENT if entry.get("type", "gift") == "gift" else REPAYMENT_EVENT
+        )
+        events.append(
+            [
+                int(entry["iteration"]),
+                event_type,
+                agent_index[entry["giver"]],
+                agent_index[entry["receiver"]],
+                round(float(entry["amount"]), 2),
+                0.0,
+            ]
+        )
+    for entry in getattr(simulation, "trade_log", []):
+        if entry["buyer"] not in agent_index or entry["seller"] not in agent_index:
+            continue
+        events.append(
+            [
+                int(entry["iteration"]),
+                TRADE_EVENT,
+                agent_index[entry["buyer"]],
+                agent_index[entry["seller"]],
+                round(float(entry["amount"]), 2),
+                round(float(entry["quantity"]), 2),
+            ]
+        )
+    events.sort(key=lambda event: (event[0], event[1]))
+
+    market = simulation.config.get("MARKET", {})
+    trust = simulation.config.get("TRUST", {})
+    shocks = simulation.config.get("SHOCKS", {})
+    social = simulation.config.get("SOCIAL", {})
+    market_enabled = bool(market.get("ENABLED", False))
+    trust_enabled = bool(trust.get("ENABLED", False))
+    shocks_enabled = bool(shocks.get("ENABLED", False))
+    reciprocity_enabled = bool(social.get("RECIPROCITY_ENABLED", False))
+
+    extinction_iteration = None
+    for iteration in iterations:
+        if alive[iteration] == 0 and iteration > 0:
+            extinction_iteration = iteration
+            break
+    last_alive_iteration = max(
+        (iteration for iteration in iterations if alive[iteration] > 0),
+        default=0,
+    )
+
+    agents = []
+    for agent in simulation.agents:
+        if agent.id not in agent_index:
+            continue
+        metadata = agent_history[agent_history["id"] == agent.id].iloc[0]
+        agents.append(
+            {
+                "id": agent.id,
+                "label": agent.id.replace("agent-", "A"),
+                "color": WORLD_AGENT_COLORS[
+                    agent_index[agent.id] % len(WORLD_AGENT_COLORS)
+                ],
+                "generosity": round(float(metadata["generosity_score"]), 3),
+                "acceptance": round(float(metadata["acceptance_score"]), 3),
+                "risk": round(float(metadata["risk_tolerance"]), 3),
+                "production": round(float(agent.production_rate), 3),
+                "consumption": round(float(agent.consumption_need), 3),
+            }
+        )
+
+    settings = simulation.config["SIMULATION"]
+    agent_settings = simulation.config["AGENTS"]
+    transfer_range = settings.get(
+        "TRANSFER_AMOUNT_RANGE",
+        [settings.get("TRANSFER_AMOUNT", 0.0)] * 2,
+    )
+    return {
+        "meta": {
+            "iterations": last_iteration,
+            "seed": int(settings["RANDOM_SEED"]),
+            "agents": agents,
+            "initial_resources": round(
+                float(settings["INITIAL_RESOURCES"]), 2
+            ),
+            "resource_floor": round(float(settings["RESOURCE_FLOOR"]), 2),
+            "living_cost": round(float(agent_settings["LIVING_COST"]), 2),
+            "transfer_range": [
+                round(float(transfer_range[0]), 2),
+                round(float(transfer_range[1]), 2),
+            ],
+            "market_enabled": market_enabled,
+            "market_price": round(float(market.get("PRICE", 1.0)), 2),
+            "trust_enabled": trust_enabled,
+            "shocks_enabled": shocks_enabled,
+            "reciprocity_enabled": reciprocity_enabled,
+            "extinction_iteration": extinction_iteration,
+            "last_alive_iteration": last_alive_iteration,
+        },
+        "series": {
+            "resources": resources,
+            "goods": goods if market_enabled else [],
+            "risk": risk if (trust_enabled or shocks_enabled) else [],
+            "reputation": reputation if trust_enabled else [],
+            "gini": gini,
+            "alive": alive,
+            "total": total,
+        },
+        "events": events,
+        "shocks": [
+            {
+                "iteration": int(entry["iteration"]),
+                "duration": int(entry["duration"]),
+                "type": str(entry["type"]),
+                "magnitude": round(float(entry["magnitude"]), 3),
+            }
+            for entry in simulation.shock_log
+        ],
+    }
+
+
+def build_world_html(simulation: ResourceSimulation) -> str:
+    """Render a self-contained animated world view as HTML."""
+
+    template_path = (
+        Path(__file__).resolve().parent / "templates" / "world.html"
+    )
+    template = template_path.read_text(encoding="utf-8")
+    payload = build_world_payload(simulation)
+    data = json.dumps(payload, separators=(",", ":"), allow_nan=False)
+    data = data.replace("</", "<\\/")
+    title = "Exchange Dynamics - The Commons"
+    return (
+        template.replace("__PAGE_TITLE__", title)
+        .replace("__WORLD_PAYLOAD__", data)
+    )
 
 
 def _summary_for_iteration(
@@ -108,7 +322,7 @@ def _iteration_marker(iteration: int) -> dict[str, object]:
 
 
 def build_figure(simulation: ResourceSimulation) -> go.Figure:
-    """Build an animated resource-by-agent Plotly figure."""
+    """Build the legacy animated resource-by-agent Plotly figure."""
 
     agent_history = simulation.agent_history_frame()
     if agent_history.empty:
@@ -320,14 +534,20 @@ def create_visualization(
     output: str | Path = "simulation.html",
     iterations: int | None = None,
     config: dict[str, Any] | None = None,
+    renderer: str = "world",
 ) -> Path:
-    """Run the configured simulation and write an interactive HTML chart."""
+    """Run the configured simulation and write an interactive HTML view."""
 
     simulation = ResourceSimulation(config or CONFIG)
     simulation.run(iterations=iterations)
     output_path = Path(output)
-    figure = build_figure(simulation)
-    figure.write_html(output_path, include_plotlyjs=True)
+    if renderer == "plotly":
+        figure = build_figure(simulation)
+        figure.write_html(output_path, include_plotlyjs=True)
+        return output_path
+    if renderer != "world":
+        raise ValueError("renderer must be 'world' or 'plotly'")
+    output_path.write_text(build_world_html(simulation), encoding="utf-8")
     return output_path
 
 
@@ -348,9 +568,17 @@ def main() -> None:
         default=None,
         help="Path to custom YAML configuration file",
     )
+    parser.add_argument(
+        "--plotly",
+        action="store_true",
+        help="Write the original Plotly line chart instead of the world view",
+    )
     args = parser.parse_args()
     cfg = load_config(args.config) if args.config else None
-    output_path = create_visualization(args.output, args.iterations, config=cfg)
+    renderer = "plotly" if args.plotly else "world"
+    output_path = create_visualization(
+        args.output, args.iterations, config=cfg, renderer=renderer
+    )
     print(f"Interactive visualization written to {output_path}")
 
 

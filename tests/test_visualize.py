@@ -2,7 +2,38 @@ from copy import deepcopy
 
 import pytest
 from main import CONFIG, ResourceSimulation
-from visualize import build_figure, create_visualization
+from visualize import (
+    build_figure,
+    build_world_html,
+    build_world_payload,
+    create_visualization,
+)
+
+
+def gift_config() -> dict:
+    config = deepcopy(CONFIG)
+    config["SIMULATION"].update(
+        {
+            "AGENTS": 3,
+            "INITIAL_RESOURCES": 100.0,
+            "RESOURCE_FLOOR": 0.0,
+            "RANDOM_SEED": 11,
+            "TRANSFER_AMOUNT_RANGE": (5.0, 5.0),
+        }
+    )
+    config["AGENTS"].update(
+        {
+            "GENEROSITY": (1.0, 1.0),
+            "ACCEPTANCE": (1.0, 1.0),
+            "MIN_RESOURCES_AFTER_GIVING": 0.0,
+            "MAX_RESOURCES_AFTER_RECEIVING": 1_000_000.0,
+            "LIVING_COST": 0.0,
+        }
+    )
+    config["AFFORDABILITY"].update(
+        {"MIN_RESOURCES": 0.0, "MAX_RESOURCES": 1.0}
+    )
+    return config
 
 
 def test_build_figure_hover_and_yaxis_range():
@@ -90,3 +121,96 @@ def test_create_visualization(tmp_path):
 
     assert returned_path.exists()
     assert returned_path.stat().st_size > 0
+    html = returned_path.read_text(encoding="utf-8")
+    assert "<!doctype html>" in html
+    assert "window.commonsReplay" in html
+
+
+def test_world_payload_has_frames_and_agent_metadata():
+    sim = ResourceSimulation(gift_config())
+    sim.run(iterations=6)
+
+    payload = build_world_payload(sim)
+
+    assert payload["meta"]["iterations"] == 6
+    assert len(payload["meta"]["agents"]) == 3
+    assert len(payload["series"]["resources"]) == 7
+    assert len(payload["series"]["resources"][0]) == 3
+    assert all("color" in agent for agent in payload["meta"]["agents"])
+
+
+def test_world_payload_records_gift_events():
+    sim = ResourceSimulation(gift_config())
+    sim.run(iterations=5)
+
+    payload = build_world_payload(sim)
+
+    assert sim.transfer_log
+    assert payload["events"]
+    assert len(payload["events"]) == len(sim.transfer_log)
+    iteration, event_type, giver, receiver, amount, _ = payload["events"][0]
+    assert 0 <= iteration <= 5
+    assert event_type == 0
+    assert giver != receiver
+    assert amount == 5.0
+
+
+def test_world_payload_records_market_trades():
+    config = deepcopy(CONFIG)
+    config["SIMULATION"].update(
+        {
+            "AGENTS": 2,
+            "INITIAL_RESOURCES": 50.0,
+            "RESOURCE_FLOOR": 0.0,
+            "RANDOM_SEED": 3,
+        }
+    )
+    config["AGENTS"].update(
+        {
+            "GENEROSITY": (0.0, 0.0),
+            "ACCEPTANCE": (0.0, 0.0),
+            "LIVING_COST": 0.0,
+        }
+    )
+    config["MARKET"].update(
+        {
+            "ENABLED": True,
+            "PRICE": 2.0,
+            "PRODUCTION_RANGE": (0.0, 0.0),
+            "CONSUMPTION_RANGE": (0.0, 0.0),
+        }
+    )
+    sim = ResourceSimulation(config)
+    sim.initialize_agents()
+    producer, consumer = sim.agents
+    producer.production_rate = 4.0
+    producer.consumption_need = 0.0
+    producer.goods = 4.0
+    consumer.production_rate = 0.0
+    consumer.consumption_need = 2.0
+    consumer.goods = 0.0
+
+    sim.run_iteration()
+    payload = build_world_payload(sim)
+
+    assert sim.trade_log
+    trade = next(event for event in payload["events"] if event[1] == 2)
+    assert trade[0] == 1
+    assert trade[2] == 1  # consumer buys
+    assert trade[3] == 0  # producer sells
+    assert trade[4] == 4.0
+    assert trade[5] == 2.0
+
+
+def test_world_html_is_self_contained_and_embeds_data():
+    sim = ResourceSimulation(gift_config())
+    sim.run(iterations=4)
+
+    html = build_world_html(sim)
+
+    assert "__WORLD_PAYLOAD__" not in html
+    assert "__PAGE_TITLE__" not in html
+    assert "The Commons" in html
+    assert "commonsReplay" in html
+    assert "https://" not in html
+    assert "<script src=" not in html

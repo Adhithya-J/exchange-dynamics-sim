@@ -208,3 +208,6 @@ marimo/_lsp/
 __marimo__/
 
 sim-env
+
+# Generated charts are ignored, but the world renderer template is source.
+!templates/world.html

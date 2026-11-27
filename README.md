@@ -1,8 +1,10 @@
 # Exchange Dynamics Simulation
 
-![Simulation output after 1,000 iterations](docs/simulation-output-1000.png)
+![The Commons world view after 1,000 iterations](docs/commons-world.png)
 
-*Default configuration, 1,000 iterations. The interactive chart starts at iteration 0.*
+*Default configuration, 1,000 iterations. Every villager has a hut and a money
+sack; the commons shrinks as resources are consumed. Open `simulation.html` to
+replay the whole run.*
 
 An experimental agent-based simulation of resource sharing and inequality.
 Agents have different generosity and acceptance tendencies. During each
@@ -45,8 +47,10 @@ living agent pays the configured cost of living; reaching the resource floor
 does not create a resource top-up.
 
 The simulation records mean, median, standard deviation, total resources, and
-the Gini coefficient after each iteration. The source of truth is a list of
-`Agent` objects; Pandas is used only to expose the current state for analysis.
+the Gini coefficient after each iteration. Successful gifts, repayments, and
+market trades also go into `transfer_log` and `trade_log`, which the visualizer
+replays. The source of truth is a list of `Agent` objects; Pandas is used only
+to expose the current state for analysis.
 
 ## Market (optional)
 
@@ -134,10 +138,24 @@ python -m pytest -q
 Both `main.py` and `visualize.py` support `--config <path>` to load a custom YAML
 configuration file and `--iterations <n>` to override the run length.
 
-`visualize.py` creates a self-contained `simulation.html` Plotly chart. Open it
-in a browser to inspect each agent's resource balance over time and move the
-iteration slider. The summary card in the chart updates with the selected
-iteration.
+`visualize.py` creates a self-contained `simulation.html` village view that
+replays the recorded run. Open it in a browser; the replay starts automatically
+(press **space** to pause). Every agent has a hut around the green. All
+villagers are the same size; the sack beside each one grows and shrinks with
+their coin balance, so wealth is visible without changing the body size. A gold
+coin is drawn whenever money changes hands: gifts and repayments happen at the
+receiver's hut, while market trades happen in the separate market square. The
+commons pond shows the village's remaining total resources, so it visibly
+shrinks as living costs consume them. Click a hut's owner or a feed row to
+inspect a villager, and drag the timeline to scrub. When everyone dies, the
+timeline trims at extinction.
+
+The world is a presentation layer over the recorded events, not a change to
+who can interact: it replays the existing model and leaves conservation
+untouched. The view works with the optional layers: enable `MARKET`, `TRUST`,
+`SOCIAL`, and `SHOCKS` in the configuration and their effects appear in the
+village, inspector, and event feed. Pass `--plotly` to `visualize.py` to write
+the original Plotly line chart instead.
 
 The random seed and model parameters are defined in `config.yaml` and loaded
 through `utils.load_config`. For interactive use, construct
@@ -150,7 +168,8 @@ inspect `metrics_history` or the returned DataFrame.
 - `main.py` - agents, simulation lifecycle, affordability, market, and metrics.
 - `utils/` - shared helpers, including YAML configuration loading.
 - `tests/` - unit and behavior tests for the model.
-- `visualize.py` - interactive Plotly visualization.
+- `visualize.py` - animated world view plus the legacy Plotly chart.
+- `templates/world.html` - self-contained HTML/CSS/Canvas replay renderer.
 - `experiments.py` - seed and parameter sweep runner with confidence intervals.
 - `TRUST_SOCIETY_SCOPE.md` - research scope and roadmap.
 - `TODO.md` - implementation tasks derived from the roadmap.
