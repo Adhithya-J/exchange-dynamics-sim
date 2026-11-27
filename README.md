@@ -75,6 +75,8 @@ inspect `metrics_history` or the returned DataFrame.
 - `utils/` - shared helpers, including YAML configuration loading.
 - `tests/` - unit and behavior tests for the model.
 - `visualize.py` - interactive Plotly visualization.
+- `TRUST_SOCIETY_SCOPE.md` - research scope and roadmap.
+- `TODO.md` - implementation tasks derived from the roadmap.
 - `requirements.txt` - runtime and test dependencies.
 
 ## Limitations

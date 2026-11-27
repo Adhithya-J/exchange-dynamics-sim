@@ -1,0 +1,101 @@
+# TODO
+
+Task list derived from the roadmap in
+[`TRUST_SOCIETY_SCOPE.md`](TRUST_SOCIETY_SCOPE.md#implementation-order), expanded
+with the current state of the code.
+
+Current model: agents hold a single `resources` balance and make direct
+transfers based on fixed generosity/acceptance scores. There is no goods
+market, reputation, trust belief, or experiment harness yet.
+
+## 1. Define money, goods, utility, and conservation rules
+
+- [ ] Document what creates and destroys money and goods (production,
+      consumption, living cost, transfers).
+- [ ] Decide whether `LIVING_COST` is a real payment (to producers) or an
+      explicit sink; today it simply deletes resources
+      (`main.py:344-354`).
+- [ ] Add config keys and validation for money/goods units and initial
+      endowments.
+- [ ] Add tests asserting conservation holds except at documented sinks/sources.
+
+**Done when:** every change in total money/goods is attributable to a named
+rule, and tests enforce it.
+
+## 2. Build a minimal market
+
+- [ ] Add goods inventory, production, and consumption to `Agent`.
+- [ ] Support producer/consumer roles or per-agent production/demand parameters.
+- [ ] Choose an initial price rule (fixed price before any market clearing).
+- [ ] Implement a step order: produce -> trade -> consume -> record.
+- [ ] Record inventory, unmet demand, and prices each iteration.
+- [ ] Add metrics for fulfilled demand, unmet demand, and trade volume.
+- [ ] Extend `config.yaml` and `utils/config.py` validation.
+- [ ] Add tests for clearing, inventory leftovers, and zero-demand cases.
+
+**Done when:** a run reports fulfilled/unmet demand and goods conservation,
+with no regressions in the existing transfer tests.
+
+## 3. Add private memory and noisy public reputation
+
+- [ ] Replace the `deque` of giver ids (`main.py:43`) with beliefs that carry a
+      reliability value and decay over time.
+- [ ] Add a public reputation store shared by agents.
+- [ ] Model observation noise, delay, and bias as configurable parameters.
+- [ ] Add metrics for reputation accuracy and calibration.
+- [ ] Add tests for memory decay and noisy reputation updates.
+
+**Done when:** agents can hold an incorrect belief about another agent, and
+the simulation reports how wrong those beliefs are.
+
+## 4. Replace fixed probabilities with belief-based decisions
+
+- [ ] Base give/receive decisions on expected payoff and trust beliefs instead
+      of `effective_generosity` / `effective_acceptance`
+      (`main.py:95-105`).
+- [ ] Add risk tolerance and update it, or hold it fixed per agent.
+- [ ] Keep decisions explainable (record the inputs used).
+- [ ] Add tests that a higher-trust belief increases cooperation.
+
+**Done when:** decisions are driven by beliefs about other agents, not static
+scores.
+
+## 5. Add altruism and reciprocity as a separate social layer
+
+- [ ] Represent altruistic transfers with an explicit giver cost and recipient
+      benefit.
+- [ ] Track reciprocity (who repaid whom, and how quickly).
+- [ ] Keep this layer separate from market transactions.
+- [ ] Add metrics for altruism volume and reciprocity rates.
+- [ ] Add conservation tests for the social layer.
+
+**Done when:** altruism can be enabled/disabled independently of the market and
+is measured on its own terms.
+
+## 6. Add environmental shocks and adaptation
+
+- [ ] Add a config-driven shock schedule (scarcity, information shocks).
+- [ ] Implement at least one adaptation/learning rule for agents.
+- [ ] Add resilience metrics (recovery time, survival after a shock).
+- [ ] Add deterministic-seed tests for shock runs.
+
+**Done when:** a run can apply a shock at a chosen iteration and report how the
+population recovers.
+
+## 7. Run controlled experiments across seeds and parameter ranges
+
+- [ ] Add a sweep runner over seeds and parameter ranges.
+- [ ] Aggregate results with confidence intervals, not single runs.
+- [ ] Save results (CSV/JSON) for comparison.
+- [ ] Document the experiment workflow in `README.md`.
+
+**Done when:** one command produces comparable results across seeds and
+parameters.
+
+## Cross-cutting
+
+- [ ] Keep the README model/limitations sections in sync with each change.
+- [ ] Extend `visualize.py` to chart new metrics (demand, reputation, shocks).
+- [ ] Add invariant/property tests for resource and goods conservation.
+- [ ] Add a CI workflow under `.github/` to run `pytest` on supported Python
+      versions (3.11-3.14).
