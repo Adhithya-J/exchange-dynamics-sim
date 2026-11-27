@@ -4,10 +4,10 @@ Task list derived from the roadmap in
 [`TRUST_SOCIETY_SCOPE.md`](TRUST_SOCIETY_SCOPE.md#implementation-order), expanded
 with the current state of the code.
 
-Current model: agents hold money (`resources`) and make direct transfers based
-on fixed generosity/acceptance scores. An optional goods market adds
-production, trade, and consumption. There is no reputation, trust belief, or
-experiment harness yet.
+Current model: agents hold money (`resources`) and make direct transfers.
+Optional layers add a goods market, trust beliefs and noisy reputation,
+altruism/reciprocity, and environmental shocks with adaptation. A sweep runner
+reports confidence intervals across seeds and parameters.
 
 ## 1. Define money, goods, utility, and conservation rules
 
@@ -84,10 +84,10 @@ population recovers.
 
 ## 7. Run controlled experiments across seeds and parameter ranges
 
-- [ ] Add a sweep runner over seeds and parameter ranges.
-- [ ] Aggregate results with confidence intervals, not single runs.
-- [ ] Save results (CSV/JSON) for comparison.
-- [ ] Document the experiment workflow in `README.md`.
+- [x] Add a sweep runner over seeds and parameter ranges.
+- [x] Aggregate results with confidence intervals, not single runs.
+- [x] Save results (CSV/JSON) for comparison.
+- [x] Document the experiment workflow in `README.md`.
 
 **Done when:** one command produces comparable results across seeds and
 parameters.

@@ -92,6 +92,24 @@ the legacy score. Trusted agents are also selected as receivers more often.
 `decision_log` records each attempt; `tests/test_trust.py` and
 `tests/test_decisions.py` cover the update and decision rules.
 
+## Experiments
+
+`experiments.py` runs each seed and parameter combination, then writes raw runs
+and a summary with 95% confidence intervals:
+
+```bash
+python experiments.py --iterations 500 --seeds 1 2 3 \
+  --sweep SIMULATION.AGENTS=5,10 \
+  --sweep MARKET.ENABLED=true \
+  --output results/runs.csv
+```
+
+Sweep values are parsed as JSON when possible, so booleans, numbers, and lists
+work (`SHOCKS.SCHEDULE='[{"iteration": 100, "type": "scarcity", "magnitude": 0.5}]'`).
+The command writes `results/runs.csv`, `results/runs_summary.csv`, and
+`results/runs_summary.json`. Use `--config` to start from a custom YAML file and
+`--metrics` to choose which final metrics to aggregate.
+
 ## Quick start
 
 ```bash
@@ -126,6 +144,7 @@ inspect `metrics_history` or the returned DataFrame.
 - `utils/` - shared helpers, including YAML configuration loading.
 - `tests/` - unit and behavior tests for the model.
 - `visualize.py` - interactive Plotly visualization.
+- `experiments.py` - seed and parameter sweep runner with confidence intervals.
 - `TRUST_SOCIETY_SCOPE.md` - research scope and roadmap.
 - `TODO.md` - implementation tasks derived from the roadmap.
 - `MODEL.md` - units, conservation ledger, and market rules.
