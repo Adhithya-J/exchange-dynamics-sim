@@ -114,7 +114,8 @@ the simulation behaves exactly like the transfer-only model.
   remainder, so trade cannot consume the money needed for the fixed subsistence
   cost.
 - A seller's market income is capped by `MAX_RESOURCES_AFTER_RECEIVING`, the
-  same ceiling that applies to gifts.
+  same ceiling that applies to gifts. A seller with `SELLER_RESERVATION_PRICE`
+  above the market price holds goods instead of selling.
 - The price starts at `MARKET.PRICE` and adjusts once per iteration:
   `imbalance = (unmet_demand - leftover_goods) / total_demand`, then
   `next_price = price * (1 + PRICE_ADJUSTMENT * imbalance)`, clamped to
@@ -131,16 +132,36 @@ never create gift debts.
 When `SOCIAL.RECIPROCITY_ENABLED` is true, each gift is recorded as a debt from
 the receiver to the giver. After `REPAY_DELAY` iterations the debtor attempts a
 repayment with its own hidden `repayment_probability`, returning
-`REPAY_FRACTION` of the gift while staying at or above `RESOURCE_FLOOR`.
-`repayment_probability` is drawn once at initialization from
+`REPAY_FRACTION` of the outstanding debt while staying at or above
+`RESOURCE_FLOOR`. `repayment_probability` is drawn once at initialization from
 `SOCIAL.REPAY_PROBABILITY_RANGE`; the legacy scalar `REPAY_PROBABILITY` is still
 accepted for old configurations and sets every agent to the same value.
 Repayments are ordinary money transfers, so they conserve total money.
 
+Unpaid debt does not vanish. A missed or partial attempt is a default: the
+remainder is multiplied by `1 + DEFAULT_PENALTY_RATE`, retried after
+`REPAY_RETRY_DELAY` iterations, and counted in `defaults` and
+`total_defaults`. If either party dies, the unrecoverable
+remainder is written off and recorded in `written_off_debt`. While a debtor has
+an unpaid default with a creditor, `EXCLUDE_DEFAULTERS` prevents that creditor
+from choosing the debtor as a new recipient until the debt is settled.
+
 `repayment_log` records the debtor, creditor, original gift iteration,
-repayment iteration, delay, and amount. Metrics include `altruism_volume`,
-`repayments`, `repayment_volume`, `reciprocity_rate`, `outstanding_debt`, and
-`mean_repayment_delay`.
+repayment iteration, delay, amount, remaining balance, and whether the debt was
+fully cleared. Metrics include `gift_volume`, `altruism_volume`,
+`net_gift_volume`, `repayments`, `repayment_volume`, `reciprocity_rate`,
+`repayment_event_rate`, `outstanding_debt`, `defaulted_debt`, `defaults`,
+`total_defaults`, `written_off_debt`, and `mean_repayment_delay`.
+`reciprocity_rate` is value-based (`repaid value / gifted value`, capped at 1);
+`repayment_event_rate` is the old event-based count. `gift_volume` is gross
+gifts, `altruism_volume` is gross gifts when reciprocity is off and net gifts
+minus repayments when it is on, and `net_gift_volume` is the cumulative
+difference.
+
+Recipient memory is also a reciprocity channel. When explicit reciprocity is
+enabled, `MEMORY.USE_WITH_RECIPROCITY: false` (the default) turns off the memory
+preference so the same gift is not rewarded twice. Set it to true only when both
+channels are wanted deliberately.
 
 ## Trust and reputation (optional)
 
@@ -149,8 +170,8 @@ Disabled by default. When `TRUST.ENABLED` is true:
 
 - every agent starts with public reputation and private beliefs equal to
   `INITIAL_BELIEF`;
-- when a scheduled debt comes due, the creditor observes whether the debtor
-  repaid (`1`) or defaulted (`0`);
+- when a scheduled debt comes due, the creditor observes the fraction actually
+  repaid (0 for a default, 1 for full repayment, or a partial value);
 - the private belief of that creditor moves toward the observation by
   `LEARNING_RATE`, then blends with public reputation by `PUBLIC_WEIGHT`;
 - public reputation moves toward the observed value (the outcome plus `BIAS`
@@ -177,16 +198,24 @@ effect; a single channel keeps it linear and interpretable.
 
 When `TRUST.DECISION_WEIGHT` is greater than 0 and reciprocity is enabled:
 
-- expected return per unit = `belief * REPAY_FRACTION`;
-- expected net payoff = `belief * REPAY_FRACTION - 1`;
-- trust probability = logistic(`expected net payoff / risk_tolerance`);
+- risk-adjusted belief = `prior + risk_tolerance * (belief - prior)`;
+- expected return per unit = `risk-adjusted belief * REPAY_FRACTION`;
+- expected net payoff = `expected return - 1`;
+- trust probability = logistic(
+  `expected net payoff / DECISION_TEMPERATURE`);
 - receiver selection multiplies each candidate's memory weight by
   `(1 - DECISION_WEIGHT) + DECISION_WEIGHT * trust_probability`.
 
-If reciprocity is disabled, expected return is zero, so trust cannot make
-giving look profitable. Giving and acceptance use the legacy affordability
-scores, and accepting a gift is always weakly dominant because repayment is
-optional and default has no penalty.
+Risk tolerance is not decision noise. A risk-tolerant agent acts on a strong
+belief; a risk-averse agent falls back toward the prior. `DECISION_TEMPERATURE`
+is a separate, fixed noise parameter, so raising risk tolerance does not make
+every choice more random. If reciprocity is disabled, expected return is zero,
+so trust cannot make giving look profitable.
+
+Giving and acceptance use the legacy affordability
+scores. Accepting a gift is weakly dominant because repayment is optional, but
+default now has a real cost (late fees, lower reputation, and loss of future
+credit), so accepting and defaulting is no longer free.
 
 `RISK_TOLERANCE` is drawn once per agent from `AGENTS.RISK_TOLERANCE` and stays
 fixed (except for the optional shock adaptation described below). Each attempted
@@ -228,11 +257,11 @@ level, or `None` if it never does.
 6. Trust beliefs and public reputation always stay within [0, 1].
 7. The trust layer never changes money or goods totals.
 8. Market prices stay within `[MIN_PRICE, MAX_PRICE]`.
+9. Outstanding debt and written-off debt are never negative, and an
+   outstanding debt is settled or written off, never silently dropped.
 
 ## Open decisions
 
 - Pass stranded goods to other agents when an owner dies.
-- Decide whether defaulted debt should remain outstanding and reduce future
-  credit access.
 - Decide whether production should respond to the market price.
 - Decide whether private beliefs should fully replace the legacy memory deque.

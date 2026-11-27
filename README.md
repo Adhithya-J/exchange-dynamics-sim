@@ -66,6 +66,8 @@ to expose the current state for analysis.
   worth that much to a buyer and buyers refuse prices above it;
 - buyers keep back the fixed living cost, and seller income respects the same
   receiving ceiling as gifts;
+- a seller with `SELLER_RESERVATION_PRICE` above the market price holds goods
+  instead of selling;
 - the price starts at `PRICE` and moves each iteration from the balance of
   unmet demand and unsold goods (`PRICE_ADJUSTMENT`, `MIN_PRICE`, `MAX_PRICE`);
 - unsold goods stay in inventory.
@@ -80,10 +82,14 @@ money sink. `MODEL.md` documents the full ledger, and
 Direct transfers are the altruism layer; market trades are kept separate. Set
 `SOCIAL.RECIPROCITY_ENABLED: true` to schedule a possible repayment after each
 gift. Each agent draws a hidden `REPAY_PROBABILITY_RANGE` value, and
-`REPAY_DELAY` and `REPAY_FRACTION` control the attempt. `repayment_log` records
-who repaid whom and how quickly, while metrics report `altruism_volume`,
-`reciprocity_rate`, `outstanding_debt`, and `mean_repayment_delay`.
-`tests/test_social.py` covers the rules.
+`REPAY_DELAY` and `REPAY_FRACTION` control the attempt. Unpaid debt is not
+forgotten: it is charged `DEFAULT_PENALTY_RATE`, retried after
+`REPAY_RETRY_DELAY`, and blocks new gifts from the creditor while
+`EXCLUDE_DEFAULTERS` is true. `repayment_log` records who repaid whom and how
+quickly, while metrics report `gift_volume`, `net_gift_volume`,
+`reciprocity_rate` (value-based), `repayment_event_rate`, `outstanding_debt`,
+`defaulted_debt`, and `written_off_debt`. `tests/test_social.py` covers the
+rules.
 
 ## Environmental shocks (optional)
 
@@ -106,10 +112,11 @@ simulation reports `mean_trust`, `mean_reputation`, `reputation_error`, and
 `reputation_brier`.
 
 Set `TRUST.DECISION_WEIGHT` above 0 to use those beliefs when choosing a
-receiver. Expected net payoff is `belief * REPAY_FRACTION - 1`, turned into a
-probability with each agent's fixed `RISK_TOLERANCE`, then blended with the
-legacy memory weight. Giving and accepting keep their affordability scores, so
-trust is counted once instead of being multiplied through selection, giving,
+receiver. Risk tolerance scales how far the agent acts on its belief versus the
+prior; expected net payoff is `risk-adjusted belief * REPAY_FRACTION - 1`,
+turned into a probability with a fixed `DECISION_TEMPERATURE`, then blended with
+the legacy memory weight. Giving and accepting keep their affordability scores,
+so trust is counted once instead of being multiplied through selection, giving,
 and acceptance. `decision_log` records each attempt; `tests/test_trust.py` and
 `tests/test_decisions.py` cover the update and decision rules.
 

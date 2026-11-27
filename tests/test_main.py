@@ -297,6 +297,35 @@ class TestResourceSimulation:
 
         assert c2_count > c1_count * 3
 
+    def test_memory_preference_is_disabled_with_reciprocity_by_default(self):
+        counts = {}
+        for use_memory_with_reciprocity in (False, True):
+            config = make_config()
+            config["SIMULATION"].update(
+                {"AGENTS": 3, "INITIAL_RESOURCES": 100.0}
+            )
+            config["AGENTS"].update(
+                {"LIVING_COST": 0.0, "MIN_RESOURCES_AFTER_GIVING": 0.0}
+            )
+            config["MEMORY"]["PREFERENCE_FRACTION"] = 1.0
+            config["MEMORY"]["USE_WITH_RECIPROCITY"] = (
+                use_memory_with_reciprocity
+            )
+            config["SOCIAL"]["RECIPROCITY_ENABLED"] = True
+            config["TRUST"]["ENABLED"] = False
+            simulation = ResourceSimulation(config)
+            simulation.initialize_agents()
+            sender, remembered, other = simulation.agents
+            sender.memory.append(remembered.id)
+
+            chosen = [simulation._find_receiver(sender) for _ in range(400)]
+            counts[use_memory_with_reciprocity] = sum(
+                1 for agent in chosen if agent.id == remembered.id
+            )
+
+        assert 140 < counts[False] < 260
+        assert counts[True] > 380
+
     def test_transfer_amount_bounds_fallback_to_fixed_amount(self):
         config = make_config()
         del config["SIMULATION"]["TRANSFER_AMOUNT_RANGE"]

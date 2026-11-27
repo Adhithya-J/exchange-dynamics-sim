@@ -84,7 +84,7 @@ class TestBeliefDecisions:
             receiver, trusted
         ) == simulation._receive_probability(receiver, distrusted)
 
-    def test_risk_tolerance_flattens_expected_payoff(self):
+    def test_risk_tolerance_increases_response_to_belief(self):
         simulation = ResourceSimulation(decision_config())
         simulation.initialize_agents()
         other = Agent("other", 1.0, 1.0, 1000.0)
@@ -94,11 +94,27 @@ class TestBeliefDecisions:
         cautious.beliefs[other.id] = 0.9
         bold.beliefs[other.id] = 0.9
 
-        # A lower temperature sharpens a negative expected payoff; a higher
-        # risk-tolerance value flattens every probability toward 0.5.
+        # Risk tolerance scales the response to the belief rather than acting
+        # as decision noise, so a risk-tolerant agent differentiates more.
         assert simulation._trust_decision_probability(
             bold, other
         ) > simulation._trust_decision_probability(cautious, other)
+
+    def test_zero_risk_tolerance_ignores_trust_beliefs(self):
+        simulation = ResourceSimulation(decision_config())
+        simulation.initialize_agents()
+        other = Agent("other", 1.0, 1.0, 1000.0)
+        simulation.reputation[other.id] = 0.5
+        risk_averse = Agent("averse", 1.0, 1.0, 1000.0, risk_tolerance=0.0)
+        risk_averse.beliefs[other.id] = 0.99
+
+        assert simulation._trust_decision_probability(
+            risk_averse, other
+        ) == pytest.approx(
+            simulation._trust_decision_probability(
+                Agent("same", 1.0, 1.0, 1000.0, risk_tolerance=0.0), other
+            )
+        )
 
     def test_expected_return_is_derived_from_repay_fraction(self):
         full = ResourceSimulation(decision_config())
@@ -204,6 +220,13 @@ class TestDecisionValidation:
         config["TRUST"]["DECISION_WEIGHT"] = 1.5
 
         with pytest.raises(ValueError, match="DECISION_WEIGHT"):
+            ResourceSimulation(config).initialize_agents()
+
+    def test_decision_temperature_must_be_positive(self):
+        config = decision_config()
+        config["TRUST"]["DECISION_TEMPERATURE"] = 0.0
+
+        with pytest.raises(ValueError, match="DECISION_TEMPERATURE"):
             ResourceSimulation(config).initialize_agents()
 
     def test_negative_risk_tolerance_is_rejected(self):

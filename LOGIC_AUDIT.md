@@ -1,8 +1,8 @@
 # Logic, Economic, Visual, and Game-Theory Audit
 
-> **Status:** Section 1 (1.1–1.8) has been fixed and is covered by the test
-> suite. Section 2 (game theory) is the next pass. The text below records the
-> issues as they were found, not the current implementation.
+> **Status:** Sections 1 (1.1–1.8) and 2 (2.1–2.5) have been fixed and are
+> covered by the test suite. The text below records the issues as they were
+> found, not the current implementation.
 
 **Scope:** `main.py`, `replay.py`, `experiments.py`, `visualize.py`, `viewer/`, `config.yaml`, `MODEL.md`, `README.md`, `TRUST_SOCIETY_SCOPE.md`.
 

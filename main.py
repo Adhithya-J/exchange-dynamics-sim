@@ -33,6 +33,7 @@ DEFAULT_MARKET_SETTINGS: dict[str, Any] = {
     "PRODUCTION_RANGE": (0.0, 0.0),
     "CONSUMPTION_RANGE": (0.0, 0.0),
     "UNMET_DEMAND_PENALTY": 0.0,
+    "SELLER_RESERVATION_PRICE": 0.0,
 }
 
 # Trust settings used when a custom configuration omits the section. Trust is
@@ -47,6 +48,7 @@ DEFAULT_TRUST_SETTINGS: dict[str, Any] = {
     "BIAS": 0.0,
     "PUBLIC_WEIGHT": 0.3,
     "DECISION_WEIGHT": 0.0,
+    "DECISION_TEMPERATURE": 0.1,
 }
 
 # Social settings used when a custom configuration omits the section.
@@ -55,6 +57,9 @@ DEFAULT_SOCIAL_SETTINGS: dict[str, Any] = {
     "REPAY_PROBABILITY_RANGE": (0.2, 0.8),
     "REPAY_DELAY": 3,
     "REPAY_FRACTION": 1.0,
+    "REPAY_RETRY_DELAY": 1,
+    "DEFAULT_PENALTY_RATE": 0.05,
+    "EXCLUDE_DEFAULTERS": True,
 }
 
 # Shock settings used when a custom configuration omits the section.
@@ -232,9 +237,12 @@ class ResourceSimulation:
         self.trade_log: list[dict[str, Any]] = []
         self.death_log: list[dict[str, Any]] = []
         self.total_gifts = 0
+        self.total_gift_volume = 0.0
         self.total_repayments = 0
         self.total_repayment_volume = 0.0
         self.total_repayment_delay = 0
+        self.total_defaults = 0
+        self.written_off_debt = 0.0
         self._active_shocks: list[dict[str, Any]] = []
         self.shock_log: list[dict[str, Any]] = []
         self.shock_count = 0
@@ -267,6 +275,7 @@ class ResourceSimulation:
             min_price = float(merged["MIN_PRICE"])
             max_price = float(merged["MAX_PRICE"])
             unmet_penalty = float(merged["UNMET_DEMAND_PENALTY"])
+            seller_reservation = float(merged["SELLER_RESERVATION_PRICE"])
         except (TypeError, ValueError) as exc:
             raise ValueError("MARKET settings must be numeric") from exc
         production_range = self._validated_range(
@@ -285,6 +294,10 @@ class ResourceSimulation:
             )
         if unmet_penalty < 0:
             raise ValueError("MARKET.UNMET_DEMAND_PENALTY must not be negative")
+        if seller_reservation < 0:
+            raise ValueError(
+                "MARKET.SELLER_RESERVATION_PRICE must not be negative"
+            )
         return {
             "enabled": enabled,
             "price": price,
@@ -294,6 +307,7 @@ class ResourceSimulation:
             "production_range": production_range,
             "consumption_range": consumption_range,
             "unmet_demand_penalty": unmet_penalty,
+            "seller_reservation_price": seller_reservation,
         }
 
     def _trust_settings(self) -> dict[str, Any]:
@@ -311,6 +325,7 @@ class ResourceSimulation:
             bias = float(merged["BIAS"])
             public_weight = float(merged["PUBLIC_WEIGHT"])
             decision_weight = float(merged["DECISION_WEIGHT"])
+            decision_temperature = float(merged["DECISION_TEMPERATURE"])
         except (TypeError, ValueError) as exc:
             raise ValueError("TRUST settings must be numeric") from exc
         if not 0 <= initial_belief <= 1:
@@ -327,6 +342,8 @@ class ResourceSimulation:
             raise ValueError("TRUST.PUBLIC_WEIGHT must be between 0 and 1")
         if not 0 <= decision_weight <= 1:
             raise ValueError("TRUST.DECISION_WEIGHT must be between 0 and 1")
+        if decision_temperature <= 0:
+            raise ValueError("TRUST.DECISION_TEMPERATURE must be positive")
         return {
             "enabled": enabled,
             "initial_belief": initial_belief,
@@ -337,6 +354,7 @@ class ResourceSimulation:
             "bias": bias,
             "public_weight": public_weight,
             "decision_weight": decision_weight,
+            "decision_temperature": decision_temperature,
         }
 
     def _social_settings(self) -> dict[str, Any]:
@@ -348,6 +366,8 @@ class ResourceSimulation:
         try:
             delay = int(merged["REPAY_DELAY"])
             fraction = float(merged["REPAY_FRACTION"])
+            retry_delay = int(merged["REPAY_RETRY_DELAY"])
+            default_penalty = float(merged["DEFAULT_PENALTY_RATE"])
         except (TypeError, ValueError) as exc:
             raise ValueError("SOCIAL settings must be numeric") from exc
         if "REPAY_PROBABILITY" in configured:
@@ -374,11 +394,18 @@ class ResourceSimulation:
             raise ValueError("SOCIAL.REPAY_DELAY must not be negative")
         if fraction < 0:
             raise ValueError("SOCIAL.REPAY_FRACTION must not be negative")
+        if retry_delay < 1:
+            raise ValueError("SOCIAL.REPAY_RETRY_DELAY must be at least 1")
+        if default_penalty < 0:
+            raise ValueError("SOCIAL.DEFAULT_PENALTY_RATE must not be negative")
         return {
             "enabled": enabled,
             "repay_probability_range": probability_range,
             "repay_delay": delay,
             "repay_fraction": fraction,
+            "repay_retry_delay": retry_delay,
+            "default_penalty_rate": default_penalty,
+            "exclude_defaulters": bool(merged["EXCLUDE_DEFAULTERS"]),
         }
 
     def _schedule_repayment(
@@ -387,6 +414,7 @@ class ResourceSimulation:
         """Record a gift and schedule a possible reciprocal repayment."""
 
         self.total_gifts += 1
+        self.total_gift_volume += amount
         settings = self._social_settings()
         if not settings["enabled"]:
             return
@@ -397,33 +425,65 @@ class ResourceSimulation:
                 "debtor": receiver.id,
                 "creditor": giver.id,
                 "amount": amount,
+                "remaining": amount,
+                "defaults": 0,
+                "attempts": 0,
             }
         )
 
     def _process_repayments(self, iteration: int) -> dict[str, Any]:
-        """Pay due gifts back and record whether each debtor reciprocated."""
+        """Pay due gifts back and keep unpaid debt on the books.
+
+        A missed or partial payment is a default: it is observed by trust,
+        charged a late fee, and retried later. If either party dies the
+        unrecoverable remainder is written off. Debt therefore does not silently
+        disappear, and ``outstanding_debt`` stays meaningful.
+        """
 
         settings = self._social_settings()
-        empty = {
-            "repayments": 0,
-            "repayment_volume": 0.0,
-            "total_repayments": self.total_repayments,
-            "reciprocity_rate": (
-                self.total_repayments / self.total_gifts
-                if self.total_gifts
-                else 0.0
-            ),
-            "outstanding_debt": float(
-                sum(entry["amount"] for entry in self._repayment_queue)
-            ),
-            "mean_repayment_delay": (
-                self.total_repayment_delay / self.total_repayments
-                if self.total_repayments
-                else 0.0
-            ),
-        }
+
+        def summary(defaults: int = 0) -> dict[str, Any]:
+            outstanding = float(
+                sum(entry["remaining"] for entry in self._repayment_queue)
+            )
+            defaulted = float(
+                sum(
+                    entry["remaining"]
+                    for entry in self._repayment_queue
+                    if entry["defaults"] > 0
+                )
+            )
+            return {
+                "repayments": 0,
+                "repayment_volume": 0.0,
+                "total_repayments": self.total_repayments,
+                "reciprocity_rate": (
+                    min(
+                        1.0,
+                        self.total_repayment_volume / self.total_gift_volume,
+                    )
+                    if self.total_gift_volume > 0
+                    else 0.0
+                ),
+                "repayment_event_rate": (
+                    min(1.0, self.total_repayments / self.total_gifts)
+                    if self.total_gifts
+                    else 0.0
+                ),
+                "outstanding_debt": outstanding,
+                "defaulted_debt": defaulted,
+                "defaults": defaults,
+                "total_defaults": self.total_defaults,
+                "written_off_debt": self.written_off_debt,
+                "mean_repayment_delay": (
+                    self.total_repayment_delay / self.total_repayments
+                    if self.total_repayments
+                    else 0.0
+                ),
+            }
+
         if not settings["enabled"] or not self._repayment_queue:
-            return empty
+            return summary()
 
         due = [
             entry for entry in self._repayment_queue if entry["due"] <= iteration
@@ -435,72 +495,78 @@ class ResourceSimulation:
         ]
         count = 0
         volume = 0.0
+        defaults = 0
         floor = self.config["SIMULATION"]["RESOURCE_FLOOR"]
+        epsilon = 1e-9
         for entry in due:
             debtor = self._agent_by_id(entry["debtor"])
             creditor = self._agent_by_id(entry["creditor"])
+            entry["attempts"] += 1
+            due_amount = entry["remaining"] * settings["repay_fraction"]
             amount = 0.0
-            if debtor.is_alive and creditor.is_alive:
-                if self.random.random() < debtor.repayment_probability:
-                    spendable = max(0.0, debtor.resources - floor)
-                    amount = min(
-                        entry["amount"] * settings["repay_fraction"], spendable
-                    )
-            # A failed roll, a dead counterparty, or an unaffordable debt is a
-            # default. It is recorded as an observation so reputation can learn
-            # whom to trust instead of rising on every gift.
-            self._observe_repayment(debtor, creditor, 1.0 if amount > 0 else 0.0)
-            if amount <= 0:
-                continue
-            debtor.resources -= amount
-            creditor.resources += amount
-            if not debtor.is_alive:
-                self._log_death(debtor, "repayment")
-            delay = iteration - entry["gift_iteration"]
-            self.repayment_log.append(
-                {
-                    "gift_iteration": entry["gift_iteration"],
-                    "repayment_iteration": iteration,
-                    "delay": delay,
-                    "debtor": entry["debtor"],
-                    "creditor": entry["creditor"],
-                    "scheduled_amount": entry["amount"],
-                    "amount": amount,
-                }
-            )
-            self.transfer_log.append(
-                {
-                    "iteration": iteration,
-                    "type": "repayment",
-                    "giver": entry["debtor"],
-                    "receiver": entry["creditor"],
-                    "amount": amount,
-                }
-            )
-            count += 1
-            volume += amount
-            self.total_repayments += 1
-            self.total_repayment_volume += amount
-            self.total_repayment_delay += delay
+            if (
+                due_amount > 0
+                and debtor.is_alive
+                and creditor.is_alive
+                and self.random.random() < debtor.repayment_probability
+            ):
+                spendable = max(0.0, debtor.resources - floor)
+                amount = min(due_amount, spendable)
+            outcome = amount / due_amount if due_amount > 0 else 0.0
+            self._observe_repayment(debtor, creditor, outcome)
+            if amount > 0:
+                debtor.resources -= amount
+                creditor.resources += amount
+                if not debtor.is_alive:
+                    self._log_death(debtor, "repayment")
+                delay = iteration - entry["gift_iteration"]
+                entry["remaining"] -= amount
+                self.repayment_log.append(
+                    {
+                        "gift_iteration": entry["gift_iteration"],
+                        "repayment_iteration": iteration,
+                        "delay": delay,
+                        "debtor": entry["debtor"],
+                        "creditor": entry["creditor"],
+                        "scheduled_amount": entry["amount"],
+                        "amount": amount,
+                        "remaining": max(0.0, entry["remaining"]),
+                        "full": entry["remaining"] <= epsilon,
+                    }
+                )
+                self.transfer_log.append(
+                    {
+                        "iteration": iteration,
+                        "type": "repayment",
+                        "giver": entry["debtor"],
+                        "receiver": entry["creditor"],
+                        "amount": amount,
+                    }
+                )
+                count += 1
+                volume += amount
+                self.total_repayments += 1
+                self.total_repayment_volume += amount
+                self.total_repayment_delay += delay
 
-        return {
-            "repayments": count,
-            "repayment_volume": volume,
-            "total_repayments": self.total_repayments,
-            "reciprocity_rate": (
-                self.total_repayments / self.total_gifts
-                if self.total_gifts
-                else 0.0
-            ),
-            "outstanding_debt": float(
-                sum(entry["amount"] for entry in self._repayment_queue)
-            ),
-            "mean_repayment_delay": (
-                self.total_repayment_delay / self.total_repayments
-                if self.total_repayments
-                else 0.0
-            ),
-        }
+            if entry["remaining"] <= epsilon:
+                continue
+            if not debtor.is_alive or not creditor.is_alive:
+                # No one can settle the remainder; write it off instead of
+                # retrying a dead account forever.
+                self.written_off_debt += entry["remaining"]
+                continue
+            defaults += 1
+            self.total_defaults += 1
+            entry["defaults"] += 1
+            entry["remaining"] *= 1.0 + settings["default_penalty_rate"]
+            entry["due"] = iteration + settings["repay_retry_delay"]
+            self._repayment_queue.append(entry)
+
+        result = summary(defaults=defaults)
+        result["repayments"] = count
+        result["repayment_volume"] = volume
+        return result
 
     def _shock_settings(self) -> dict[str, Any]:
         """Return validated shock settings and the normalized schedule."""
@@ -911,9 +977,12 @@ class ResourceSimulation:
         self.transfer_log = []
         self.trade_log = []
         self.total_gifts = 0
+        self.total_gift_volume = 0.0
         self.total_repayments = 0
         self.total_repayment_volume = 0.0
         self.total_repayment_delay = 0
+        self.total_defaults = 0
+        self.written_off_debt = 0.0
         self._active_shocks = []
         self.shock_log = []
         self.death_log = []
@@ -1016,18 +1085,37 @@ class ResourceSimulation:
         if minimum_transfer is None:
             minimum_transfer, _ = self._transfer_amount_bounds()
         receiving_ceil = self.config["AGENTS"]["MAX_RESOURCES_AFTER_RECEIVING"]
+        social = self._social_settings()
         candidates = [
             agent
             for agent in self.agents
             if agent.id != sender.id
             and agent.can_receive(receiving_ceil, minimum_transfer)
         ]
+        if social["enabled"] and social["exclude_defaulters"]:
+            defaulting = {
+                entry["debtor"]
+                for entry in self._repayment_queue
+                if entry["creditor"] == sender.id
+                and entry["defaults"] > 0
+                and entry["remaining"] > 1e-9
+            }
+            candidates = [
+                candidate for candidate in candidates if candidate.id not in defaulting
+            ]
         if not candidates:
             return None
 
-        memory_fraction = self.config["MEMORY"]["PREFERENCE_FRACTION"]
+        memory_settings = self.config.get("MEMORY") or {}
+        memory_fraction = memory_settings["PREFERENCE_FRACTION"]
         if not 0 <= memory_fraction <= 1:
             raise ValueError("PREFERENCE_FRACTION must be between 0 and 1")
+        if social["enabled"] and not bool(
+            memory_settings.get("USE_WITH_RECIPROCITY", False)
+        ):
+            # A gift already creates a debt. Keeping the memory preference on
+            # would reward the same gift twice.
+            memory_fraction = 0.0
 
         weights = self._memory_weights(sender, candidates, memory_fraction)
         trust = self._trust_settings()
@@ -1040,6 +1128,8 @@ class ResourceSimulation:
                 probability = self._trust_decision_probability(sender, candidate)
                 factor = (1.0 - decision_weight) + decision_weight * probability
                 trust_weights.append(base_weight * factor)
+            if sum(trust_weights) <= 0:
+                trust_weights = weights
             return self.random.choices(
                 candidates, weights=trust_weights, k=1
             )[0]
@@ -1049,16 +1139,27 @@ class ResourceSimulation:
         return self.random.choices(candidates, weights=weights, k=1)[0]
 
     def _trust_decision_probability(self, agent: Agent, other: Agent) -> float:
-        """Return the probability of cooperating based on expected repayment."""
+        """Return how strongly the agent acts on its belief about ``other``.
+
+        Risk tolerance scales how far the agent moves away from the prior in
+        response to a belief. A risk-tolerant agent acts on a strong belief; a
+        risk-averse one falls back toward the prior. The logistic temperature is
+        a separate decision-noise parameter, so higher risk tolerance never
+        makes every choice more random.
+        """
 
         settings = self._trust_settings()
         social = self._social_settings()
+        prior = settings["initial_belief"]
         belief = self.belief_for(agent, other.id)
+        adjusted_belief = prior + agent.risk_tolerance * (belief - prior)
         expected_return = (
-            belief * social["repay_fraction"] if social["enabled"] else 0.0
+            adjusted_belief * social["repay_fraction"]
+            if social["enabled"]
+            else 0.0
         )
         expected_net = expected_return - 1.0
-        temperature = max(agent.risk_tolerance, 0.05)
+        temperature = settings["decision_temperature"]
         return float(1.0 / (1.0 + np.exp(-expected_net / temperature)))
 
     def _give_probability(self, agent: Agent, receiver: Agent | None = None) -> float:
@@ -1311,6 +1412,10 @@ class ResourceSimulation:
             # unmet. A buyer refuses to trade when the price exceeds that value.
             if price > penalty:
                 continue
+            # Sellers with a reservation price hold their goods when the market
+            # price is too low.
+            if price < settings["seller_reservation_price"]:
+                continue
             # Keep back the fixed living cost so trade cannot spend the money
             # the agent needs to survive the cost step.
             spendable = max(0.0, buyer.resources - floor - living_cost)
@@ -1455,6 +1560,12 @@ class ResourceSimulation:
         alive = int(sum(agent.is_alive for agent in self.agents))
         if alive == 0 and self.extinction_iteration is None:
             self.extinction_iteration = iteration
+        social = self._social_settings()
+        altruism_volume = (
+            max(0.0, transfer_volume - repayments["repayment_volume"])
+            if social["enabled"]
+            else transfer_volume
+        )
         statistics.update(
             {
                 "iteration": iteration,
@@ -1464,7 +1575,11 @@ class ResourceSimulation:
                 "total_transfer_volume": self.total_transfer_volume,
                 "goods_total": float(sum(agent.goods for agent in self.agents)),
                 "alive": alive,
-                "altruism_volume": transfer_volume,
+                "altruism_volume": altruism_volume,
+                "gift_volume": transfer_volume,
+                "net_gift_volume": (
+                    self.total_gift_volume - self.total_repayment_volume
+                ),
                 "living_cost_paid": living_cost_paid,
                 "living_cost_due": self._last_living_cost_due,
                 "extinction_iteration": self.extinction_iteration,

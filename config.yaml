@@ -57,6 +57,8 @@ MARKET:
   # Money charged per unit of unmet demand at the living-cost step. This is the
   # value of a good: buyers only purchase when the price is at or below it.
   UNMET_DEMAND_PENALTY: 2.0
+  # Sellers hold goods rather than sell below this price. 0 sells at any price.
+  SELLER_RESERVATION_PRICE: 0.0
 
 # Environmental shocks and simple adaptation. Off by default.
 SHOCKS:
@@ -76,8 +78,15 @@ SOCIAL:
   REPAY_PROBABILITY_RANGE: [0.2, 0.8]
   # Iterations between a gift and its attempted repayment.
   REPAY_DELAY: 3
-  # Fraction of the gift returned.
+  # Fraction of the gift returned per attempt.
   REPAY_FRACTION: 1.0
+  # Iterations before an unpaid remainder is retried.
+  REPAY_RETRY_DELAY: 1
+  # Fraction added to the unpaid remainder after each missed attempt. This is a
+  # late fee, so defaulting has a real cost and debt does not vanish.
+  DEFAULT_PENALTY_RATE: 0.05
+  # Stop giving to an agent who defaulted on you until the debt is settled.
+  EXCLUDE_DEFAULTERS: true
 
 # Private trust beliefs and noisy public reputation. Off by default.
 TRUST:
@@ -99,6 +108,9 @@ TRUST:
   PUBLIC_WEIGHT: 0.3
   # Blend trust-based receiver selection with legacy scores (0 legacy, 1 trust).
   DECISION_WEIGHT: 0.0
+  # Logistic temperature for trust decisions. Lower values make the same
+  # expected payoff translate into a sharper choice.
+  DECISION_TEMPERATURE: 0.1
 
 # Controls how much past exchanges affect recipient selection.
 MEMORY:
@@ -106,3 +118,6 @@ MEMORY:
   SIZE: 10
   # Memory preference [0, 1]; 0 ignores memory and 1 relies on it.
   PREFERENCE_FRACTION: 0.5
+  # When explicit reciprocity is enabled, memory would reward the same gift a
+  # second time. Keep this false unless you deliberately want both channels.
+  USE_WITH_RECIPROCITY: false

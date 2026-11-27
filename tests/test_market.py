@@ -242,6 +242,22 @@ class TestMarketCycle:
         assert metrics["goods_traded"] == 0.0
         assert metrics["unmet_demand"] == 1.0
 
+    def test_sellers_hold_goods_below_their_reservation_price(self):
+        config = market_config()
+        config["MARKET"]["PRICE"] = 1.0
+        config["MARKET"]["SELLER_RESERVATION_PRICE"] = 2.0
+        simulation = ResourceSimulation(config)
+        simulation.initialize_agents()
+        buyer, seller = simulation.agents
+        buyer.consumption_need = 1.0
+        seller.production_rate = 5.0
+
+        simulation.run_iteration()
+
+        metrics = simulation.metrics_history[-1]
+        assert metrics["goods_traded"] == 0.0
+        assert metrics["unmet_demand"] == 1.0
+
     def test_price_rises_when_demand_exceeds_supply(self):
         config = market_config(agents=2)
         config["MARKET"]["CONSUMPTION_RANGE"] = (1.0, 1.0)
