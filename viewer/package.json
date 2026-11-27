@@ -1,0 +1,13 @@
+{
+  "name": "commons-replay-viewer",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Standalone viewer and Playwright capture script for exchange-dynamics replay logs",
+  "scripts": {
+    "capture": "node capture.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.65.1"
+  }
+}

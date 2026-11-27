@@ -96,6 +96,9 @@ parameters.
 
 - [x] Emit a versioned, renderer-neutral replay log with typed events and
       explicit deaths (`replay.py`).
+- [x] Split the renderer into a standalone `viewer/` that loads replay logs
+      instead of importing the simulation.
+- [x] Add a Playwright capture script for deterministic frame/video export.
 - [x] Keep the README model/limitations sections in sync with each change.
 - [x] Extend `visualize.py` to chart new metrics (demand, reputation, shocks).
 - [x] Add invariant/property tests for resource and goods conservation.

@@ -5,7 +5,6 @@ from main import CONFIG, ResourceSimulation
 from visualize import (
     build_figure,
     build_world_html,
-    build_world_payload,
     create_visualization,
 )
 
@@ -126,80 +125,15 @@ def test_create_visualization(tmp_path):
     assert "window.commonsReplay" in html
 
 
-def test_world_payload_has_frames_and_agent_metadata():
+def test_world_html_embeds_a_versioned_replay():
     sim = ResourceSimulation(gift_config())
-    sim.run(iterations=6)
+    sim.run(iterations=4)
 
-    payload = build_world_payload(sim)
+    html = build_world_html(sim)
 
-    assert payload["meta"]["iterations"] == 6
-    assert len(payload["meta"]["agents"]) == 3
-    assert len(payload["series"]["resources"]) == 7
-    assert len(payload["series"]["resources"][0]) == 3
-    assert all("color" in agent for agent in payload["meta"]["agents"])
-
-
-def test_world_payload_records_gift_events():
-    sim = ResourceSimulation(gift_config())
-    sim.run(iterations=5)
-
-    payload = build_world_payload(sim)
-
-    assert sim.transfer_log
-    assert payload["events"]
-    assert len(payload["events"]) == len(sim.transfer_log)
-    iteration, event_type, giver, receiver, amount, _ = payload["events"][0]
-    assert 0 <= iteration <= 5
-    assert event_type == 0
-    assert giver != receiver
-    assert amount == 5.0
-
-
-def test_world_payload_records_market_trades():
-    config = deepcopy(CONFIG)
-    config["SIMULATION"].update(
-        {
-            "AGENTS": 2,
-            "INITIAL_RESOURCES": 50.0,
-            "RESOURCE_FLOOR": 0.0,
-            "RANDOM_SEED": 3,
-        }
-    )
-    config["AGENTS"].update(
-        {
-            "GENEROSITY": (0.0, 0.0),
-            "ACCEPTANCE": (0.0, 0.0),
-            "LIVING_COST": 0.0,
-        }
-    )
-    config["MARKET"].update(
-        {
-            "ENABLED": True,
-            "PRICE": 2.0,
-            "PRODUCTION_RANGE": (0.0, 0.0),
-            "CONSUMPTION_RANGE": (0.0, 0.0),
-        }
-    )
-    sim = ResourceSimulation(config)
-    sim.initialize_agents()
-    producer, consumer = sim.agents
-    producer.production_rate = 4.0
-    producer.consumption_need = 0.0
-    producer.goods = 4.0
-    consumer.production_rate = 0.0
-    consumer.consumption_need = 2.0
-    consumer.goods = 0.0
-
-    sim.run_iteration()
-    payload = build_world_payload(sim)
-
-    assert sim.trade_log
-    trade = next(event for event in payload["events"] if event[1] == 2)
-    assert trade[0] == 1
-    assert trade[2] == 1  # consumer buys
-    assert trade[3] == 0  # producer sells
-    assert trade[4] == 4.0
-    assert trade[5] == 2.0
+    assert "window.__REPLAY__" in html
+    assert '"schema_version":1' in html
+    assert "build_world_payload" not in html
 
 
 def test_world_html_is_self_contained_and_embeds_data():

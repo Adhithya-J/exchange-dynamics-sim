@@ -213,5 +213,9 @@ sim-env
 /replay.json
 /replay.json.gz
 
-# Generated charts are ignored, but the world renderer template is source.
-!templates/world.html
+# Viewer dependencies and captured frames.
+viewer/node_modules/
+/capture/
+
+# The viewer shell is source even though generated charts are ignored.
+!viewer/index.html

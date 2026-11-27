@@ -23,204 +23,58 @@ from plotly.colors import qualitative
 from plotly.subplots import make_subplots
 
 from main import CONFIG, MetricsCalculator, ResourceSimulation
-from replay import AGENT_COLORS
+from replay import build_replay
 from utils import load_config
 
-# Stable identity colors for the world view. The same color follows an agent
-# into every chart so selections stay legible across the animation.
-WORLD_AGENT_COLORS = AGENT_COLORS
-
-GIFT_EVENT = 0
-REPAYMENT_EVENT = 1
-TRADE_EVENT = 2
+VIEWER_DIR = Path(__file__).resolve().parent / "viewer"
 
 
-def build_world_payload(simulation: ResourceSimulation) -> dict[str, object]:
-    """Build the compact JSON payload used by the animated world view."""
+def _viewer_asset(name: str) -> str:
+    return (VIEWER_DIR / name).read_text(encoding="utf-8")
 
-    agent_history = simulation.agent_history_frame()
-    if agent_history.empty:
-        raise ValueError("The simulation must be initialized or run before plotting")
 
-    agent_ids = list(agent_history["id"].drop_duplicates())
-    agent_index = {agent_id: index for index, agent_id in enumerate(agent_ids)}
-    last_iteration = int(agent_history["iteration"].max())
-    iterations = list(range(last_iteration + 1))
-    metrics_by_iteration = {
-        int(metrics["iteration"]): metrics
-        for metrics in simulation.metrics_history
-    }
+def build_world_html(
+    simulation: ResourceSimulation,
+    *,
+    title: str = "Exchange Dynamics - The Commons",
+) -> str:
+    """Render a self-contained world view from a replay of ``simulation``."""
 
-    resources = [[0.0 for _ in agent_ids] for _ in iterations]
-    goods = [[0.0 for _ in agent_ids] for _ in iterations]
-    risk = [[0.0 for _ in agent_ids] for _ in iterations]
-    reputation = [[None for _ in agent_ids] for _ in iterations]
-    for row in simulation.agent_history:
-        iteration = int(row["iteration"])
-        if iteration < 0 or iteration > last_iteration:
-            continue
-        index = agent_index[row["id"]]
-        resources[iteration][index] = round(float(row["resources"]), 2)
-        goods[iteration][index] = round(float(row.get("goods", 0.0)), 2)
-        risk[iteration][index] = round(float(row.get("risk_tolerance", 0.5)), 3)
-        value = row.get("reputation")
-        reputation[iteration][index] = (
-            round(float(value), 3) if value is not None else None
-        )
+    return build_viewer_html(build_replay(simulation), title=title)
 
-    def metric_series(key: str, initial: float = 0.0) -> list[float]:
-        values = [float(initial)]
-        for iteration in iterations[1:]:
-            metrics = metrics_by_iteration.get(iteration, {})
-            values.append(round(float(metrics.get(key, initial)), 4))
-        return values
 
-    initial_summary = _summary_for_iteration(
-        simulation, agent_history, iterations[0]
+def build_viewer_html(
+    replay: dict[str, object],
+    *,
+    title: str = "Exchange Dynamics - The Commons",
+) -> str:
+    """Inline the viewer assets and a replay into one standalone HTML file."""
+
+    payload = json.dumps(
+        replay, separators=(",", ":"), allow_nan=False
+    ).replace("</", "<\\/")
+    shell = _viewer_asset("index.html")
+    html = shell.replace(
+        "<title>The Commons - Exchange Dynamics</title>",
+        f"<title>{title}</title>",
     )
-    gini = metric_series("gini")
-    gini[0] = round(float(initial_summary["gini"]), 4)
-    alive = [int(value) for value in metric_series("alive", len(agent_ids))]
-    alive[0] = len(agent_ids)
-    total = metric_series("total")
-    total[0] = round(float(initial_summary["total"]), 2)
-
-    events: list[list[float | int]] = []
-    for entry in getattr(simulation, "transfer_log", []):
-        if entry["giver"] not in agent_index or entry["receiver"] not in agent_index:
-            continue
-        event_type = (
-            GIFT_EVENT if entry.get("type", "gift") == "gift" else REPAYMENT_EVENT
-        )
-        events.append(
-            [
-                int(entry["iteration"]),
-                event_type,
-                agent_index[entry["giver"]],
-                agent_index[entry["receiver"]],
-                round(float(entry["amount"]), 2),
-                0.0,
-            ]
-        )
-    for entry in getattr(simulation, "trade_log", []):
-        if entry["buyer"] not in agent_index or entry["seller"] not in agent_index:
-            continue
-        events.append(
-            [
-                int(entry["iteration"]),
-                TRADE_EVENT,
-                agent_index[entry["buyer"]],
-                agent_index[entry["seller"]],
-                round(float(entry["amount"]), 2),
-                round(float(entry["quantity"]), 2),
-            ]
-        )
-    events.sort(key=lambda event: (event[0], event[1]))
-
-    market = simulation.config.get("MARKET", {})
-    trust = simulation.config.get("TRUST", {})
-    shocks = simulation.config.get("SHOCKS", {})
-    social = simulation.config.get("SOCIAL", {})
-    market_enabled = bool(market.get("ENABLED", False))
-    trust_enabled = bool(trust.get("ENABLED", False))
-    shocks_enabled = bool(shocks.get("ENABLED", False))
-    reciprocity_enabled = bool(social.get("RECIPROCITY_ENABLED", False))
-
-    extinction_iteration = None
-    for iteration in iterations:
-        if alive[iteration] == 0 and iteration > 0:
-            extinction_iteration = iteration
-            break
-    last_alive_iteration = max(
-        (iteration for iteration in iterations if alive[iteration] > 0),
-        default=0,
+    html = html.replace(
+        '<link rel="stylesheet" href="theme.css">',
+        "<style>\n" + _viewer_asset("theme.css") + "\n</style>",
     )
-
-    agents = []
-    for agent in simulation.agents:
-        if agent.id not in agent_index:
-            continue
-        metadata = agent_history[agent_history["id"] == agent.id].iloc[0]
-        agents.append(
-            {
-                "id": agent.id,
-                "label": agent.id.replace("agent-", "A"),
-                "color": WORLD_AGENT_COLORS[
-                    agent_index[agent.id] % len(WORLD_AGENT_COLORS)
-                ],
-                "generosity": round(float(metadata["generosity_score"]), 3),
-                "acceptance": round(float(metadata["acceptance_score"]), 3),
-                "risk": round(float(metadata["risk_tolerance"]), 3),
-                "production": round(float(agent.production_rate), 3),
-                "consumption": round(float(agent.consumption_need), 3),
-            }
-        )
-
-    settings = simulation.config["SIMULATION"]
-    agent_settings = simulation.config["AGENTS"]
-    transfer_range = settings.get(
-        "TRANSFER_AMOUNT_RANGE",
-        [settings.get("TRANSFER_AMOUNT", 0.0)] * 2,
+    html = html.replace(
+        '<script src="replay-loader.js"></script>',
+        "<script>\n" + _viewer_asset("replay-loader.js") + "\n</script>",
     )
-    return {
-        "meta": {
-            "iterations": last_iteration,
-            "seed": int(settings["RANDOM_SEED"]),
-            "agents": agents,
-            "initial_resources": round(
-                float(settings["INITIAL_RESOURCES"]), 2
-            ),
-            "resource_floor": round(float(settings["RESOURCE_FLOOR"]), 2),
-            "living_cost": round(float(agent_settings["LIVING_COST"]), 2),
-            "transfer_range": [
-                round(float(transfer_range[0]), 2),
-                round(float(transfer_range[1]), 2),
-            ],
-            "market_enabled": market_enabled,
-            "market_price": round(float(market.get("PRICE", 1.0)), 2),
-            "trust_enabled": trust_enabled,
-            "shocks_enabled": shocks_enabled,
-            "reciprocity_enabled": reciprocity_enabled,
-            "extinction_iteration": extinction_iteration,
-            "last_alive_iteration": last_alive_iteration,
-        },
-        "series": {
-            "resources": resources,
-            "goods": goods if market_enabled else [],
-            "risk": risk if (trust_enabled or shocks_enabled) else [],
-            "reputation": reputation if trust_enabled else [],
-            "gini": gini,
-            "alive": alive,
-            "total": total,
-        },
-        "events": events,
-        "shocks": [
-            {
-                "iteration": int(entry["iteration"]),
-                "duration": int(entry["duration"]),
-                "type": str(entry["type"]),
-                "magnitude": round(float(entry["magnitude"]), 3),
-            }
-            for entry in simulation.shock_log
-        ],
-    }
-
-
-def build_world_html(simulation: ResourceSimulation) -> str:
-    """Render a self-contained animated world view as HTML."""
-
-    template_path = (
-        Path(__file__).resolve().parent / "templates" / "world.html"
+    html = html.replace(
+        '<script src="viewer.js"></script>',
+        "<script>\n" + _viewer_asset("viewer.js") + "\n</script>",
     )
-    template = template_path.read_text(encoding="utf-8")
-    payload = build_world_payload(simulation)
-    data = json.dumps(payload, separators=(",", ":"), allow_nan=False)
-    data = data.replace("</", "<\\/")
-    title = "Exchange Dynamics - The Commons"
-    return (
-        template.replace("__PAGE_TITLE__", title)
-        .replace("__WORLD_PAYLOAD__", data)
+    html = html.replace(
+        "/*__INLINE_REPLAY__*/",
+        "window.__REPLAY__ = " + payload + ";",
     )
+    return html
 
 
 def _summary_for_iteration(

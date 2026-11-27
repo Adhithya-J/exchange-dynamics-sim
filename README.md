@@ -149,6 +149,37 @@ or `living_cost`) instead of being inferred from a resource crossing. The
 `living_cost_paid` metric records the only money sink, so total resources can be
 reconciled from the replay alone.
 
+## Standalone viewer
+
+`viewer/` is a playback client over the replay log. It contains no simulation
+code and does not import the model. Serve the repository root, then open the
+viewer with a replay path:
+
+```bash
+python -m http.server 8000
+# http://localhost:8000/viewer/?replay=/replay.json.gz
+```
+
+The **Open** button also loads a local `.json` or `.json.gz` replay directly, so
+the viewer works without a server. `visualize.py` still writes a single
+self-contained `simulation.html` by inlining the same viewer assets and replay.
+
+To capture reproducible frames, use the Playwright script in `viewer/`:
+
+```bash
+cd viewer
+npm install
+npx playwright install chromium
+node capture.mjs --replay ../replay.json.gz --out ../capture \
+  --fps 30 --seconds 20 --video ../capture/commons.mp4
+```
+
+The script serves the viewer and replay locally, pauses playback, steps the
+timeline at a fixed rate, and writes `frame-00000.png` onwards. Passing
+`--video` invokes FFmpeg (which must be on your `PATH`) to turn the frames into
+an MP4; frames are kept either way. Use `--canvas-only` to capture just the
+canvas.
+
 ## Quick start
 
 ```bash
@@ -197,8 +228,9 @@ inspect `metrics_history` or the returned DataFrame.
 - `utils/` - shared helpers, including YAML configuration loading.
 - `tests/` - unit and behavior tests for the model.
 - `visualize.py` - animated world view plus the legacy Plotly chart.
+- `viewer/` - standalone HTML/CSS/Canvas replay client and Playwright capture
+  script; it reads the versioned replay, not the simulation.
 - `replay.py` - versioned JSON replay export and validation.
-- `templates/world.html` - self-contained HTML/CSS/Canvas replay renderer.
 - `experiments.py` - seed and parameter sweep runner with confidence intervals.
 - `TRUST_SOCIETY_SCOPE.md` - research scope and roadmap.
 - `TODO.md` - implementation tasks derived from the roadmap.
