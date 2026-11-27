@@ -24,22 +24,31 @@ function startViewer(DATA) {
     ink: "#1c1b18",
     paper: "#f4efe6",
     paperDeep: "#efe8da",
-    ground: "#efe8da",
-    groundPatch: "#e7ddca",
-    groundPatchDeep: "#e2d7c2",
-    path: "#ddd3c0",
+    meadow: "#dce3ce",
+    meadowPatch: "#cfd8be",
+    meadowDeep: "#c3cfb2",
+    town: "#f2e2ce",
+    townEdge: "#ecd8bd",
+    plaza: "#e9d8bc",
+    plazaLine: "#d7c1a0",
     gold: "#c88a1e",
+    coin: "#d99b26",
     water: "#2f6f73",
     sage: "#4e6b50",
+    sageLight: "#6b8260",
+    sageDeep: "#456046",
     sageDry: "#8a8a66",
     alert: "#b84a39",
     stone: "#8c857b",
-    sack: "#c79a62",
+    coffer: "#c79a62",
+    cofferLid: "#d9b585",
+    cofferInner: "#f7f2e7",
     hutWall: "#ede3d0",
     door: "#6b4b2f",
     skin: "#e6bd94",
     shadow: "#d8cebc",
     rule: "#d8d0c0",
+    muted: "#666055",
     white: "#fbf7ef"
   };
 
@@ -136,40 +145,89 @@ function startViewer(DATA) {
     for (let t = start; t <= stop; t += 1) shocksByTick[t].push(shock);
   }
 
-  // Spatial layout. Huts sit on a ring with a gap on the east side, leaving a
-  // separate market square. The commons is the shared pond in the middle.
-  const CENTER = { x: 0.43, y: 0.52 };
-  const RING = { rx: 0.33, ry: 0.31 };
-  const COMMONS = { x: 0.43, y: 0.52 };
-  const MARKET = { x: 0.82, y: 0.52 };
-  const RING_START = Math.PI * 0.20;
-  const RING_SPAN = Math.PI * 1.60;
+  // Concentric layout: the market square sits at the centre of an organic
+  // town clearing, huts ring the square, and the commons meadow wraps the
+  // outside. There are no fixed pathways; villagers walk directly.
+  const CENTER = { x: 0.5, y: 0.5 };
+  const TOWN = { rx: 0.425, ry: 0.405 };
+  const HUT_RING = { rx: 0.305, ry: 0.278 };
+  const MARKET = { x: 0.5, y: 0.5 };
 
   const homes = agents.map(function (_, index) {
-    const angle = RING_START + ((index + 0.5) / A) * RING_SPAN;
-    const x = CENTER.x + Math.cos(angle) * RING.rx;
-    const y = CENTER.y + Math.sin(angle) * RING.ry;
+    const spread = A === 1 ? 0 : (index / A) * TWO_PI;
+    const angle = -Math.PI / 2 + spread + Math.sin(index * 2.399963 + 0.7) * 0.055;
+    const radiusJitter = 1 + Math.sin(index * 1.618034 + 1.3) * 0.045;
+    const x = CENTER.x + Math.cos(angle) * HUT_RING.rx * radiusJitter;
+    const y = CENTER.y + Math.sin(angle) * HUT_RING.ry * radiusJitter;
+    const inset = 0.10 + (index % 3) * 0.012;
     return {
       angle: angle,
       x: x,
       y: y,
-      homeX: x + (CENTER.x - x) * 0.12,
-      homeY: y + (CENTER.y - y) * 0.12
+      homeX: x + (CENTER.x - x) * inset,
+      homeY: y + (CENTER.y - y) * inset
     };
   });
 
-  // Fixed bush positions around the commons. Berries are revealed by the
-  // current stock ratio, so the patch thins out as resources are consumed.
-  const bushes = Array.from({ length: 7 }, function (_, index) {
-    const angle = -Math.PI / 2 + index * (TWO_PI / 7) + 0.18;
-    return {
-      ox: Math.cos(angle) * 1.03,
-      oy: Math.sin(angle) * 0.82,
-      size: 0.16 + (index % 3) * 0.025,
-      berries: 3 + (index % 3) * 2,
-      threshold: 0.04 + index * 0.035
-    };
-  });
+  // Berry bushes and ponds sit in the meadow around the outside of the town
+  // clearing. Their ripeness and water level follow the recorded commons
+  // percentage, so the outer ring thins out as the stock is spent.
+  const commonsSites = (function buildCommonsSites() {
+    const sites = [];
+
+    // Main bushes with varied sizes and slightly uneven spacing.
+    const bushCount = 11;
+    for (let i = 0; i < bushCount; i += 1) {
+      const angle = -Math.PI / 2 + (i / bushCount) * TWO_PI + (i % 3 - 1) * 0.085;
+      const rx = 0.428 + ((i * 3) % 5) * 0.011;
+      const ry = 0.408 + ((i * 5) % 4) * 0.010;
+      sites.push({
+        kind: "bush",
+        x: CENTER.x + Math.cos(angle) * rx,
+        y: CENTER.y + Math.sin(angle) * ry,
+        size: 0.026 + ((i * 7) % 5) * 0.005,
+        berries: 4 + (i % 4) * 2,
+        threshold: 0.06 + (i % 6) * 0.055,
+        tone: i % 3,
+        seed: i * 1.37
+      });
+    }
+
+    // A second scatter of smaller berry clusters between the main bushes.
+    const clusterCount = 7;
+    for (let i = 0; i < clusterCount; i += 1) {
+      const angle = -Math.PI / 2 + ((i + 0.5) / clusterCount) * TWO_PI + 0.22;
+      const rx = 0.442 + ((i * 2) % 4) * 0.010;
+      const ry = 0.420 + ((i * 3) % 3) * 0.011;
+      sites.push({
+        kind: "bush",
+        x: CENTER.x + Math.cos(angle) * rx,
+        y: CENTER.y + Math.sin(angle) * ry,
+        size: 0.013 + (i % 3) * 0.003,
+        berries: 2 + (i % 3),
+        threshold: 0.04 + (i % 5) * 0.05,
+        tone: (i + 1) % 3,
+        seed: 50 + i * 1.91
+      });
+    }
+
+    const pondCount = 5;
+    for (let i = 0; i < pondCount; i += 1) {
+      const angle = -Math.PI / 2 + Math.PI * 0.27 +
+        (i / pondCount) * TWO_PI + (i % 2 ? 0.055 : -0.04);
+      const rx = 0.436 + ((i * 3) % 4) * 0.011;
+      const ry = 0.416 + ((i * 2) % 3) * 0.011;
+      sites.push({
+        kind: "pond",
+        x: CENTER.x + Math.cos(angle) * rx,
+        y: CENTER.y + Math.sin(angle) * ry,
+        size: 0.013 + ((i * 5) % 4) * 0.0035,
+        threshold: 0.04 + (i % 4) * 0.05,
+        seed: 30 + i * 2.11
+      });
+    }
+    return sites;
+  })();
 
   // A single pre-rendered coin sprite keeps the per-frame draw cheap.
   const coinSprite = document.createElement("canvas");
@@ -188,6 +246,27 @@ function startViewer(DATA) {
     c.lineWidth = 1.2;
     c.beginPath();
     c.arc(16, 16, 8, 0, TWO_PI);
+    c.stroke();
+  })();
+
+  // A brighter coin for the static box stacks. The moving coins keep the
+  // slightly deeper ochre so the animation reads as motion, not decoration.
+  const cofferCoinSprite = document.createElement("canvas");
+  cofferCoinSprite.width = 32;
+  cofferCoinSprite.height = 32;
+  (function buildCofferCoinSprite() {
+    const c = cofferCoinSprite.getContext("2d");
+    c.fillStyle = PALETTE.coin;
+    c.strokeStyle = PALETTE.ink;
+    c.lineWidth = 1.6;
+    c.beginPath();
+    c.arc(16, 16, 13, 0, TWO_PI);
+    c.fill();
+    c.stroke();
+    c.strokeStyle = "rgba(28, 27, 24, 0.35)";
+    c.lineWidth = 1;
+    c.beginPath();
+    c.arc(16, 16, 8.5, 0, TWO_PI);
     c.stroke();
   })();
 
@@ -264,8 +343,38 @@ function startViewer(DATA) {
     return clamp(unit() * 0.025, 9, 19);
   }
 
-  function commonsRadius() {
-    return clamp(unit() * 0.105, 34, 88);
+  function hutSize() {
+    return clamp(unit() * 0.044, 18, 33);
+  }
+
+  function marketScale() {
+    return clamp(unit() * 0.040, 16, 32);
+  }
+
+  function blobPath(context, cx, cy, rx, ry, seed, wobble) {
+    const points = 12;
+    const xs = [];
+    const ys = [];
+    for (let i = 0; i < points; i += 1) {
+      const angle = (i / points) * TWO_PI;
+      const radius = 1 +
+        Math.sin(angle * 3 + seed) * wobble +
+        Math.cos(angle * 5 + seed * 1.7) * wobble * 0.6;
+      xs.push(cx + Math.cos(angle) * rx * radius);
+      ys.push(cy + Math.sin(angle) * ry * radius);
+    }
+    context.beginPath();
+    context.moveTo((xs[points - 1] + xs[0]) / 2, (ys[points - 1] + ys[0]) / 2);
+    for (let i = 0; i < points; i += 1) {
+      const next = (i + 1) % points;
+      context.quadraticCurveTo(
+        xs[i],
+        ys[i],
+        (xs[i] + xs[next]) / 2,
+        (ys[i] + ys[next]) / 2
+      );
+    }
+    context.closePath();
   }
 
   function visitorSpot(receiver, giver) {
@@ -298,8 +407,8 @@ function startViewer(DATA) {
     for (let i = 0; i < A; i += 1) {
       const home = homes[i];
       if (!aliveAt(i, tick)) {
-        x[i] = home.homeX;
-        y[i] = home.homeY;
+        x[i] = home.x;
+        y[i] = home.y;
       } else {
         x[i] = home.homeX + Math.sin(tick * 0.57 + i * 1.7) * 0.008;
         y[i] = home.homeY + Math.cos(tick * 0.43 + i * 1.3) * 0.006;
@@ -354,24 +463,10 @@ function startViewer(DATA) {
     const fraction = smoothStep(clamp(time, 0, N - 1) - low);
     const a = targetsFor(low);
     const b = targetsFor(high);
-    const point = screenPoint({
+    return screenPoint({
       x: a.x[index] + (b.x[index] - a.x[index]) * fraction,
       y: a.y[index] + (b.y[index] - a.y[index]) * fraction
     });
-
-    // Keep walkers on the bank instead of letting them cross the water.
-    const center = screenPoint(COMMONS);
-    const waterRadius = commonsRadius() * stockRatio(time);
-    const bank = waterRadius * 1.18;
-    const dx = point.x - center.x;
-    const dy = point.y - center.y;
-    const distance = Math.hypot(dx, dy);
-    if (distance < bank) {
-      const angle = distance > 0.001 ? Math.atan2(dy, dx) : index * 2.399963;
-      point.x = center.x + Math.cos(angle) * bank;
-      point.y = center.y + Math.sin(angle) * bank;
-    }
-    return point;
   }
 
   function eventTypeName(type) {
@@ -457,19 +552,8 @@ function startViewer(DATA) {
     context.restore();
   }
 
-  function drawPath(context, from, to, bend) {
-    const mid = {
-      x: (from.x + to.x) / 2 + bend,
-      y: (from.y + to.y) / 2 - bend * 0.35
-    };
-    context.beginPath();
-    context.moveTo(from.x, from.y);
-    context.quadraticCurveTo(mid.x, mid.y, to.x, to.y);
-    context.stroke();
-  }
-
   function drawHut(context, index, point) {
-    const s = clamp(unit() * 0.044, 18, 33);
+    const s = hutSize();
     const color = agents[index].color;
     context.save();
     context.translate(point.x, point.y);
@@ -526,7 +610,7 @@ function startViewer(DATA) {
   }
 
   function drawHutLabels(context, tick) {
-    const s = clamp(unit() * 0.044, 18, 33);
+    const s = hutSize();
     for (let index = 0; index < A; index += 1) {
       const point = screenPoint(homes[index]);
       const angle = homes[index].angle;
@@ -546,37 +630,74 @@ function startViewer(DATA) {
 
   function drawMarket(context) {
     const p = screenPoint(MARKET);
-    const s = clamp(unit() * 0.034, 14, 26);
+    const s = marketScale();
     const open = meta.market_enabled;
+    const width = s * 8.8;
+    const height = s * 5.2;
+    const left = p.x - width / 2;
+    const top = p.y - height / 2;
+
     context.save();
 
+    // A crisp stone square in the middle of the clearing.
     context.fillStyle = PALETTE.shadow;
-    context.fillRect(p.x - s * 4.0 + 2, p.y - s * 2.45 + 2, s * 8.0, s * 4.9);
-    context.fillStyle = PALETTE.paperDeep;
+    context.fillRect(left + 3, top + 3, width, height);
+    context.fillStyle = PALETTE.plaza;
     context.strokeStyle = PALETTE.ink;
     context.lineWidth = 1.5;
-    context.fillRect(p.x - s * 4.0, p.y - s * 2.45, s * 8.0, s * 4.9);
-    context.strokeRect(p.x - s * 4.0, p.y - s * 2.45, s * 8.0, s * 4.9);
+    context.fillRect(left, top, width, height);
+    context.strokeRect(left, top, width, height);
+
+    context.strokeStyle = PALETTE.plazaLine;
+    context.lineWidth = 1;
+    context.strokeRect(left + 7, top + 7, width - 14, height - 14);
+
+    // Sparse cobble marks, kept flat and quiet.
+    context.strokeStyle = "rgba(28, 27, 24, 0.18)";
+    for (let i = 1; i < 5; i += 1) {
+      const y = top + (height / 5) * i;
+      context.beginPath();
+      context.moveTo(left + 12, y);
+      context.lineTo(left + width - 12, y);
+      context.stroke();
+    }
+    for (let i = 1; i < 4; i += 1) {
+      const x = left + (width / 4) * i;
+      context.beginPath();
+      context.moveTo(x, top + 10);
+      context.lineTo(x, top + height - 10);
+      context.stroke();
+    }
 
     const awning = open
       ? [PALETTE.gold, PALETTE.water, PALETTE.alert]
       : [PALETTE.stone, "#9b9488", "#a39c90"];
     for (let k = -1; k <= 1; k += 1) {
-      const x = p.x + k * s * 2.35;
-      const y = p.y + Math.abs(k) * s * 0.22;
+      const x = p.x + k * s * 2.45;
+      const y = p.y + Math.abs(k) * s * 0.16;
 
-      context.fillStyle = PALETTE.paper;
+      // Stall table.
+      context.fillStyle = PALETTE.coffer;
       context.strokeStyle = PALETTE.ink;
-      context.lineWidth = 1;
-      context.fillRect(x - s * 0.55, y - s * 0.12, s * 1.1, s * 0.62);
-      context.strokeRect(x - s * 0.55, y - s * 0.12, s * 1.1, s * 0.62);
+      context.lineWidth = 1.2;
+      context.fillRect(x - s * 0.58, y - s * 0.06, s * 1.16, s * 0.58);
+      context.strokeRect(x - s * 0.58, y - s * 0.06, s * 1.16, s * 0.58);
 
+      // A little produce on the table.
+      context.fillStyle = open ? PALETTE.sage : PALETTE.sageDry;
+      for (let i = -1; i <= 1; i += 1) {
+        context.beginPath();
+        context.arc(x + i * s * 0.25, y + s * 0.18, s * 0.09, 0, TWO_PI);
+        context.fill();
+      }
+
+      // Awning and posts.
       context.fillStyle = awning[k + 1];
       context.beginPath();
-      context.moveTo(x - s * 0.72, y - s * 0.12);
-      context.lineTo(x + s * 0.72, y - s * 0.12);
-      context.lineTo(x + s * 0.52, y - s * 0.62);
-      context.lineTo(x - s * 0.52, y - s * 0.62);
+      context.moveTo(x - s * 0.74, y - s * 0.06);
+      context.lineTo(x + s * 0.74, y - s * 0.06);
+      context.lineTo(x + s * 0.54, y - s * 0.60);
+      context.lineTo(x - s * 0.54, y - s * 0.60);
       context.closePath();
       context.fill();
       context.strokeStyle = PALETTE.ink;
@@ -584,17 +705,44 @@ function startViewer(DATA) {
       context.stroke();
 
       context.fillStyle = PALETTE.ink;
-      context.fillRect(x - s * 0.04, y + s * 0.12, s * 0.08, s * 0.38);
+      context.fillRect(x - s * 0.70, y - s * 0.06, s * 0.07, s * 0.42);
+      context.fillRect(x + s * 0.63, y - s * 0.06, s * 0.07, s * 0.42);
     }
 
     if (!open) {
-      context.fillStyle = "rgba(244, 239, 230, 0.58)";
-      context.fillRect(p.x - s * 4.0, p.y - s * 2.45, s * 8.0, s * 4.9);
+      // A muted wash and a small ledger stamp read as closed without the
+      // harsh diagonal alert line.
+      context.fillStyle = "rgba(244, 239, 230, 0.38)";
+      context.fillRect(left, top, width, height);
+
+      context.save();
+      context.translate(left + width * 0.78, top + height * 0.82);
+      context.rotate(-0.035);
+      const stampWidth = s * 2.1;
+      const stampHeight = s * 0.78;
+      context.strokeStyle = "rgba(102, 96, 85, 0.45)";
+      context.lineWidth = 1;
+      context.strokeRect(
+        -stampWidth / 2,
+        -stampHeight / 2,
+        stampWidth,
+        stampHeight
+      );
+      context.fillStyle = "rgba(102, 96, 85, 0.72)";
+      context.font = "500 " + Math.max(9, Math.round(s * 0.33)) + "px " + SANS;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText("Closed", 0, 0.5);
+      context.restore();
     }
 
     context.restore();
-    drawTag(context, open ? "Market" : "Market - closed", p.x, p.y - s * 2.7,
-      PALETTE.paper, open ? PALETTE.ink : PALETTE.muted, PALETTE.ink, false);
+    drawTag(context, open ? "Market" : "Market - closed",
+      p.x, top - s * 0.34,
+      PALETTE.paper,
+      open ? PALETTE.ink : PALETTE.muted,
+      open ? PALETTE.ink : PALETTE.stone,
+      false);
   }
 
   function buildBackground() {
@@ -605,26 +753,32 @@ function startViewer(DATA) {
     bg.setTransform(DPR, 0, 0, DPR, 0, 0);
     bg.clearRect(0, 0, W, H);
 
-    // Flat parchment. The patches are deliberately large and low-contrast so
-    // the ground feels placed rather than mechanically tiled.
-    bg.fillStyle = PALETTE.ground;
+    const padX = Math.min(56, W * 0.06);
+    const padY = Math.min(48, H * 0.07);
+    const usableW = Math.max(1, W - padX * 2);
+    const usableH = Math.max(1, H - padY * 2);
+    const townCenter = screenPoint(CENTER);
+    const townRx = TOWN.rx * usableW;
+    const townRy = TOWN.ry * usableH;
+
+    // The outer terrain is a muted meadow, not a paper panel.
+    bg.fillStyle = PALETTE.meadow;
     bg.fillRect(0, 0, W, H);
 
     const patches = [
-      [0.17, 0.24, 0.21, 0.13],
-      [0.75, 0.20, 0.16, 0.10],
-      [0.27, 0.79, 0.24, 0.14],
-      [0.81, 0.73, 0.15, 0.11],
-      [0.52, 0.09, 0.13, 0.06]
+      [0.10, 0.16, 0.16, 0.10, 1.3],
+      [0.86, 0.14, 0.13, 0.09, 2.7],
+      [0.15, 0.84, 0.18, 0.11, 4.1],
+      [0.91, 0.78, 0.12, 0.09, 5.6],
+      [0.50, 0.06, 0.14, 0.055, 7.2],
+      [0.48, 0.94, 0.17, 0.06, 8.9]
     ];
     for (let i = 0; i < patches.length; i += 1) {
       const patch = patches[i];
-      bg.fillStyle = i % 2 ? PALETTE.groundPatch : PALETTE.groundPatchDeep;
-      bg.globalAlpha = 0.32;
-      bg.beginPath();
-      bg.ellipse(
-        patch[0] * W, patch[1] * H, patch[2] * W, patch[3] * H, 0, 0, TWO_PI
-      );
+      const point = screenPoint({ x: patch[0], y: patch[1] });
+      bg.fillStyle = i % 2 ? PALETTE.meadowPatch : PALETTE.meadowDeep;
+      bg.globalAlpha = 0.48;
+      blobPath(bg, point.x, point.y, patch[2] * W, patch[3] * H, patch[4], 0.15);
       bg.fill();
     }
     bg.globalAlpha = 1;
@@ -635,14 +789,14 @@ function startViewer(DATA) {
       return seed / 4294967296;
     }
 
-    // Sparse ink-and-sage marks for texture, never a glow or gradient.
+    // Sparse grass and flower marks, always as flat ink or pigment.
     bg.save();
-    for (let i = 0; i < 90; i += 1) {
+    for (let i = 0; i < 150; i += 1) {
       const x = random() * W;
       const y = random() * H;
-      bg.globalAlpha = 0.10 + random() * 0.10;
-      bg.fillStyle = i % 3 === 0 ? PALETTE.gold : PALETTE.sage;
-      if (random() > 0.78) {
+      bg.globalAlpha = 0.10 + random() * 0.12;
+      bg.fillStyle = i % 5 === 0 ? PALETTE.gold : PALETTE.sage;
+      if (random() > 0.66) {
         bg.strokeStyle = PALETTE.sage;
         bg.lineWidth = 1;
         bg.beginPath();
@@ -653,65 +807,52 @@ function startViewer(DATA) {
         bg.stroke();
       } else {
         bg.beginPath();
-        bg.arc(x, y, 0.6 + random() * 1.1, 0, TWO_PI);
+        bg.arc(x, y, 0.5 + random() * 1.2, 0, TWO_PI);
         bg.fill();
       }
     }
     bg.restore();
 
-    // Curved paths run from each hut to the near bank of the commons, then
-    // from the far bank to the market. No path crosses the water.
-    const commonsPoint = screenPoint(COMMONS);
-    const bankRadius = commonsRadius() * 1.16;
+    // The town clearing is an organic warm-parchment patch inside the meadow.
+    // Stacked translucent blobs soften its edge without a dashboard gradient.
     bg.save();
-    bg.strokeStyle = PALETTE.path;
-    bg.lineWidth = clamp(unit() * 0.011, 3.5, 8);
-    bg.lineCap = "round";
-    for (let i = 0; i < A; i += 1) {
-      const home = screenPoint(homes[i]);
-      const dx = home.x - commonsPoint.x;
-      const dy = home.y - commonsPoint.y;
-      const length = Math.hypot(dx, dy) || 1;
-      const bank = {
-        x: commonsPoint.x + (dx / length) * bankRadius,
-        y: commonsPoint.y + (dy / length) * bankRadius
-      };
-      const bend = (i % 2 === 0 ? 1 : -1) * unit() * 0.018;
-      drawPath(bg, home, bank, bend);
-    }
-    const marketPoint = screenPoint(MARKET);
-    const marketDx = marketPoint.x - commonsPoint.x;
-    const marketDy = marketPoint.y - commonsPoint.y;
-    const marketLength = Math.hypot(marketDx, marketDy) || 1;
-    drawPath(bg, {
-      x: commonsPoint.x + (marketDx / marketLength) * bankRadius,
-      y: commonsPoint.y + (marketDy / marketLength) * bankRadius
-    }, marketPoint, unit() * 0.012);
-    bg.restore();
-
-    // The dry basin and the full-pond guide ring stay put. The water itself is
-    // drawn each frame at the current stock level.
-    const c = screenPoint(COMMONS);
-    const radius = commonsRadius();
-    bg.save();
-    bg.fillStyle = PALETTE.groundPatchDeep;
-    bg.strokeStyle = PALETTE.rule;
-    bg.lineWidth = 1.5;
-    bg.beginPath();
-    bg.ellipse(c.x, c.y, radius * 1.18, radius * 0.98, 0, 0, TWO_PI);
+    bg.fillStyle = PALETTE.townEdge;
+    bg.globalAlpha = 0.24;
+    blobPath(bg, townCenter.x, townCenter.y, townRx * 1.10, townRy * 1.11, 12.4, 0.055);
     bg.fill();
-    bg.stroke();
-    bg.strokeStyle = "rgba(28, 27, 24, 0.28)";
-    bg.setLineDash([3, 6]);
-    bg.lineWidth = 1;
-    bg.beginPath();
-    bg.ellipse(c.x, c.y, radius * 0.95, radius * 0.78, 0, 0, TWO_PI);
-    bg.stroke();
+    bg.globalAlpha = 0.38;
+    blobPath(bg, townCenter.x, townCenter.y, townRx * 1.055, townRy * 1.06, 13.1, 0.05);
+    bg.fill();
+    bg.globalAlpha = 1;
+    bg.fillStyle = PALETTE.town;
+    blobPath(bg, townCenter.x, townCenter.y, townRx, townRy, 14.7, 0.045);
+    bg.fill();
+
+    // No hard outline: a loose band of grass tufts straddles the edge so the
+    // peach ground dissolves into the meadow.
+    for (let i = 0; i < 54; i += 1) {
+      const angle = (i / 54) * TWO_PI + 0.17;
+      const wobble = 1 +
+        Math.sin(angle * 3 + 14.7) * 0.045 +
+        Math.cos(angle * 5 + 21.4) * 0.03;
+      const scale = 0.992 + ((i * 7) % 5) * 0.007;
+      const x = townCenter.x + Math.cos(angle) * townRx * wobble * scale;
+      const y = townCenter.y + Math.sin(angle) * townRy * wobble * scale;
+      const tilt = ((i % 5) - 2) * 0.35;
+      bg.globalAlpha = 0.20 + ((i * 3) % 4) * 0.06;
+      bg.strokeStyle = i % 4 === 0 ? PALETTE.sageLight : PALETTE.sage;
+      bg.lineWidth = 1;
+      bg.beginPath();
+      bg.moveTo(x - 1.8, y + 1.6);
+      bg.quadraticCurveTo(x - 0.5, y - 1.5, x + 0.4, y - 4.2);
+      bg.moveTo(x + 0.4, y + 1.6);
+      bg.quadraticCurveTo(x + 1.4 + tilt, y - 1.2, x + 2.2 + tilt, y - 3.6);
+      bg.stroke();
+    }
     bg.restore();
 
-    for (let i = 0; i < A; i += 1) {
-      drawHut(bg, i, screenPoint(homes[i]));
-    }
+    // Central market square. It is drawn here because its open state does not
+    // change during a replay; the stalls and awnings sit over the plaza.
     drawMarket(bg);
 
     bg.save();
@@ -730,94 +871,141 @@ function startViewer(DATA) {
     bg.restore();
   }
 
-  function drawCommons(context, ratio) {
-    const c = screenPoint(COMMONS);
-    const radius = commonsRadius();
-    const water = radius * ratio;
+  function drawCommonsRing(context, ratio) {
+    for (const site of commonsSites) {
+      if (site.kind === "pond") {
+        drawCommonsPond(context, site, ratio);
+      } else {
+        drawCommonsBush(context, site, ratio);
+      }
+    }
 
-    if (water > 1) {
-      context.save();
+    const labelPoint = screenPoint({ x: 0.5, y: 0.055 });
+    drawTag(context, "Commons " + Math.round(ratio * 100) + "%",
+      labelPoint.x, labelPoint.y,
+      PALETTE.paper, PALETTE.ink, PALETTE.ink, false);
+  }
+
+  function drawCommonsBush(context, site, ratio) {
+    if (ratio <= site.threshold) return;
+
+    const point = screenPoint(site);
+    const lush = clamp(
+      (ratio - site.threshold) / Math.max(0.01, 0.88 - site.threshold),
+      0,
+      1
+    );
+    const radius = unit() * site.size * (0.58 + 0.42 * lush);
+    const livingColor = site.tone === 0
+      ? PALETTE.sageLight
+      : site.tone === 1
+        ? PALETTE.sage
+        : PALETTE.sageDeep;
+
+    context.save();
+    context.fillStyle = mixColor(PALETTE.sageDry, livingColor, lush);
+    context.strokeStyle = PALETTE.ink;
+    context.lineWidth = 1.2;
+    blobPath(context, point.x, point.y, radius, radius * 0.84, site.seed, 0.17);
+    context.fill();
+    context.stroke();
+
+    context.strokeStyle = "rgba(28, 27, 24, 0.30)";
+    context.lineWidth = 1;
+    for (let i = 0; i < 3; i += 1) {
+      const angle = site.seed + i * 2.1;
+      const distance = radius * 0.34;
+      context.beginPath();
+      context.moveTo(
+        point.x + Math.cos(angle) * distance,
+        point.y + Math.sin(angle) * distance
+      );
+      context.quadraticCurveTo(
+        point.x + Math.cos(angle + 0.5) * distance * 1.5,
+        point.y + Math.sin(angle + 0.5) * distance * 1.5,
+        point.x + Math.cos(angle + 0.8) * distance * 1.8,
+        point.y + Math.sin(angle + 0.8) * distance * 1.8
+      );
+      context.stroke();
+    }
+
+    const berries = Math.round(site.berries * lush);
+    for (let i = 0; i < berries; i += 1) {
+      const angle = i * 2.399963 + site.seed;
+      const distance = radius * (0.25 + (i % 2) * 0.5);
+      context.fillStyle = i % 3 === 0 ? PALETTE.gold : PALETTE.alert;
+      context.beginPath();
+      context.arc(
+        point.x + Math.cos(angle) * distance,
+        point.y + Math.sin(angle) * distance * 0.82,
+        1.5,
+        0,
+        TWO_PI
+      );
+      context.fill();
+    }
+    context.restore();
+  }
+
+  function drawCommonsPond(context, site, ratio) {
+    const point = screenPoint(site);
+    const base = unit() * site.size;
+    const level = clamp(
+      (ratio - site.threshold) / Math.max(0.01, 1 - site.threshold),
+      0,
+      1
+    );
+    const water = ratio > site.threshold
+      ? base * (0.22 + 0.78 * level)
+      : 0;
+
+    context.save();
+
+    // The mud bank remains visible even when the water is nearly gone.
+    context.fillStyle = mixColor(PALETTE.meadowPatch, PALETTE.townEdge, 0.55);
+    context.strokeStyle = PALETTE.ink;
+    context.lineWidth = 1;
+    blobPath(context, point.x, point.y, base * 1.12, base * 0.72, site.seed, 0.12);
+    context.fill();
+    context.stroke();
+
+    if (water > 1.5) {
       context.fillStyle = PALETTE.water;
       context.strokeStyle = PALETTE.ink;
-      context.lineWidth = 1.5;
-      context.beginPath();
-      context.ellipse(c.x, c.y, water, water * 0.78, 0, 0, TWO_PI);
+      context.lineWidth = 1.2;
+      blobPath(context, point.x, point.y, water, water * 0.60, site.seed + 4.2, 0.08);
       context.fill();
       context.stroke();
 
-      context.strokeStyle = "rgba(244, 239, 230, 0.34)";
+      context.strokeStyle = "rgba(244, 239, 230, 0.50)";
       context.lineWidth = 1;
-      for (let i = 1; i <= 2; i += 1) {
-        context.beginPath();
-        context.ellipse(
-          c.x,
-          c.y,
-          water * (0.28 + i * 0.2),
-          water * (0.14 + i * 0.1),
-          0,
-          0,
-          TWO_PI
-        );
-        context.stroke();
-      }
-
-      // A flat ripple line, not a glossy highlight.
-      context.strokeStyle = "rgba(244, 239, 230, 0.55)";
-      context.lineWidth = 1.2;
       context.beginPath();
       context.ellipse(
-        c.x - water * 0.18,
-        c.y - water * 0.12,
-        water * 0.3,
-        water * 0.12,
+        point.x - water * 0.16,
+        point.y - water * 0.10,
+        water * 0.34,
+        water * 0.14,
         0,
         Math.PI * 0.85,
         Math.PI * 1.7
       );
       context.stroke();
-      context.restore();
     }
 
-    for (const bush of bushes) {
-      const bx = c.x + bush.ox * radius;
-      const by = c.y + bush.oy * radius * 0.82;
-      const bushRadius = radius * bush.size;
-      const lush = clamp((ratio - bush.threshold) / 0.45, 0, 1);
-      const living = ratio > bush.threshold;
-      context.save();
-      context.fillStyle = living
-        ? mixColor(PALETTE.sage, PALETTE.sageDry, 1 - lush)
-        : PALETTE.sageDry;
-      context.strokeStyle = PALETTE.ink;
-      context.lineWidth = 1;
+    // Reeds thin out with the water level.
+    const reeds = Math.round(5 * level);
+    context.strokeStyle = PALETTE.sageDry;
+    context.lineWidth = 1.2;
+    for (let i = 0; i < reeds; i += 1) {
+      const angle = site.seed + i * 2.1;
+      const x = point.x + Math.cos(angle) * base * 0.92;
+      const y = point.y + Math.sin(angle) * base * 0.52;
       context.beginPath();
-      context.arc(bx, by, bushRadius, 0, TWO_PI);
-      context.fill();
+      context.moveTo(x, y);
+      context.quadraticCurveTo(x + 1, y - 5, x + 3, y - 8);
       context.stroke();
-
-      if (living) {
-        const share = clamp((ratio - bush.threshold) / Math.max(0.01, 1 - bush.threshold), 0, 1);
-        const berries = Math.round(bush.berries * share);
-        for (let b = 0; b < berries; b += 1) {
-          const angle = b * 2.399963 + bush.threshold * 10;
-          const distance = bushRadius * (0.28 + (b % 2) * 0.26);
-          context.fillStyle = b % 3 === 0 ? PALETTE.gold : PALETTE.alert;
-          context.beginPath();
-          context.arc(
-            bx + Math.cos(angle) * distance,
-            by + Math.sin(angle) * distance,
-            1.5,
-            0,
-            TWO_PI
-          );
-          context.fill();
-        }
-      }
-      context.restore();
     }
-
-    drawTag(context, "Commons " + Math.round(ratio * 100) + "%",
-      c.x, c.y + radius * 1.24, PALETTE.paper, PALETTE.ink, PALETTE.ink, false);
+    context.restore();
   }
 
   function mixColor(from, to, amount) {
@@ -837,56 +1025,76 @@ function startViewer(DATA) {
     return "rgb(" + channel(0) + "," + channel(1) + "," + channel(2) + ")";
   }
 
-  function drawSack(context, x, y, radius, ratio) {
-    const r = Math.max(3, radius);
+  function drawCoinBox(context, index, hutPoint, ratio) {
+    const s = hutSize();
+    const angle = homes[index].angle;
+    const tangentX = -Math.sin(angle);
+    const tangentY = Math.cos(angle);
+    const cx = hutPoint.x + tangentX * s * 1.36;
+    const cy = hutPoint.y + tangentY * s * 1.36 + s * 0.12;
+    const width = s * 0.88;
+    const height = s * 0.70;
+    const left = cx - width / 2;
+    const top = cy - height / 2;
+
     context.save();
-    context.translate(x, y);
 
+    // Solid two-colour print shadow.
     context.fillStyle = PALETTE.shadow;
-    context.beginPath();
-    context.ellipse(2, r * 0.76, r * 0.82, r * 0.24, 0, 0, TWO_PI);
-    context.fill();
+    context.fillRect(left + 2, top + 2, width, height);
 
-    context.fillStyle = PALETTE.sack;
+    // Chest body.
+    context.fillStyle = PALETTE.coffer;
     context.strokeStyle = PALETTE.ink;
     context.lineWidth = 1.5;
-    context.beginPath();
-    context.moveTo(-r * 0.5, -r * 0.52);
-    context.bezierCurveTo(-r * 1.02, r * 0.25, -r * 0.55, r * 0.82, 0, r * 0.82);
-    context.bezierCurveTo(r * 0.55, r * 0.82, r * 1.02, r * 0.25, r * 0.5, -r * 0.52);
-    context.closePath();
-    context.fill();
-    context.stroke();
+    context.fillRect(left, top, width, height);
+    context.strokeRect(left, top, width, height);
 
-    // Cinched neck and tie ends.
-    context.strokeStyle = PALETTE.ink;
-    context.lineWidth = 2;
-    context.beginPath();
-    context.moveTo(-r * 0.48, -r * 0.52);
-    context.lineTo(r * 0.48, -r * 0.52);
-    context.stroke();
-    context.lineWidth = 1;
-    context.beginPath();
-    context.moveTo(-r * 0.2, -r * 0.52);
-    context.lineTo(-r * 0.34, -r * 0.74);
-    context.moveTo(r * 0.2, -r * 0.52);
-    context.lineTo(r * 0.34, -r * 0.74);
-    context.stroke();
+    // Bright cream interior, then coin stacks rising from the bottom up.
+    const innerLeft = left + width * 0.08;
+    const innerTop = top + height * 0.24;
+    const innerWidth = width * 0.84;
+    const innerHeight = height * 0.64;
+    const ratioClamped = clamp(ratio, 0, 1);
+    context.fillStyle = PALETTE.cofferInner;
+    context.fillRect(innerLeft, innerTop, innerWidth, innerHeight);
 
-    context.strokeStyle = "rgba(28, 27, 24, 0.30)";
-    context.lineWidth = 1;
-    context.beginPath();
-    context.moveTo(0, -r * 0.2);
-    context.lineTo(0, r * 0.66);
-    context.stroke();
+    const columns = 4;
+    const rows = 3;
+    const slots = columns * rows;
+    const filled = Math.ceil(ratioClamped * slots);
+    const stepX = innerWidth / columns;
+    const stepY = innerHeight / rows;
+    const coinR = Math.min(stepX, stepY) * 0.40;
 
-    const coins = Math.round(clamp(ratio, 0, 1) * 5);
-    for (let i = 0; i < coins; i += 1) {
-      const coinX = (i - (coins - 1) / 2) * r * 0.26;
-      const coinY = -r * 0.68 - (i % 2) * r * 0.12;
-      const coinR = r * 0.18;
-      context.drawImage(coinSprite, coinX - coinR, coinY - coinR, coinR * 2, coinR * 2);
+    for (let slot = 0; slot < filled; slot += 1) {
+      const row = Math.floor(slot / columns);
+      const column = slot % columns;
+      const coinX = innerLeft + stepX * (column + 0.5);
+      const coinY = innerTop + innerHeight - stepY * (row + 0.5);
+      context.drawImage(
+        cofferCoinSprite,
+        coinX - coinR,
+        coinY - coinR,
+        coinR * 2,
+        coinR * 2
+      );
     }
+
+    // Lid band and a small latch keep the box readable at any size.
+    context.fillStyle = PALETTE.cofferLid;
+    context.strokeStyle = PALETTE.ink;
+    context.lineWidth = 1.2;
+    context.fillRect(left, top, width, height * 0.18);
+    context.strokeRect(left, top, width, height * 0.18);
+
+    context.fillStyle = PALETTE.gold;
+    context.strokeStyle = PALETTE.ink;
+    context.lineWidth = 1;
+    context.fillRect(cx - width * 0.075, top + height * 0.12,
+      width * 0.15, height * 0.17);
+    context.strokeRect(cx - width * 0.075, top + height * 0.12,
+      width * 0.15, height * 0.17);
 
     context.restore();
   }
@@ -933,6 +1141,16 @@ function startViewer(DATA) {
     context.restore();
   }
 
+  function drawVillage(context, tick, time) {
+    for (let index = 0; index < A; index += 1) {
+      if (!aliveAt(index, tick)) continue;
+      const point = screenPoint(homes[index]);
+      drawHut(context, index, point);
+      const ratio = clamp(resourceAt(index, time) / maxCoins, 0, 1);
+      drawCoinBox(context, index, point, ratio);
+    }
+  }
+
   function drawAgent(context, index, position, time, now) {
     const R = agentRadius();
     const agent = agents[index];
@@ -953,9 +1171,6 @@ function startViewer(DATA) {
     const bounce = moving ? Math.abs(Math.sin(phase)) * R * 0.08 : 0;
     const y = position.y - bounce;
     const face = dx < -0.01 ? -1 : 1;
-    const coins = resourceAt(index, time);
-    const ratio = clamp(coins / maxCoins, 0, 1);
-    const sackRadius = R * (0.34 + 0.56 * Math.sqrt(ratio));
 
     context.save();
 
@@ -963,9 +1178,6 @@ function startViewer(DATA) {
     context.beginPath();
     context.ellipse(position.x + 2, y + R * 1.12, R * 0.78, R * 0.22, 0, 0, TWO_PI);
     context.fill();
-
-    const sackX = position.x - face * R * 0.98;
-    drawSack(context, sackX, y - R * 0.02, sackRadius, ratio);
 
     const stride = moving ? Math.sin(phase) * R * 0.36 : 0;
     const leftLift = moving ? Math.max(0, Math.sin(phase)) * R * 0.18 : 0;
@@ -1149,7 +1361,8 @@ function startViewer(DATA) {
     ctx.drawImage(backgroundCanvas, 0, 0, W, H);
     const tick = Math.floor(clamp(state.t, 0, N - 1));
     drawShockTint(tick);
-    drawCommons(ctx, stockRatio(state.t));
+    drawCommonsRing(ctx, stockRatio(state.t));
+    drawVillage(ctx, tick, state.t);
     drawHutLabels(ctx, tick);
     drawAgents(ctx, state.t, now);
     drawEventParticles(ctx, state.t);
@@ -1194,7 +1407,7 @@ function startViewer(DATA) {
     const parts = [
       "<strong>" + agent.label + "</strong>",
       (alive ? "alive" : "dead") + " - " + formatNumber(coins, 1) + " coins",
-      "<span class=\"muted\">sack " + Math.round(ratio * 100) + "% full</span>"
+      "<span class=\"muted\">coin box " + Math.round(ratio * 100) + "% full</span>"
     ];
     const recent = recentEventFor(index, tick);
     if (recent) {
@@ -1232,7 +1445,7 @@ function startViewer(DATA) {
     }
     const alive = series.alive[tick];
     if (alive === 0) {
-      return "The last villager is gone. Only the empty commons remains.";
+      return "The last villager is gone. Only the empty meadow remains.";
     }
     const deaths = deathsByTick[tick] || [];
     if (deaths.length) {
@@ -1246,7 +1459,7 @@ function startViewer(DATA) {
     if (events.length === 1) {
       const event = events[0];
       if (event[1] === TRADE) {
-        return eventText(event) + " at the market.";
+        return eventText(event) + " in the central square.";
       }
       if (event[1] === REPAY) {
         return eventText(event) + ".";
@@ -1316,7 +1529,7 @@ function startViewer(DATA) {
     if (state.selected == null) {
       selectedPanel.innerHTML =
         "<div class=\"panel-head\"><div class=\"panel-title\">Villager</div></div>" +
-        "<p class=\"selected-empty\">Click any villager in the village, or a row in this iteration's feed, to see their coins, sack, and latest exchange.</p>";
+        "<p class=\"selected-empty\">Click any villager in the village, or a row in this iteration's feed, to see their coins, coin box, and latest exchange.</p>";
       return;
     }
 
@@ -1332,7 +1545,7 @@ function startViewer(DATA) {
 
     let cells =
       "<div class=\"inspect-grid\">" +
-        "<div><div class=\"k\">Sack</div><div class=\"v\">" + Math.round(ratio * 100) + "% full</div></div>" +
+        "<div><div class=\"k\">Coin box</div><div class=\"v\">" + Math.round(ratio * 100) + "% full</div></div>" +
         "<div><div class=\"k\">Risk</div><div class=\"v\">" + formatNumber(risk, 2) + "</div></div>";
     if (goods != null) {
       cells += "<div><div class=\"k\">Goods</div><div class=\"v\">" + formatNumber(goods, 1) + "</div></div>";
@@ -1356,7 +1569,7 @@ function startViewer(DATA) {
         "<button class=\"clear-btn\" id=\"clearSelection\">Clear</button>" +
       "</div>" +
       "<div class=\"big-value\">" + formatNumber(coins, 1) + "<small>coins</small></div>" +
-      "<div class=\"sack-meter\"><i style=\"width:" + (ratio * 100).toFixed(1) + "%\"></i></div>" +
+      "<div class=\"coin-meter\"><i style=\"width:" + (ratio * 100).toFixed(1) + "%\"></i></div>" +
       cells +
       recentHtml;
 
@@ -1536,7 +1749,7 @@ function startViewer(DATA) {
     scrub.max = String(end);
     readoutTotal.textContent = "/ " + formatNumber(end, 0);
     worldNote.textContent = meta.market_enabled
-      ? "Click a villager - gifts, repayments and market trades are animated"
+      ? "Click a villager - gifts, repayments and central-market trades are animated"
       : "Click a villager - the market is closed in this run";
 
     resizeWorld();

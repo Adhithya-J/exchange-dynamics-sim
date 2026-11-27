@@ -46,7 +46,7 @@
 
   <main class="layout">
     <section class="world-wrap" id="worldWrap">
-      <canvas id="world" tabindex="0" aria-label="A village of huts around a shared commons and a market"></canvas>
+      <canvas id="world" tabindex="0" aria-label="A village of huts around a central market square, ringed by meadow, berry bushes, and ponds"></canvas>
       <div class="world-note" id="worldNote">Click a villager to inspect them</div>
       <div class="shock-banner" id="shockBanner"></div>
       <div class="tooltip" id="tooltip"></div>
@@ -57,12 +57,12 @@
         <div class="panel-head">
           <div class="panel-title">What you are looking at</div>
         </div>
-        <div class="legend-row"><span class="ico hut"></span><span><b>Hut.</b> One per villager. The roof color matches its owner.</span></div>
-        <div class="legend-row"><span class="ico commons"></span><span><b>Commons.</b> The shared natural stock. It shrinks as living costs are paid.</span></div>
-        <div class="legend-row"><span class="ico market"></span><span><b>Market.</b> A separate square where buyers and sellers meet.</span></div>
-        <div class="legend-row"><span class="ico sack"></span><span><b>Sack.</b> Every villager is the same size. The sack grows with their coins.</span></div>
+        <div class="legend-row"><span class="ico hut"></span><span><b>Hut.</b> One per villager, set around the central square. The roof color matches its owner.</span></div>
+        <div class="legend-row"><span class="ico commons"></span><span><b>Commons.</b> The grassy outer ring of berry bushes and ponds. It thins as the shared stock is spent.</span></div>
+        <div class="legend-row"><span class="ico market"></span><span><b>Market.</b> The central square where buyers and sellers meet.</span></div>
+        <div class="legend-row"><span class="ico coffer"></span><span><b>Coin box.</b> A fixed box beside each hut fills with coins as its owner's balance grows, and empties as they spend or give.</span></div>
         <div class="legend-row"><span class="ico coin"></span><span><b>Gold coin.</b> Money moving from one villager to another.</span></div>
-        <div class="legend-row" id="deathLegend"><span class="ico death"></span><span><b>Tombstone.</b> The villager ran out of coins and left the village.</span></div>
+        <div class="legend-row" id="deathLegend"><span class="ico death"></span><span><b>Tombstone.</b> At the resource floor, the villager and hut are replaced by a stone marker.</span></div>
       </section>
 
       <section class="panel" id="selectedPanel"></section>
@@ -106,11 +106,11 @@
     <h2 id="helpTitle">How to read The Commons</h2>
     <p>This page replays the simulation. It does not change the rules or the numbers. Each villager is an agent from the recorded run.</p>
     <ol>
-      <li><b>Huts and villagers.</b> Every villager has a hut around the green. The roof color matches the villager. All villagers are the same size.</li>
-      <li><b>Sacks are money.</b> A villager's sack grows as they hold more coins and shrinks when they have less. The sack is the money indicator, not the body.</li>
-      <li><b>The commons.</b> The pond and bushes are the village's shared natural stock. It falls as the living cost consumes resources. The percentage in the header and on the pond is what is left.</li>
-      <li><b>Exchanges.</b> A gold coin is money changing hands. Gifts and repayments happen at the receiver's hut. Market trades happen in the market square, where coins and goods cross.</li>
-      <li><b>Death.</b> A villager at the resource floor is replaced by a tombstone and stops taking part.</li>
+      <li><b>Huts and villagers.</b> Every villager has a hut on the ring around the central square. The roof color matches the villager. All villagers are the same size.</li>
+      <li><b>Coin boxes are money.</b> A fixed box beside each hut fills with gold coins as its owner holds more, and empties as they give, spend, or pay the living cost. The box is the money indicator, not the body.</li>
+      <li><b>The commons.</b> The grassy outer ring of berry bushes and ponds is the village's shared natural stock. As the percentage falls, the bushes dry and thin out and the ponds recede. The percentage in the header and on the meadow is what is left.</li>
+      <li><b>Exchanges.</b> A gold coin is money changing hands. Gifts and repayments happen at the receiver's hut. Market trades happen in the central square, where coins and goods cross.</li>
+      <li><b>Death.</b> A villager at the resource floor is replaced by a tombstone; their hut disappears and they stop taking part.</li>
       <li><b>Explore.</b> Press <b>space</b> to play or pause, use the arrows to step, drag the timeline to scrub, and click a villager or a feed row to inspect them.</li>
     </ol>
     <p class="fine">Each iteration: gifts and repayments, then production and trade if the market is enabled, then consumption, then the living cost for every living villager.</p>

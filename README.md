@@ -2,9 +2,9 @@
 
 ![The Commons world view after 1,000 iterations](docs/commons-world.png)
 
-*Default configuration, 1,000 iterations. Every villager has a hut and a money
-sack; the commons shrinks as resources are consumed. Open `simulation.html` to
-replay the whole run.*
+*Default configuration, 1,000 iterations. Every villager has a hut and a coin
+box around the central market square; the surrounding meadow commons thins as
+resources are consumed. Open `simulation.html` to replay the whole run.*
 
 An experimental agent-based simulation of resource sharing and inequality.
 Agents have different generosity and acceptance tendencies. During each
@@ -200,15 +200,17 @@ configuration file and `--iterations <n>` to override the run length.
 
 `visualize.py` creates a self-contained `simulation.html` village view that
 replays the recorded run. Open it in a browser; the replay starts automatically
-(press **space** to pause). Every agent has a hut around the green. All
-villagers are the same size; the sack beside each one grows and shrinks with
-their coin balance, so wealth is visible without changing the body size. A gold
-coin is drawn whenever money changes hands: gifts and repayments happen at the
-receiver's hut, while market trades happen in the separate market square. The
-commons pond shows the village's remaining total resources, so it visibly
-shrinks as living costs consume them. Click a hut's owner or a feed row to
-inspect a villager, and drag the timeline to scrub. When everyone dies, the
-timeline trims at extinction.
+(press **space** to pause). Every agent has a hut on a ring around the central
+market square. All villagers are the same size; a fixed coin box beside each hut
+fills with gold coins as its owner's balance grows and empties when they give,
+spend, or pay the living cost, so wealth is visible without changing the body
+size. A gold coin is drawn whenever money changes hands: gifts and repayments
+happen at the receiver's hut, while market trades happen in the central square.
+The outer meadow carries berry bushes and small ponds whose ripeness and water
+level mirror the village's remaining total resources, so the commons visibly
+thins as living costs consume them. Click a villager or a feed row to inspect
+them, and drag the timeline to scrub. When everyone dies, the timeline trims at
+extinction.
 
 The world is a presentation layer over the recorded events, not a change to
 who can interact: it replays the existing model and leaves conservation

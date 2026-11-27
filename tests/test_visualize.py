@@ -146,6 +146,8 @@ def test_world_html_inlines_viewer_and_embeds_data():
     assert "__PAGE_TITLE__" not in html
     assert "The Commons" in html
     assert "commonsReplay" in html
+    assert "Coin box" in html
+    assert "central square" in html
     assert "fonts.googleapis.com" in html
     assert "<script src=" not in html
     assert "/*__INLINE_REPLAY__*/" not in html

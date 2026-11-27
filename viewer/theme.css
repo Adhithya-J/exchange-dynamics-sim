@@ -3,18 +3,20 @@
 :root {
   --paper: #f4efe6;
   --paper-deep: #efe8da;
-  --canvas: #efe8da;
+  --canvas: #dce3ce;
   --canvas-border: #d5ccb9;
   --ink: #1c1b18;
   --muted: #666055;
   --rule: #d8d0c0;
   --rule-soft: #e4dccd;
   --gold: #c88a1e;
+  --coin: #d99b26;
   --water: #2f6f73;
   --sage: #4e6b50;
   --alert: #b84a39;
   --stone: #8c857b;
-  --sack: #c79a62;
+  --coffer: #c79a62;
+  --coffer-inner: #f7f2e7;
   --serif: "Newsreader", Georgia, "Times New Roman", serif;
   --sans: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
   --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
@@ -374,9 +376,21 @@ input:focus-visible {
 }
 
 .ico.commons {
-  width: 16px;
-  height: 10px;
-  margin-top: 3px;
+  width: 15px;
+  height: 13px;
+  margin-top: 2px;
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+  background: var(--sage);
+}
+
+.ico.commons::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 5px;
+  width: 5px;
+  height: 3px;
   border: 1px solid var(--ink);
   border-radius: 50%;
   background: var(--water);
@@ -405,14 +419,36 @@ input:focus-visible {
   );
 }
 
-.ico.sack {
-  width: 11px;
-  height: 13px;
-  margin-top: 2px;
-  margin-left: 3px;
+.ico.coffer {
+  width: 13px;
+  height: 11px;
+  margin-top: 3px;
+  margin-left: 2px;
   border: 1px solid var(--ink);
-  border-radius: 45% 45% 40% 40%;
-  background: var(--sack);
+  background: var(--coffer-inner);
+}
+
+.ico.coffer::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  top: 4px;
+  height: 3px;
+  border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+  background: var(--coin);
+}
+
+.ico.coffer::after {
+  content: "";
+  position: absolute;
+  left: -1px;
+  right: -1px;
+  top: -4px;
+  height: 3px;
+  border: 1px solid var(--ink);
+  background: var(--coffer);
 }
 
 .ico.coin {
@@ -500,14 +536,14 @@ input:focus-visible {
   font-size: 12px;
 }
 
-.sack-meter {
+.coin-meter {
   width: 100%;
   height: 3px;
   margin: 8px 0 14px;
   background: var(--rule);
 }
 
-.sack-meter i {
+.coin-meter i {
   display: block;
   height: 100%;
   background: var(--gold);

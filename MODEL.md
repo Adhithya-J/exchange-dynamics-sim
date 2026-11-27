@@ -63,12 +63,11 @@ living-cost sink each iteration, so total money can be reconciled from the logs.
 `replay.py` packages those observations into a versioned JSON replay
 (`schema_version`, `meta`, `agents`, `ticks`, and typed `events`). The replay is
 the contract between the model and a renderer; it records state and events, not
-positions or drawing details. The world visualization still reads the in-memory
-logs and snapshots; positions in the world are a presentation layer only, not
-part of the model. Its commons pond is a visual mirror of total money
-(`series.total`), not an extra resource stock or a second ledger; it shrinks only
-when the recorded total falls, which in the default rules means the living-cost
-sink.
+positions or drawing details. The world visualization reads the replay; huts,
+paths, coin boxes, and terrain are a presentation layer only, not part of the
+model. Its outer meadow is a visual mirror of total money (`series.total`), not
+an extra resource stock or a second ledger; the bushes and ponds thin only when
+the recorded total falls, which in the default rules means the living-cost sink.
 
 ## Minimal market rules
 
