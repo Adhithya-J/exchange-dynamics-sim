@@ -314,7 +314,7 @@
   async function boot() {
     bindFileInput();
     try {
-      var stored = takeStoredReplay();
+      var stored = await takeStoredReplay();
       if (stored) {
         global.startViewer(buildView(stored));
         return;
