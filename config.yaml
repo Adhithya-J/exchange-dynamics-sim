@@ -46,6 +46,25 @@ MARKET:
   # Goods needed per living agent per iteration.
   CONSUMPTION_RANGE: [1.0, 1.0]
 
+# Private trust beliefs and noisy public reputation. Off by default.
+TRUST:
+  # Turn belief and reputation tracking on.
+  ENABLED: false
+  # Prior belief that another agent will reciprocate, in [0, 1].
+  INITIAL_BELIEF: 0.5
+  # How quickly beliefs and reputation move toward new evidence.
+  LEARNING_RATE: 0.2
+  # Per-iteration pull back toward the prior, in [0, 1].
+  DECAY: 0.02
+  # Standard deviation of noise on public observations.
+  NOISE: 0.0
+  # Iterations before an observation reaches public reputation.
+  DELAY: 0
+  # Constant bias added to public observations.
+  BIAS: 0.0
+  # Weight of public reputation when blending into private belief.
+  PUBLIC_WEIGHT: 0.3
+
 # Controls how much past exchanges affect recipient selection.
 MEMORY:
   # Number of previous givers remembered; higher means longer memory.

@@ -57,6 +57,18 @@ goods, consumption destroys them, and the living cost remains an explicit money
 sink. `MODEL.md` documents the full ledger, and `tests/test_conservation.py`
 plus `tests/test_market.py` enforce it.
 
+## Trust and reputation (optional)
+
+Set `TRUST.ENABLED: true` to add private beliefs and public reputation. Every
+agent starts at `INITIAL_BELIEF`. After a transfer, the receiver updates its
+belief about the giver and a shared public reputation observation, with
+configurable `LEARNING_RATE`, `DECAY`, `NOISE`, `DELAY`, `BIAS`, and
+`PUBLIC_WEIGHT`. The simulation reports `mean_trust`, `mean_reputation`,
+`reputation_error`, and `reputation_brier`.
+
+The trust layer only records behaviour; it does not change transfers or
+conservation. `tests/test_trust.py` covers the update and noise rules.
+
 ## Quick start
 
 ```bash

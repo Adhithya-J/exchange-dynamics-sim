@@ -39,12 +39,12 @@ with no regressions in the existing transfer tests.
 
 ## 3. Add private memory and noisy public reputation
 
-- [ ] Replace the `deque` of giver ids (`main.py:43`) with beliefs that carry a
-      reliability value and decay over time.
-- [ ] Add a public reputation store shared by agents.
-- [ ] Model observation noise, delay, and bias as configurable parameters.
-- [ ] Add metrics for reputation accuracy and calibration.
-- [ ] Add tests for memory decay and noisy reputation updates.
+- [x] Add decay-bearing private beliefs alongside the legacy `deque` of giver
+      ids (`Agent.beliefs`).
+- [x] Add a public reputation store shared by agents (`ResourceSimulation`).
+- [x] Model observation noise, delay, and bias as configurable parameters.
+- [x] Add metrics for reputation accuracy and calibration.
+- [x] Add tests for memory decay and noisy reputation updates.
 
 **Done when:** agents can hold an incorrect belief about another agent, and
 the simulation reports how wrong those beliefs are.

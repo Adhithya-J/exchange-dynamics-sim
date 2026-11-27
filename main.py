@@ -31,6 +31,19 @@ DEFAULT_MARKET_SETTINGS: dict[str, Any] = {
     "CONSUMPTION_RANGE": (0.0, 0.0),
 }
 
+# Trust settings used when a custom configuration omits the section. Trust is
+# also opt-in so the legacy transfer model is unchanged by default.
+DEFAULT_TRUST_SETTINGS: dict[str, Any] = {
+    "ENABLED": False,
+    "INITIAL_BELIEF": 0.5,
+    "LEARNING_RATE": 0.2,
+    "DECAY": 0.02,
+    "NOISE": 0.0,
+    "DELAY": 0,
+    "BIAS": 0.0,
+    "PUBLIC_WEIGHT": 0.3,
+}
+
 
 class Agent:
     """An individual with resources, social tendencies, and recipient memory."""
@@ -56,6 +69,8 @@ class Agent:
         self.production_rate = float(production_rate)
         self.consumption_need = float(consumption_need)
         self.memory: deque[str] = deque(maxlen=memory_size)
+        # Private belief that another agent will reciprocate, keyed by id.
+        self.beliefs: dict[str, float] = {}
 
     @property
     def is_alive(self) -> bool:
@@ -90,6 +105,7 @@ class Agent:
             "consumption_need": self.consumption_need,
             "alive": self.is_alive,
             "memory": list(self.memory),
+            "beliefs": dict(self.beliefs),
         }
 
 
@@ -173,6 +189,12 @@ class ResourceSimulation:
         self.agent_history: list[dict[str, Any]] = []
         self.total_transfers = 0
         self.total_transfer_volume = 0.0
+        self._current_iteration = 0
+        self.reputation: dict[str, float] = {}
+        self._reputation_queue: list[tuple[int, str, float]] = []
+        self._giving_opportunities: dict[str, int] = {}
+        self._giving_successes: dict[str, int] = {}
+        self._iteration_observations: list[tuple[float, float]] = []
 
     @staticmethod
     def _validated_range(value: Any, name: str) -> tuple[float, float]:
@@ -208,6 +230,191 @@ class ResourceSimulation:
             "price": price,
             "production_range": production_range,
             "consumption_range": consumption_range,
+        }
+
+    def _trust_settings(self) -> dict[str, Any]:
+        """Return validated trust settings, defaulting to a disabled layer."""
+
+        configured = self.config.get("TRUST") or {}
+        merged = {**DEFAULT_TRUST_SETTINGS, **configured}
+        enabled = bool(merged["ENABLED"])
+        try:
+            initial_belief = float(merged["INITIAL_BELIEF"])
+            learning_rate = float(merged["LEARNING_RATE"])
+            decay = float(merged["DECAY"])
+            noise = float(merged["NOISE"])
+            delay = int(merged["DELAY"])
+            bias = float(merged["BIAS"])
+            public_weight = float(merged["PUBLIC_WEIGHT"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("TRUST settings must be numeric") from exc
+        if not 0 <= initial_belief <= 1:
+            raise ValueError("TRUST.INITIAL_BELIEF must be between 0 and 1")
+        if not 0 <= learning_rate <= 1:
+            raise ValueError("TRUST.LEARNING_RATE must be between 0 and 1")
+        if not 0 <= decay <= 1:
+            raise ValueError("TRUST.DECAY must be between 0 and 1")
+        if noise < 0:
+            raise ValueError("TRUST.NOISE must not be negative")
+        if delay < 0:
+            raise ValueError("TRUST.DELAY must not be negative")
+        if not 0 <= public_weight <= 1:
+            raise ValueError("TRUST.PUBLIC_WEIGHT must be between 0 and 1")
+        return {
+            "enabled": enabled,
+            "initial_belief": initial_belief,
+            "learning_rate": learning_rate,
+            "decay": decay,
+            "noise": noise,
+            "delay": delay,
+            "bias": bias,
+            "public_weight": public_weight,
+        }
+
+    def _initialize_trust(self) -> None:
+        settings = self._trust_settings()
+        self._reputation_queue = []
+        self._giving_opportunities = {agent.id: 0 for agent in self.agents}
+        self._giving_successes = {agent.id: 0 for agent in self.agents}
+        self._iteration_observations = []
+        for agent in self.agents:
+            agent.beliefs = {}
+        if not settings["enabled"]:
+            self.reputation = {}
+            return
+        self.reputation = {
+            agent.id: settings["initial_belief"] for agent in self.agents
+        }
+
+    def _decay_trust(self) -> None:
+        settings = self._trust_settings()
+        if not settings["enabled"]:
+            return
+        prior = settings["initial_belief"]
+        keep = 1.0 - settings["decay"]
+        for agent_id, value in self.reputation.items():
+            self.reputation[agent_id] = float(
+                np.clip(prior + keep * (value - prior), 0.0, 1.0)
+            )
+        for agent in self.agents:
+            for other_id, value in agent.beliefs.items():
+                agent.beliefs[other_id] = float(
+                    np.clip(prior + keep * (value - prior), 0.0, 1.0)
+                )
+
+    def _apply_reputation_observation(self, agent_id: str, observed: float) -> None:
+        settings = self._trust_settings()
+        current = self.reputation.get(agent_id, settings["initial_belief"])
+        updated = current + settings["learning_rate"] * (observed - current)
+        self.reputation[agent_id] = float(np.clip(updated, 0.0, 1.0))
+
+    def _process_reputation_queue(self) -> None:
+        settings = self._trust_settings()
+        if not settings["enabled"] or not self._reputation_queue:
+            return
+        due = [
+            event
+            for event in self._reputation_queue
+            if event[0] <= self._current_iteration
+        ]
+        self._reputation_queue = [
+            event
+            for event in self._reputation_queue
+            if event[0] > self._current_iteration
+        ]
+        for _, agent_id, observed in due:
+            self._apply_reputation_observation(agent_id, observed)
+
+    def belief_for(self, observer: Agent, other_id: str) -> float:
+        """Return a private belief, falling back to public reputation."""
+
+        settings = self._trust_settings()
+        if other_id in observer.beliefs:
+            return observer.beliefs[other_id]
+        return self.reputation.get(other_id, settings["initial_belief"])
+
+    def _observe_reciprocation(self, giver: Agent, receiver: Agent) -> None:
+        """Update private and public trust after a successful transfer."""
+
+        settings = self._trust_settings()
+        if not settings["enabled"]:
+            return
+        prior = settings["initial_belief"]
+        self._giving_successes[giver.id] = (
+            self._giving_successes.get(giver.id, 0) + 1
+        )
+
+        observed = 1.0 + settings["bias"]
+        if settings["noise"] > 0:
+            observed += self.random.gauss(0.0, settings["noise"])
+        observed = float(np.clip(observed, 0.0, 1.0))
+
+        predicted = self.reputation.get(giver.id, prior)
+        self._iteration_observations.append((predicted, 1.0))
+
+        if settings["delay"] == 0:
+            self._apply_reputation_observation(giver.id, observed)
+        else:
+            self._reputation_queue.append(
+                (
+                    self._current_iteration + settings["delay"],
+                    giver.id,
+                    observed,
+                )
+            )
+
+        private = receiver.beliefs.get(giver.id, prior)
+        private = private + settings["learning_rate"] * (1.0 - private)
+        private = (
+            (1.0 - settings["public_weight"]) * private
+            + settings["public_weight"] * self.reputation.get(giver.id, prior)
+        )
+        receiver.beliefs[giver.id] = float(np.clip(private, 0.0, 1.0))
+
+    def _trust_metrics(self) -> dict[str, Any]:
+        settings = self._trust_settings()
+        if not settings["enabled"]:
+            return {
+                "mean_trust": 0.0,
+                "mean_reputation": 0.0,
+                "reputation_error": 0.0,
+                "reputation_brier": 0.0,
+                "trust_observations": 0,
+            }
+
+        prior = settings["initial_belief"]
+        beliefs = [
+            value for agent in self.agents for value in agent.beliefs.values()
+        ]
+        reputation_values = list(self.reputation.values())
+        errors = []
+        for agent in self.agents:
+            opportunities = self._giving_opportunities.get(agent.id, 0)
+            if opportunities == 0:
+                continue
+            giving_rate = self._giving_successes.get(agent.id, 0) / opportunities
+            errors.append(
+                abs(self.reputation.get(agent.id, prior) - giving_rate)
+            )
+        if self._iteration_observations:
+            brier = float(
+                np.mean(
+                    [
+                        (predicted - outcome) ** 2
+                        for predicted, outcome in self._iteration_observations
+                    ]
+                )
+            )
+        else:
+            brier = 0.0
+        return {
+            "mean_trust": float(np.mean(beliefs)) if beliefs else prior,
+            "mean_reputation": (
+                float(np.mean(reputation_values)) if reputation_values else prior
+            ),
+            "reputation_error": float(np.mean(errors)) if errors else 0.0,
+            "reputation_brier": brier,
+            "trust_observations": len(self._iteration_observations),
         }
 
     def initialize_agents(self) -> list[Agent]:
@@ -246,6 +453,8 @@ class ResourceSimulation:
         self.agent_history = []
         self.total_transfers = 0
         self.total_transfer_volume = 0.0
+        self._current_iteration = 0
+        self._initialize_trust()
         self._record_agent_snapshot(iteration=0)
         return self.agents
 
@@ -359,6 +568,7 @@ class ResourceSimulation:
         giver.resources -= transfer_size
         receiver.resources += transfer_size
         receiver.memory.append(giver.id)
+        self._observe_reciprocation(giver, receiver)
         return (giver.id, receiver.id, transfer_size)
 
     def _process_transfers(self) -> list[tuple[str, str, float]]:
@@ -370,9 +580,16 @@ class ResourceSimulation:
 
         senders = list(self.agents)
         self.random.shuffle(senders)
+        trust_enabled = self._trust_settings()["enabled"]
 
         for sender in senders:
-            if not sender.is_alive or not self._can_give(sender, minimum_transfer):
+            if not sender.is_alive:
+                continue
+            if trust_enabled:
+                self._giving_opportunities[sender.id] = (
+                    self._giving_opportunities.get(sender.id, 0) + 1
+                )
+            if not self._can_give(sender, minimum_transfer):
                 continue
             receiver = self._find_receiver(sender, minimum_transfer)
             if receiver is None:
@@ -540,10 +757,14 @@ class ResourceSimulation:
 
         if not self.agents:
             self.initialize_agents()
+        iteration = len(self.metrics_history) + 1
+        self._current_iteration = iteration
+        self._iteration_observations = []
+        self._decay_trust()
+        self._process_reputation_queue()
         completed = self._process_transfers()
         market = self._run_market_cycle()
         self._apply_living_cost()
-        iteration = len(self.metrics_history) + 1
         self.total_transfers += len(completed)
         transfer_volume = sum(amount for _, _, amount in completed)
         self.total_transfer_volume += transfer_volume
@@ -556,7 +777,9 @@ class ResourceSimulation:
                 "transfer_volume": transfer_volume,
                 "total_transfer_volume": self.total_transfer_volume,
                 "goods_total": float(sum(agent.goods for agent in self.agents)),
+                "alive": int(sum(agent.is_alive for agent in self.agents)),
                 **market,
+                **self._trust_metrics(),
             }
         )
         self.metrics_history.append(statistics)

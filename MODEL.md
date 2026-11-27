@@ -61,6 +61,26 @@ the simulation behaves exactly like the transfer-only model.
 - Unsold goods stay in inventory. Unmet demand is recorded.
 - Goods held by dead agents are stranded but still counted in total goods.
 
+## Trust and reputation (optional)
+
+Disabled by default. When `TRUST.ENABLED` is true:
+
+- every agent starts with public reputation and private beliefs equal to
+  `INITIAL_BELIEF`;
+- after a successful transfer, the receiver observes the giver as cooperative;
+- the private belief moves toward 1 by `LEARNING_RATE`, then blends with public
+  reputation by `PUBLIC_WEIGHT`;
+- public reputation moves toward the observed value (1 plus `BIAS` and Gaussian
+  `NOISE`, clipped to [0, 1]);
+- observations reach public reputation after `DELAY` iterations;
+- beliefs and reputation are pulled back toward the prior by `DECAY` each
+  iteration.
+
+Trust only records and scores behaviour; it does not move money or goods, so the
+conservation ledger is unchanged. `reputation_error` compares public reputation
+with each agent's observed giving rate, while `reputation_brier` scores this
+iteration's predictions against observed reciprocation.
+
 ## Invariants
 
 1. A social transfer or market trade never changes total money.
@@ -68,6 +88,8 @@ the simulation behaves exactly like the transfer-only model.
 3. Total money changes only by `-LIVING_COST * living_agents`.
 4. No agent's money becomes negative.
 5. Dead agents do not participate in any step.
+6. Trust beliefs and public reputation always stay within [0, 1].
+7. The trust layer never changes money or goods totals.
 
 ## Open decisions
 
@@ -75,3 +97,4 @@ the simulation behaves exactly like the transfer-only model.
   scarcity.
 - Decide whether stranded goods pass to other agents when an owner dies.
 - Add price discovery to replace the fixed `MARKET.PRICE`.
+- Decide whether private beliefs should fully replace the legacy memory deque.
