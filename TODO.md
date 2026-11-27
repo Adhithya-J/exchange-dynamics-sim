@@ -74,10 +74,10 @@ is measured on its own terms.
 
 ## 6. Add environmental shocks and adaptation
 
-- [ ] Add a config-driven shock schedule (scarcity, information shocks).
-- [ ] Implement at least one adaptation/learning rule for agents.
-- [ ] Add resilience metrics (recovery time, survival after a shock).
-- [ ] Add deterministic-seed tests for shock runs.
+- [x] Add a config-driven shock schedule (scarcity, information shocks).
+- [x] Implement at least one adaptation/learning rule for agents.
+- [x] Add resilience metrics (recovery time, survival after a shock).
+- [x] Add deterministic-seed tests for shock runs.
 
 **Done when:** a run can apply a shock at a chosen iteration and report how the
 population recovers.

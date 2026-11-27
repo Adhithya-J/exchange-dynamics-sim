@@ -54,6 +54,13 @@ DEFAULT_SOCIAL_SETTINGS: dict[str, Any] = {
     "REPAY_FRACTION": 1.0,
 }
 
+# Shock settings used when a custom configuration omits the section.
+DEFAULT_SHOCK_SETTINGS: dict[str, Any] = {
+    "ENABLED": False,
+    "SCHEDULE": (),
+    "ADAPTATION_RATE": 0.05,
+}
+
 
 class Agent:
     """An individual with resources, social tendencies, and recipient memory."""
@@ -215,6 +222,11 @@ class ResourceSimulation:
         self.total_repayments = 0
         self.total_repayment_volume = 0.0
         self.total_repayment_delay = 0
+        self._active_shocks: list[dict[str, Any]] = []
+        self.shock_log: list[dict[str, Any]] = []
+        self.shock_count = 0
+        self._last_shock_iteration = 0
+        self._last_unmet_by_agent: dict[str, float] = {}
 
     @staticmethod
     def _validated_range(value: Any, name: str) -> tuple[float, float]:
@@ -431,6 +443,182 @@ class ResourceSimulation:
             ),
         }
 
+    def _shock_settings(self) -> dict[str, Any]:
+        """Return validated shock settings and the normalized schedule."""
+
+        configured = self.config.get("SHOCKS") or {}
+        merged = {**DEFAULT_SHOCK_SETTINGS, **configured}
+        enabled = bool(merged["ENABLED"])
+        try:
+            adaptation_rate = float(merged["ADAPTATION_RATE"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("SHOCKS.ADAPTATION_RATE must be a number") from exc
+        if adaptation_rate < 0:
+            raise ValueError("SHOCKS.ADAPTATION_RATE must not be negative")
+
+        schedule: list[dict[str, Any]] = []
+        if enabled:
+            raw_schedule = merged["SCHEDULE"]
+            if not isinstance(raw_schedule, (list, tuple)):
+                raise ValueError("SHOCKS.SCHEDULE must be a sequence")
+            for index, event in enumerate(raw_schedule):
+                if not isinstance(event, dict):
+                    raise ValueError(
+                        f"SHOCKS.SCHEDULE[{index}] must be a mapping"
+                    )
+                if "iteration" not in event or "type" not in event:
+                    raise ValueError(
+                        f"SHOCKS.SCHEDULE[{index}] requires iteration and type"
+                    )
+                try:
+                    iteration = int(event["iteration"])
+                    magnitude = float(event.get("magnitude", 0.5))
+                    duration = int(event.get("duration", 1))
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        f"SHOCKS.SCHEDULE[{index}] values must be numeric"
+                    ) from exc
+                shock_type = str(event["type"]).lower()
+                if shock_type not in {"scarcity", "information"}:
+                    raise ValueError(
+                        f"SHOCKS.SCHEDULE[{index}].type must be "
+                        "scarcity or information"
+                    )
+                if iteration < 1:
+                    raise ValueError(
+                        "SHOCKS.SCHEDULE iteration must be at least 1"
+                    )
+                if magnitude < 0:
+                    raise ValueError(
+                        "SHOCKS.SCHEDULE magnitude must not be negative"
+                    )
+                if duration < 1:
+                    raise ValueError(
+                        "SHOCKS.SCHEDULE duration must be at least 1"
+                    )
+                schedule.append(
+                    {
+                        "iteration": iteration,
+                        "type": shock_type,
+                        "magnitude": magnitude,
+                        "duration": duration,
+                    }
+                )
+        return {
+            "enabled": enabled,
+            "adaptation_rate": adaptation_rate,
+            "schedule": schedule,
+        }
+
+    def _update_shocks(self, iteration: int) -> None:
+        """Expire old shocks and activate events scheduled for this iteration."""
+
+        settings = self._shock_settings()
+        if not settings["enabled"]:
+            self._active_shocks = []
+            return
+        for shock in self._active_shocks:
+            shock["remaining"] -= 1
+        self._active_shocks = [
+            shock for shock in self._active_shocks if shock["remaining"] > 0
+        ]
+        for event in settings["schedule"]:
+            if event["iteration"] != iteration:
+                continue
+            self._active_shocks.append(
+                {
+                    "type": event["type"],
+                    "magnitude": event["magnitude"],
+                    "remaining": event["duration"],
+                }
+            )
+            self._last_shock_iteration = iteration
+            self.shock_count += 1
+            self.shock_log.append(
+                {
+                    "iteration": iteration,
+                    "type": event["type"],
+                    "magnitude": event["magnitude"],
+                    "duration": event["duration"],
+                }
+            )
+
+    def _production_modifier(self) -> float:
+        """Return the combined scarcity multiplier for goods production."""
+
+        modifier = 1.0
+        for shock in self._active_shocks:
+            if shock["type"] == "scarcity":
+                modifier *= max(0.0, 1.0 - shock["magnitude"])
+        return modifier
+
+    def _information_noise(self) -> float:
+        """Return extra reputation noise from active information shocks."""
+
+        return float(
+            sum(
+                shock["magnitude"]
+                for shock in self._active_shocks
+                if shock["type"] == "information"
+            )
+        )
+
+    def _adapt_to_scarcity(self) -> None:
+        """Raise risk tolerance when demand is unmet, otherwise relax it."""
+
+        settings = self._shock_settings()
+        if not settings["enabled"]:
+            return
+        rate = settings["adaptation_rate"]
+        for agent in self.agents:
+            if not agent.is_alive:
+                continue
+            if self._last_unmet_by_agent.get(agent.id, 0.0) > 0:
+                agent.risk_tolerance = min(1.0, agent.risk_tolerance + rate)
+            else:
+                agent.risk_tolerance = max(
+                    0.0, agent.risk_tolerance - rate * 0.5
+                )
+
+    def _shock_metrics(self) -> dict[str, Any]:
+        return {
+            "shock_active": int(bool(self._active_shocks)),
+            "shock_count": self.shock_count,
+            "production_modifier": self._production_modifier(),
+            "reputation_noise": self._information_noise(),
+            "mean_risk_tolerance": (
+                float(
+                    np.mean([agent.risk_tolerance for agent in self.agents])
+                )
+                if self.agents
+                else 0.0
+            ),
+            "iterations_since_shock": (
+                self._current_iteration - self._last_shock_iteration
+                if self._last_shock_iteration
+                else 0
+            ),
+        }
+
+    def recovery_time(self) -> int | None:
+        """Return iterations from the last shock until unmet demand recovers."""
+
+        if not self.shock_log:
+            return None
+        shock_iteration = self.shock_log[-1]["iteration"]
+        before = [
+            metrics
+            for metrics in self.metrics_history
+            if metrics["iteration"] < shock_iteration
+        ]
+        baseline = before[-1].get("unmet_demand", 0.0) if before else 0.0
+        for metrics in self.metrics_history:
+            if metrics["iteration"] < shock_iteration:
+                continue
+            if metrics.get("unmet_demand", 0.0) <= baseline:
+                return metrics["iteration"] - shock_iteration
+        return None
+
     def _initialize_trust(self) -> None:
         settings = self._trust_settings()
         self._reputation_queue = []
@@ -505,8 +693,9 @@ class ResourceSimulation:
         )
 
         observed = 1.0 + settings["bias"]
-        if settings["noise"] > 0:
-            observed += self.random.gauss(0.0, settings["noise"])
+        noise = settings["noise"] + self._information_noise()
+        if noise > 0:
+            observed += self.random.gauss(0.0, noise)
         observed = float(np.clip(observed, 0.0, 1.0))
 
         predicted = self.reputation.get(giver.id, prior)
@@ -649,6 +838,11 @@ class ResourceSimulation:
         self.total_repayments = 0
         self.total_repayment_volume = 0.0
         self.total_repayment_delay = 0
+        self._active_shocks = []
+        self.shock_log = []
+        self.shock_count = 0
+        self._last_shock_iteration = 0
+        self._last_unmet_by_agent = {}
         self._initialize_trust()
         self._record_agent_snapshot(iteration=0)
         return self.agents
@@ -946,18 +1140,21 @@ class ResourceSimulation:
     def _produce_goods(self) -> float:
         """Add this iteration's production and return the goods created."""
 
+        modifier = self._production_modifier()
         produced = 0.0
         for agent in self.agents:
             if not agent.is_alive or agent.production_rate <= 0:
                 continue
-            agent.goods += agent.production_rate
-            produced += agent.production_rate
+            amount = agent.production_rate * modifier
+            agent.goods += amount
+            produced += amount
         return produced
 
     def _run_market_cycle(self) -> dict[str, float]:
         """Produce, trade, and consume goods, returning per-iteration totals."""
 
         settings = self._market_settings()
+        self._last_unmet_by_agent = {}
         empty_cycle = {
             "price": settings["price"],
             "goods_produced": 0.0,
@@ -1015,8 +1212,10 @@ class ResourceSimulation:
                 continue
             consumed_here = min(agent.consumption_need, agent.goods)
             agent.goods -= consumed_here
+            unmet_here = agent.consumption_need - consumed_here
             consumed += consumed_here
-            unmet += agent.consumption_need - consumed_here
+            unmet += unmet_here
+            self._last_unmet_by_agent[agent.id] = unmet_here
 
         return {
             "price": price,
@@ -1067,6 +1266,7 @@ class ResourceSimulation:
             self.initialize_agents()
         iteration = len(self.metrics_history) + 1
         self._current_iteration = iteration
+        self._update_shocks(iteration)
         self._iteration_observations = []
         self.decision_log = []
         self._decay_trust()
@@ -1075,6 +1275,7 @@ class ResourceSimulation:
         completed = self._process_transfers()
         market = self._run_market_cycle()
         self._apply_living_cost()
+        self._adapt_to_scarcity()
         self.total_transfers += len(completed)
         transfer_volume = sum(amount for _, _, amount in completed)
         self.total_transfer_volume += transfer_volume
@@ -1092,6 +1293,7 @@ class ResourceSimulation:
                 **repayments,
                 **market,
                 **self._trust_metrics(),
+                **self._shock_metrics(),
             }
         )
         self.metrics_history.append(statistics)

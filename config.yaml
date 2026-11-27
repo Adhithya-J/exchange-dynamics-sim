@@ -48,6 +48,15 @@ MARKET:
   # Goods needed per living agent per iteration.
   CONSUMPTION_RANGE: [1.0, 1.0]
 
+# Environmental shocks and simple adaptation. Off by default.
+SHOCKS:
+  ENABLED: false
+  # Events keyed by 1-based iteration; type is scarcity or information.
+  # Example: [{iteration: 100, type: scarcity, magnitude: 0.5, duration: 10}]
+  SCHEDULE: []
+  # Risk-tolerance change per iteration when demand is unmet.
+  ADAPTATION_RATE: 0.05
+
 # Altruistic gifts and optional reciprocity. Repayments are separate from trade.
 SOCIAL:
   # Let recipients repay gifts after a delay.

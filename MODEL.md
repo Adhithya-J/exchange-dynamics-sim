@@ -37,12 +37,16 @@ only move value between agents.
 
 ## Iteration order
 
-1. Social transfers between living agents.
-2. Goods production, if the market is enabled.
-3. Market trade for goods, if the market is enabled.
-4. Consumption of goods, if the market is enabled.
-5. Living cost for every living agent.
-6. Metrics and agent snapshots.
+1. Expire active shocks and activate scheduled ones.
+2. Decay trust and deliver delayed reputation observations.
+3. Pay due reciprocal repayments.
+4. Social transfers between living agents.
+5. Goods production, if the market is enabled.
+6. Market trade for goods, if the market is enabled.
+7. Consumption of goods, if the market is enabled.
+8. Living cost for every living agent.
+9. Adaptation of risk tolerance.
+10. Metrics and agent snapshots.
 
 ## Minimal market rules
 
@@ -116,6 +120,26 @@ explainable. Metrics report the mean give/accept probabilities.
 
 The decision layer only changes which transfers happen; it never creates or
 destroys money or goods.
+
+## Environmental shocks and adaptation (optional)
+
+Disabled by default. When `SHOCKS.ENABLED` is true, events in
+`SHOCKS.SCHEDULE` activate at their 1-based `iteration` for `duration` steps:
+
+- `scarcity`: multiplies goods production by `max(0, 1 - magnitude)`;
+- `information`: adds `magnitude` to reputation observation noise.
+
+Scarcity changes the goods source and information changes observations only;
+neither directly creates or destroys money or goods. `shock_log` records every
+activation.
+
+At the end of each iteration, living agents adapt: unmet demand raises
+`risk_tolerance` by `ADAPTATION_RATE` (capped at 1), while met demand lowers it
+by half that rate (floored at 0). Metrics report `shock_active`, `shock_count`,
+`production_modifier`, `reputation_noise`, `mean_risk_tolerance`,
+`iterations_since_shock`, and `alive`. `recovery_time()` returns the number of
+iterations from the last shock until unmet demand returns to its pre-shock
+level, or `None` if it never does.
 
 ## Invariants
 

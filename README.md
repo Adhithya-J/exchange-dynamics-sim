@@ -66,6 +66,16 @@ attempt. `repayment_log` records who repaid whom and how quickly, while metrics
 report `altruism_volume`, `reciprocity_rate`, `outstanding_debt`, and
 `mean_repayment_delay`. `tests/test_social.py` covers the rules.
 
+## Environmental shocks (optional)
+
+Set `SHOCKS.ENABLED: true` and list events in `SHOCKS.SCHEDULE` to apply
+`scarcity` (reduced production) or `information` (noisy reputation) shocks for
+a fixed `duration`. Living agents adapt their risk tolerance when demand is
+unmet. Metrics include `shock_active`, `production_modifier`,
+`reputation_noise`, `mean_risk_tolerance`, and `alive`; `recovery_time()`
+reports how long unmet demand took to return to its pre-shock level.
+`tests/test_shocks.py` covers the rules.
+
 ## Trust and reputation (optional)
 
 Set `TRUST.ENABLED: true` to add private beliefs and public reputation. Every
