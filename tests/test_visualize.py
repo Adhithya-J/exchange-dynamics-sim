@@ -1,5 +1,7 @@
+from copy import deepcopy
+
 import pytest
-from main import ResourceSimulation
+from main import CONFIG, ResourceSimulation
 from visualize import build_figure, create_visualization
 
 
@@ -33,6 +35,53 @@ def test_build_figure_zero_iterations_has_valid_xaxis_range():
 
     assert fig.layout.xaxis.range[0] == -0.5
     assert fig.layout.xaxis.range[1] == 0.5
+
+
+def test_hover_includes_risk_tolerance():
+    sim = ResourceSimulation()
+    sim.run(iterations=2)
+
+    fig = build_figure(sim)
+
+    assert "Risk tolerance" in fig.data[0].hovertemplate
+    assert "Unmet demand" not in {trace.name for trace in fig.data}
+
+
+def test_metrics_row_appears_for_enabled_layers():
+    config = deepcopy(CONFIG)
+    config["SIMULATION"].update(
+        {"AGENTS": 3, "ITERATIONS": 3, "INITIAL_RESOURCES": 100.0}
+    )
+    config["AGENTS"]["LIVING_COST"] = 0.0
+    config["MARKET"].update(
+        {
+            "ENABLED": True,
+            "PRODUCTION_RANGE": (0.0, 0.0),
+            "CONSUMPTION_RANGE": (1.0, 1.0),
+        }
+    )
+    config["TRUST"]["ENABLED"] = True
+    config["SHOCKS"].update(
+        {
+            "ENABLED": True,
+            "SCHEDULE": [
+                {
+                    "iteration": 2,
+                    "type": "scarcity",
+                    "magnitude": 0.5,
+                    "duration": 1,
+                }
+            ],
+        }
+    )
+    sim = ResourceSimulation(config)
+    sim.run(iterations=3)
+
+    fig = build_figure(sim)
+
+    names = {trace.name for trace in fig.data}
+    assert {"Unmet demand", "Mean reputation", "Shock active"} <= names
+    assert fig.layout.yaxis2 is not None
 
 
 def test_create_visualization(tmp_path):

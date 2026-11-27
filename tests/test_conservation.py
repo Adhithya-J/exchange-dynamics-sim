@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 import math
+import random
 
 from main import CONFIG, Agent, ResourceSimulation
 
@@ -90,6 +91,74 @@ class TestConservation:
         simulation.run(iterations=25)
 
         assert math.isclose(money_total(simulation), 250.0)
+
+    def test_random_configurations_preserve_invariants(self):
+        rng = random.Random(2026)
+        for _ in range(8):
+            config = make_config()
+            config["SIMULATION"].update(
+                {
+                    "AGENTS": rng.randint(2, 6),
+                    "ITERATIONS": 10,
+                    "INITIAL_RESOURCES": rng.uniform(20.0, 200.0),
+                    "RESOURCE_FLOOR": 0.0,
+                    "RANDOM_SEED": rng.randint(0, 10000),
+                    "TRANSFER_AMOUNT_RANGE": (1.0, 5.0),
+                }
+            )
+            config["AGENTS"].update(
+                {
+                    "MIN_RESOURCES_AFTER_GIVING": 0.0,
+                    "LIVING_COST": rng.choice([0.0, 0.5, 1.0]),
+                }
+            )
+            config["MARKET"]["ENABLED"] = rng.choice([True, False])
+            config["TRUST"]["ENABLED"] = rng.choice([True, False])
+            config["SOCIAL"]["RECIPROCITY_ENABLED"] = rng.choice(
+                [True, False]
+            )
+            config["SHOCKS"]["ENABLED"] = rng.choice([True, False])
+            config["SHOCKS"]["SCHEDULE"] = [
+                {
+                    "iteration": 5,
+                    "type": "scarcity",
+                    "magnitude": 0.5,
+                    "duration": 2,
+                }
+            ]
+
+            simulation = ResourceSimulation(config)
+            simulation.initialize_agents()
+            previous_money = money_total(simulation)
+            previous_goods = 0.0
+            for _ in range(10):
+                simulation.run_iteration()
+                metrics = simulation.metrics_history[-1]
+                current_money = money_total(simulation)
+                assert current_money <= previous_money + 1e-9
+                assert math.isclose(
+                    metrics["goods_total"],
+                    previous_goods
+                    + metrics["goods_produced"]
+                    - metrics["goods_consumed"],
+                )
+                assert all(
+                    agent.resources >= 0.0 for agent in simulation.agents
+                )
+                assert all(agent.goods >= -1e-9 for agent in simulation.agents)
+                if config["TRUST"]["ENABLED"]:
+                    assert all(
+                        0.0 <= value <= 1.0
+                        for value in simulation.reputation.values()
+                    )
+                    assert all(
+                        0.0 <= value <= 1.0
+                        for agent in simulation.agents
+                        for value in agent.beliefs.values()
+                    )
+                assert metrics["outstanding_debt"] >= 0.0
+                previous_money = current_money
+                previous_goods = metrics["goods_total"]
 
     def test_living_cost_never_pushes_money_below_the_floor(self):
         config = make_config()

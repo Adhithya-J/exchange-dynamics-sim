@@ -94,8 +94,8 @@ parameters.
 
 ## Cross-cutting
 
-- [ ] Keep the README model/limitations sections in sync with each change.
-- [ ] Extend `visualize.py` to chart new metrics (demand, reputation, shocks).
-- [ ] Add invariant/property tests for resource and goods conservation.
-- [ ] Add a CI workflow under `.github/` to run `pytest` on supported Python
+- [x] Keep the README model/limitations sections in sync with each change.
+- [x] Extend `visualize.py` to chart new metrics (demand, reputation, shocks).
+- [x] Add invariant/property tests for resource and goods conservation.
+- [x] Add a CI workflow under `.github/` to run `pytest` on supported Python
       versions (3.11-3.14).

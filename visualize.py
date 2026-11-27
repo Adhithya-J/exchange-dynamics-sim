@@ -15,6 +15,7 @@ from pathlib import Path
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.colors import qualitative
+from plotly.subplots import make_subplots
 
 from main import CONFIG, MetricsCalculator, ResourceSimulation
 from utils import load_config
@@ -50,6 +51,21 @@ def _summary_annotation(
 
     simulation_settings = simulation.config["SIMULATION"]
     agent_settings = simulation.config["AGENTS"]
+    market_enabled = simulation.config.get("MARKET", {}).get("ENABLED", False)
+    trust_enabled = simulation.config.get("TRUST", {}).get("ENABLED", False)
+    shocks_enabled = simulation.config.get("SHOCKS", {}).get("ENABLED", False)
+    optional_lines = ""
+    if market_enabled:
+        optional_lines += (
+            f"<br>Unmet demand: {summary.get('unmet_demand', 0.0):,.1f}"
+        )
+    if trust_enabled:
+        optional_lines += (
+            f"<br>Mean reputation: {summary.get('mean_reputation', 0.0):.3f}"
+        )
+    if shocks_enabled:
+        active = "yes" if summary.get("shock_active", 0) else "no"
+        optional_lines += f"<br>Shock active: {active}"
     return {
         "x": 0.99,
         "y": 1.16,
@@ -65,7 +81,8 @@ def _summary_annotation(
             f"Median: {summary['median']:,.1f}<br>"
             f"Gini: {summary['gini']:.3f}<br>"
             f"Total: {summary['total']:,.1f}<br>"
-            f"Total transfers: {int(summary['total_transfers'])}<br><br>"
+            f"Total transfers: {int(summary['total_transfers'])}"
+            f"{optional_lines}<br><br>"
             f"Initial resources: {simulation_settings['INITIAL_RESOURCES']:,.1f} per agent<br>"
             f"Living cost: {agent_settings['LIVING_COST']:,.1f} per iteration"
         ),
@@ -119,6 +136,7 @@ def build_figure(simulation: ResourceSimulation) -> go.Figure:
             agent = agent_history[agent_history["id"] == agent_id]
             gen_score = float(agent["generosity_score"].iloc[0])
             acc_score = float(agent["acceptance_score"].iloc[0])
+            risk_score = float(agent["risk_tolerance"].iloc[0])
             traces.append(
                 go.Scatter(
                     x=agent["iteration"],
@@ -130,7 +148,8 @@ def build_figure(simulation: ResourceSimulation) -> go.Figure:
                         f"{agent_id}<br>"
                         "Resources: %{y:,.2f}<br>"
                         f"Altruism / generosity: {gen_score:.2f}<br>"
-                        f"Acceptance: {acc_score:.2f}<extra></extra>"
+                        f"Acceptance: {acc_score:.2f}<br>"
+                        f"Risk tolerance: {risk_score:.2f}<extra></extra>"
                     ),
                 )
             )
@@ -157,10 +176,90 @@ def build_figure(simulation: ResourceSimulation) -> go.Figure:
     minimum_resources = float(agent_history["resources"].min())
     y_padding = max((maximum_resources - minimum_resources) * 0.05, 1.0)
 
-    figure = go.Figure(
-        data=traces(),
-        frames=frames,
+    show_metrics = bool(simulation.metrics_history) and any(
+        metrics.get(key, 0)
+        for metrics in simulation.metrics_history
+        for key in ("unmet_demand", "mean_reputation", "shock_active")
     )
+
+    if show_metrics:
+        figure = make_subplots(
+            rows=2,
+            cols=1,
+            shared_xaxes=True,
+            row_heights=[0.72, 0.28],
+            vertical_spacing=0.09,
+            specs=[[{}], [{"secondary_y": True}]],
+        )
+        for trace in traces():
+            figure.add_trace(trace, row=1, col=1)
+        metric_iterations = [0] + [
+            metrics["iteration"] for metrics in simulation.metrics_history
+        ]
+        unmet_demand = [0.0] + [
+            metrics.get("unmet_demand", 0.0)
+            for metrics in simulation.metrics_history
+        ]
+        mean_reputation = [0.0] + [
+            metrics.get("mean_reputation", 0.0)
+            for metrics in simulation.metrics_history
+        ]
+        shock_active = [0] + [
+            metrics.get("shock_active", 0)
+            for metrics in simulation.metrics_history
+        ]
+        figure.add_trace(
+            go.Scatter(
+                x=metric_iterations,
+                y=unmet_demand,
+                mode="lines",
+                name="Unmet demand",
+                line={"color": "#ef4444", "width": 2},
+            ),
+            row=2,
+            col=1,
+        )
+        figure.add_trace(
+            go.Scatter(
+                x=metric_iterations,
+                y=mean_reputation,
+                mode="lines",
+                name="Mean reputation",
+                line={"color": "#2563eb", "width": 2},
+            ),
+            row=2,
+            col=1,
+            secondary_y=True,
+        )
+        if any(shock_active):
+            figure.add_trace(
+                go.Scatter(
+                    x=metric_iterations,
+                    y=shock_active,
+                    mode="lines",
+                    name="Shock active",
+                    line={"color": "#b91c1c", "width": 1, "dash": "dot"},
+                    fill="tozeroy",
+                    fillcolor="rgba(220, 38, 38, 0.10)",
+                ),
+                row=2,
+                col=1,
+                secondary_y=True,
+            )
+        figure.update_yaxes(title_text="Unmet demand", row=2, col=1)
+        figure.update_yaxes(
+            title_text="Trust / shock",
+            secondary_y=True,
+            row=2,
+            col=1,
+        )
+        figure.update_xaxes(title_text="Iteration", row=2, col=1)
+        figure.frames = frames
+    else:
+        figure = go.Figure(
+            data=traces(),
+            frames=frames,
+        )
     figure.update_layout(
         title={
             "text": "Resources by Agent Over Time",
@@ -168,7 +267,7 @@ def build_figure(simulation: ResourceSimulation) -> go.Figure:
             "xanchor": "left",
         },
         template="plotly_white",
-        height=700,
+        height=820 if show_metrics else 700,
         margin={"l": 70, "r": 40, "t": 135, "b": 80},
         xaxis={
             "title": "Iteration",

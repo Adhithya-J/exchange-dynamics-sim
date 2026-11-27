@@ -23,11 +23,18 @@ Supported Python versions: 3.11 through 3.14.
 
 Each agent has:
 
-- a resource balance;
+- a money balance (`resources`);
 - a resource floor below which the agent is dead;
 - a generosity score, which controls the chance of giving;
-- an acceptance score, which controls the chance of receiving; and
-- short-term memory of agents that previously transferred resources to them.
+- an acceptance score, which controls the chance of receiving;
+- short-term memory of agents that previously transferred resources, plus
+  optional private trust beliefs;
+- an optional goods inventory; and
+- a fixed risk tolerance.
+
+The optional layers add a goods market, trust and reputation, reciprocity, and
+environmental shocks. `MODEL.md` documents the combined rules and conservation
+ledger.
 
 Affordability is derived from the agent's resource balance. Agents below the
 configured resource range become less likely to give, while acceptance is
@@ -152,6 +159,8 @@ inspect `metrics_history` or the returned DataFrame.
 
 ## Limitations
 
-The model has no production data, wages, rent, births, deaths, or spatial
-network. Its results depend on the chosen rules and random seed. It should be
-treated as an educational simulation and a base for further experiments.
+The model has no wages, rent, births, or spatial network. The market uses a
+single good at a fixed price, shocks follow a fixed schedule, and trust updates
+are simple heuristics rather than estimated beliefs. Its results depend on the
+chosen rules and random seed; treat it as an educational simulation and a base
+for further experiments.
