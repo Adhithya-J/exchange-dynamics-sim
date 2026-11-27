@@ -1,0 +1,77 @@
+# Model Rules and Conservation
+
+This document is the source of truth for what enters, leaves, and moves inside
+the simulation. Update it whenever a rule changes, and keep the conservation
+tests in `tests/test_conservation.py` in sync.
+
+## Units
+
+| Unit | Stored on | Meaning |
+| --- | --- | --- |
+| Money | `Agent.resources` | Medium of exchange. Not valuable on its own. |
+| Goods | `Agent.goods` | Consumable output. Valuable only when consumed. |
+
+Both are non-negative floats. An agent is dead when its money is at or below
+`SIMULATION.RESOURCE_FLOOR`.
+
+## Conservation ledger
+
+| Process | Money | Goods | Notes |
+| --- | --- | --- | --- |
+| Social transfer | conserved | unchanged | The giver loses exactly what the receiver gains. |
+| Production | unchanged | **source** | Living agents add `production_rate` goods. |
+| Market trade | conserved | conserved | The buyer pays the seller; goods move with the payment. |
+| Consumption | unchanged | **sink** | Living agents destroy up to `consumption_need` goods. |
+| Living cost | **sink** | unchanged | Each living agent is charged `LIVING_COST` money. |
+
+Every change in total money or goods must be attributable to one row above.
+Production is the only goods source, consumption is the only goods sink, and
+living cost is currently the only money sink. Trade and altruistic transfers
+only move value between agents.
+
+## Death rule
+
+- Death is explicit: `resources <= RESOURCE_FLOOR`.
+- Dead agents neither produce, trade, consume, nor pay living cost.
+- Reaching the floor does not top the agent up (`main.py:_apply_living_cost`).
+
+## Iteration order
+
+1. Social transfers between living agents.
+2. Goods production, if the market is enabled.
+3. Market trade for goods, if the market is enabled.
+4. Consumption of goods, if the market is enabled.
+5. Living cost for every living agent.
+6. Metrics and agent snapshots.
+
+## Minimal market rules
+
+The market is optional and disabled by default; with `MARKET.ENABLED: false`
+the simulation behaves exactly like the transfer-only model.
+
+- Every living agent produces `production_rate` goods per iteration. The rate
+  is drawn once at initialization from `MARKET.PRODUCTION_RANGE`.
+- Every living agent needs `consumption_need` goods per iteration, drawn from
+  `MARKET.CONSUMPTION_RANGE`.
+- Agents first consume their own goods. A shortfall is bought from other living
+  agents' surplus, defined as `goods - consumption_need`, so sellers keep
+  enough to cover their own need.
+- The price is fixed at `MARKET.PRICE` money per good (no price discovery yet).
+- A buyer may spend down to `SIMULATION.RESOURCE_FLOOR` but not below it.
+- Unsold goods stay in inventory. Unmet demand is recorded.
+- Goods held by dead agents are stranded but still counted in total goods.
+
+## Invariants
+
+1. A social transfer or market trade never changes total money.
+2. Total goods change only by `produced - consumed`.
+3. Total money changes only by `-LIVING_COST * living_agents`.
+4. No agent's money becomes negative.
+5. Dead agents do not participate in any step.
+
+## Open decisions
+
+- Replace the living-cost money sink with paid consumption once prices react to
+  scarcity.
+- Decide whether stranded goods pass to other agents when an owner dies.
+- Add price discovery to replace the fixed `MARKET.PRICE`.

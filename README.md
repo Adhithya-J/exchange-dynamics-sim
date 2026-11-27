@@ -77,6 +77,7 @@ inspect `metrics_history` or the returned DataFrame.
 - `visualize.py` - interactive Plotly visualization.
 - `TRUST_SOCIETY_SCOPE.md` - research scope and roadmap.
 - `TODO.md` - implementation tasks derived from the roadmap.
+- `MODEL.md` - units, conservation ledger, and market rules.
 - `requirements.txt` - runtime and test dependencies.
 
 ## Limitations
