@@ -170,11 +170,15 @@
           1.0
         ],
         "ENABLED": false,
+        "MAX_PRICE": 10.0,
+        "MIN_PRICE": 0.1,
         "PRICE": 1.0,
+        "PRICE_ADJUSTMENT": 0.1,
         "PRODUCTION_RANGE": [
           0.0,
           2.0
-        ]
+        ],
+        "UNMET_DEMAND_PENALTY": 2.0
       },
       "MEMORY": {
         "PREFERENCE_FRACTION": 0.5,
@@ -200,7 +204,10 @@
         "RECIPROCITY_ENABLED": false,
         "REPAY_DELAY": 3,
         "REPAY_FRACTION": 1.0,
-        "REPAY_PROBABILITY": 0.5
+        "REPAY_PROBABILITY_RANGE": [
+          0.2,
+          0.8
+        ]
       },
       "TRUST": {
         "BIAS": 0.0,
@@ -211,8 +218,7 @@
         "INITIAL_BELIEF": 0.5,
         "LEARNING_RATE": 0.2,
         "NOISE": 0.0,
-        "PUBLIC_WEIGHT": 0.3,
-        "RETURN_MULTIPLIER": 2.0
+        "PUBLIC_WEIGHT": 0.3
       }
     },
     "features": {
@@ -265,9 +271,11 @@
       "iteration": 0,
       "metrics": {
         "alive": 3,
+        "extinction_iteration": null,
         "gini": 0.0,
         "goods_total": 0.0,
         "iteration": 0,
+        "living_cost_due": 0.0,
         "living_cost_paid": 0.0,
         "max": 10.0,
         "mean": 10.0,
@@ -309,6 +317,7 @@
       "metrics": {
         "alive": 3,
         "altruism_volume": 7.462487408312987,
+        "extinction_iteration": null,
         "gini": 0.23690436216866628,
         "goods_consumed": 0.0,
         "goods_produced": 0.0,
@@ -316,6 +325,7 @@
         "goods_traded": 0.0,
         "iteration": 1,
         "iterations_since_shock": 0,
+        "living_cost_due": 9.0,
         "living_cost_paid": 9.0,
         "max": 9.672688605483039,
         "mean": 7.0,
@@ -382,6 +392,7 @@
       "metrics": {
         "alive": 2,
         "altruism_volume": 2.527543368164472,
+        "extinction_iteration": null,
         "gini": 0.38645021630114257,
         "goods_consumed": 0.0,
         "goods_produced": 0.0,
@@ -389,6 +400,7 @@
         "goods_traded": 0.0,
         "iteration": 2,
         "iterations_since_shock": 0,
+        "living_cost_due": 9.0,
         "living_cost_paid": 8.624995733632526,
         "max": 7.173484613197909,
         "mean": 4.125001422122492,
@@ -455,6 +467,7 @@
       "metrics": {
         "alive": 2,
         "altruism_volume": 4.3134250221802315,
+        "extinction_iteration": null,
         "gini": 0.3668211185444974,
         "goods_consumed": 0.0,
         "goods_produced": 0.0,
@@ -462,6 +475,7 @@
         "goods_traded": 0.0,
         "iteration": 3,
         "iterations_since_shock": 0,
+        "living_cost_due": 6.0,
         "living_cost_paid": 6.0,
         "max": 3.5077292935722895,
         "mean": 2.1250014221224913,
@@ -528,6 +542,7 @@
       "metrics": {
         "alive": 1,
         "altruism_volume": 3.0025937270426883,
+        "extinction_iteration": null,
         "gini": 0.6666666666666666,
         "goods_consumed": 0.0,
         "goods_produced": 0.0,
@@ -535,6 +550,7 @@
         "goods_traded": 0.0,
         "iteration": 4,
         "iterations_since_shock": 0,
+        "living_cost_due": 6.0,
         "living_cost_paid": 5.519521332118655,
         "max": 0.855482934248819,
         "mean": 0.28516097808293966,

@@ -9,9 +9,10 @@ resources are consumed. Open `simulation.html` to replay the whole run.*
 An experimental agent-based simulation of resource sharing and inequality.
 Agents have different generosity and acceptance tendencies. During each
 iteration, living agents may transfer a variable amount of resources to another
-living agent, remember previous givers, and pay a fixed cost of living.
-An agent that reaches the configured resource floor is dead and no longer
-participates in transfers.
+living agent, remember previous givers, and pay a cost of living. When the
+optional market is enabled, they also produce and consume goods, and unmet
+demand adds an emergency money cost. An agent that reaches the configured
+resource floor is dead and no longer participates.
 
 ## Status
 
@@ -60,22 +61,29 @@ to expose the current state for analysis.
 - each agent produces `PRODUCTION_RANGE` goods per iteration;
 - each agent needs `CONSUMPTION_RANGE` goods per iteration;
 - agents consume their own goods first and buy shortfalls from other agents'
-  surplus at the fixed `PRICE`;
-- unsold goods stay in inventory, and unmet demand is recorded.
+  surplus at the current price;
+- unmet demand is charged at `UNMET_DEMAND_PENALTY` money per unit, so a good is
+  worth that much to a buyer and buyers refuse prices above it;
+- buyers keep back the fixed living cost, and seller income respects the same
+  receiving ceiling as gifts;
+- the price starts at `PRICE` and moves each iteration from the balance of
+  unmet demand and unsold goods (`PRICE_ADJUSTMENT`, `MIN_PRICE`, `MAX_PRICE`);
+- unsold goods stay in inventory.
 
 Transfers and market trades only move money between agents. Production creates
-goods, consumption destroys them, and the living cost remains an explicit money
-sink. `MODEL.md` documents the full ledger, and `tests/test_conservation.py`
-plus `tests/test_market.py` enforce it.
+goods, consumption destroys them, and the subsistence charge is the explicit
+money sink. `MODEL.md` documents the full ledger, and
+`tests/test_conservation.py` plus `tests/test_market.py` enforce it.
 
 ## Altruism and reciprocity (optional)
 
 Direct transfers are the altruism layer; market trades are kept separate. Set
 `SOCIAL.RECIPROCITY_ENABLED: true` to schedule a possible repayment after each
-gift. `REPAY_PROBABILITY`, `REPAY_DELAY`, and `REPAY_FRACTION` control the
-attempt. `repayment_log` records who repaid whom and how quickly, while metrics
-report `altruism_volume`, `reciprocity_rate`, `outstanding_debt`, and
-`mean_repayment_delay`. `tests/test_social.py` covers the rules.
+gift. Each agent draws a hidden `REPAY_PROBABILITY_RANGE` value, and
+`REPAY_DELAY` and `REPAY_FRACTION` control the attempt. `repayment_log` records
+who repaid whom and how quickly, while metrics report `altruism_volume`,
+`reciprocity_rate`, `outstanding_debt`, and `mean_repayment_delay`.
+`tests/test_social.py` covers the rules.
 
 ## Environmental shocks (optional)
 
@@ -90,17 +98,19 @@ reports how long unmet demand took to return to its pre-shock level.
 ## Trust and reputation (optional)
 
 Set `TRUST.ENABLED: true` to add private beliefs and public reputation. Every
-agent starts at `INITIAL_BELIEF`. After a transfer, the receiver updates its
-belief about the giver and a shared public reputation observation, with
-configurable `LEARNING_RATE`, `DECAY`, `NOISE`, `DELAY`, `BIAS`, and
-`PUBLIC_WEIGHT`. The simulation reports `mean_trust`, `mean_reputation`,
-`reputation_error`, and `reputation_brier`.
+agent starts at `INITIAL_BELIEF`. When a due gift is actually repaid or
+defaulted, the creditor updates its belief about the debtor and a shared public
+reputation observation, with configurable `LEARNING_RATE`, `DECAY`, `NOISE`,
+`DELAY`, `BIAS`, and `PUBLIC_WEIGHT`. Gifts alone do not raise reputation. The
+simulation reports `mean_trust`, `mean_reputation`, `reputation_error`, and
+`reputation_brier`.
 
-Set `TRUST.DECISION_WEIGHT` above 0 to use those beliefs in giving and
-accepting decisions. Expected payoff is `belief * RETURN_MULTIPLIER - 1`, turned
-into a probability with each agent's fixed `RISK_TOLERANCE`, then blended with
-the legacy score. Trusted agents are also selected as receivers more often.
-`decision_log` records each attempt; `tests/test_trust.py` and
+Set `TRUST.DECISION_WEIGHT` above 0 to use those beliefs when choosing a
+receiver. Expected net payoff is `belief * REPAY_FRACTION - 1`, turned into a
+probability with each agent's fixed `RISK_TOLERANCE`, then blended with the
+legacy memory weight. Giving and accepting keep their affordability scores, so
+trust is counted once instead of being multiplied through selection, giving,
+and acceptance. `decision_log` records each attempt; `tests/test_trust.py` and
 `tests/test_decisions.py` cover the update and decision rules.
 
 ## Experiments
@@ -243,7 +253,9 @@ inspect `metrics_history` or the returned DataFrame.
 ## Limitations
 
 The model has no wages, rent, births, or spatial network. The market uses a
-single good at a fixed price, shocks follow a fixed schedule, and trust updates
-are simple heuristics rather than estimated beliefs. Its results depend on the
-chosen rules and random seed; treat it as an educational simulation and a base
-for further experiments.
+single good with a single adaptive price, shocks follow a fixed schedule, and
+trust updates are simple heuristics rather than estimated beliefs. Money is
+finite, so a long run eventually goes extinct; the default horizon stops before
+that point and `extinction_iteration` makes the event explicit. Its results
+depend on the chosen rules and random seed; treat it as an educational
+simulation and a base for further experiments.

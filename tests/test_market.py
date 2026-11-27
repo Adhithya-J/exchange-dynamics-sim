@@ -118,7 +118,26 @@ class TestMarketCycle:
         assert metrics["goods_produced"] == 0.0
         assert metrics["goods_traded"] == 0.0
         assert metrics["unmet_demand"] == 3.0
-        assert math.isclose(money_total(simulation), 300.0)
+        assert metrics["living_cost_due"] == 6.0
+        assert metrics["living_cost_paid"] == 6.0
+        assert math.isclose(money_total(simulation), 294.0)
+
+    def test_unmet_demand_charges_the_subsistence_penalty(self):
+        config = market_config(agents=1)
+        config["MARKET"]["CONSUMPTION_RANGE"] = (1.0, 1.0)
+        config["MARKET"]["PRODUCTION_RANGE"] = (0.0, 0.0)
+        config["MARKET"]["UNMET_DEMAND_PENALTY"] = 2.0
+        simulation = ResourceSimulation(config)
+        simulation.initialize_agents()
+        agent = simulation.agents[0]
+
+        simulation.run_iteration()
+
+        metrics = simulation.metrics_history[-1]
+        assert metrics["unmet_demand"] == 1.0
+        assert metrics["living_cost_due"] == 2.0
+        assert metrics["living_cost_paid"] == 2.0
+        assert agent.resources == 98.0
 
     def test_buyers_never_spend_below_the_resource_floor(self):
         config = market_config()
@@ -162,12 +181,78 @@ class TestMarketCycle:
 
         simulation.run(iterations=10)
 
-        assert math.isclose(money_total(simulation), 600.0)
+        previous_money = 600.0
         previous_goods = 0.0
         for metrics in simulation.metrics_history:
+            assert math.isclose(
+                metrics["total"], previous_money - metrics["living_cost_paid"]
+            )
             expected = previous_goods + metrics["goods_produced"] - metrics["goods_consumed"]
             assert math.isclose(metrics["goods_total"], expected)
             previous_goods = metrics["goods_total"]
+            previous_money = metrics["total"]
+
+    def test_buyers_keep_back_the_fixed_living_cost(self):
+        config = market_config()
+        config["AGENTS"]["LIVING_COST"] = 3.0
+        simulation = ResourceSimulation(config)
+        simulation.initialize_agents()
+        buyer, seller = simulation.agents
+        buyer.resources = 10.0
+        buyer.consumption_need = 10.0
+        seller.production_rate = 10.0
+        seller.consumption_need = 0.0
+
+        simulation._run_market_cycle()
+
+        assert buyer.resources == 3.0
+        assert seller.resources == 107.0
+
+    def test_seller_income_respects_the_receiving_ceiling(self):
+        config = market_config()
+        config["AGENTS"]["MAX_RESOURCES_AFTER_RECEIVING"] = 10.0
+        simulation = ResourceSimulation(config)
+        simulation.initialize_agents()
+        buyer, seller = simulation.agents
+        buyer.resources = 10.0
+        buyer.consumption_need = 10.0
+        seller.resources = 9.0
+        seller.production_rate = 10.0
+        seller.consumption_need = 0.0
+
+        simulation.run_iteration()
+
+        metrics = simulation.metrics_history[-1]
+        assert metrics["goods_traded"] == 1.0
+        assert seller.resources == 10.0
+
+    def test_buyers_refuse_goods_priced_above_their_value(self):
+        config = market_config()
+        config["MARKET"]["PRICE"] = 3.0
+        config["MARKET"]["UNMET_DEMAND_PENALTY"] = 2.0
+        simulation = ResourceSimulation(config)
+        simulation.initialize_agents()
+        buyer, seller = simulation.agents
+        buyer.consumption_need = 1.0
+        seller.production_rate = 5.0
+
+        simulation.run_iteration()
+
+        metrics = simulation.metrics_history[-1]
+        assert metrics["goods_traded"] == 0.0
+        assert metrics["unmet_demand"] == 1.0
+
+    def test_price_rises_when_demand_exceeds_supply(self):
+        config = market_config(agents=2)
+        config["MARKET"]["CONSUMPTION_RANGE"] = (1.0, 1.0)
+        config["MARKET"]["PRODUCTION_RANGE"] = (0.0, 0.0)
+        simulation = ResourceSimulation(config)
+        simulation.initialize_agents()
+
+        simulation.run_iteration()
+
+        assert simulation.metrics_history[-1]["price"] == 1.0
+        assert simulation.price > 1.0
 
 
 class TestMarketValidation:

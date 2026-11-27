@@ -245,6 +245,8 @@ def _metrics_from_rows(rows: dict[str, dict[str, Any]]) -> dict[str, Any]:
         sum(bool(row.get("alive", False)) for row in rows.values())
     )
     statistics["living_cost_paid"] = 0.0
+    statistics["living_cost_due"] = 0.0
+    statistics["extinction_iteration"] = None
     return statistics
 
 

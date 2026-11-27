@@ -192,16 +192,14 @@ class TestSocialValidation:
         config = social_config()
         config["SOCIAL"][setting] = value
         simulation = ResourceSimulation(config)
-        simulation.initialize_agents()
 
         with pytest.raises(ValueError, match=message):
-            simulation.run_iteration()
+            simulation.initialize_agents()
 
     def test_non_numeric_setting_is_rejected(self):
         config = social_config()
         config["SOCIAL"]["REPAY_DELAY"] = "soon"
         simulation = ResourceSimulation(config)
-        simulation.initialize_agents()
 
         with pytest.raises(ValueError, match="must be numeric"):
-            simulation.run_iteration()
+            simulation.initialize_agents()

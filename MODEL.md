@@ -8,43 +8,68 @@ tests in `tests/test_conservation.py` in sync.
 
 | Unit | Stored on | Meaning |
 | --- | --- | --- |
-| Money | `Agent.resources` | Medium of exchange. Not valuable on its own. |
-| Goods | `Agent.goods` | Consumable output. Valuable only when consumed. |
+| Money | `Agent.resources` | Medium of exchange. It buys goods and pays subsistence costs. |
+| Goods | `Agent.goods` | Consumable output. Consuming a good avoids an emergency money cost. |
+| Repayment probability | `Agent.repayment_probability` | Hidden trait: the chance this agent repays a due gift. |
 
-Both are non-negative floats. An agent is dead when its money is at or below
-`SIMULATION.RESOURCE_FLOOR`.
+Money and goods are non-negative floats. An agent is dead when its money is at
+or below `SIMULATION.RESOURCE_FLOOR`.
+
+## What makes goods valuable
+
+An agent needs `consumption_need` goods per iteration. Goods it owns are
+consumed first. Any remaining unmet demand is charged in money at the
+living-cost step at `MARKET.UNMET_DEMAND_PENALTY` per unit. A good is therefore
+worth up to that penalty to a buyer: buying a good at a price below the penalty
+reduces the money the agent will lose to unmet demand.
+
+With `MARKET.ENABLED: false` every consumption need is zero, so the penalty is
+never charged and the simulation is the original transfer-only model.
 
 ## Conservation ledger
 
 | Process | Money | Goods | Notes |
 | --- | --- | --- | --- |
 | Social transfer | conserved | unchanged | The giver loses exactly what the receiver gains. |
-| Production | unchanged | **source** | Living agents add `production_rate` goods. |
+| Repayment | conserved | unchanged | A debtor returns part of a earlier gift. |
+| Production | unchanged | **source** | Living agents add `production_rate * production_modifier` goods. |
 | Market trade | conserved | conserved | The buyer pays the seller; goods move with the payment. |
 | Consumption | unchanged | **sink** | Living agents destroy up to `consumption_need` goods. |
-| Living cost | **sink** | unchanged | Each living agent is charged `LIVING_COST` money. |
+| Subsistence cost | **sink** | unchanged | Each living agent is charged `LIVING_COST` plus `UNMET_DEMAND_PENALTY * unmet_demand`. |
 
 Every change in total money or goods must be attributable to one row above.
 Production is the only goods source, consumption is the only goods sink, and
-living cost is currently the only money sink. Trade and altruistic transfers
-only move value between agents.
+the subsistence charge is the only money sink. The charge is capped at what the
+agent can pay while staying at or above `RESOURCE_FLOOR`, so the exact money
+removed is recorded as `living_cost_paid`. `living_cost_due` records the nominal
+charge before that cap.
 
 ## Death rule
 
 - Death is explicit: `resources <= RESOURCE_FLOOR`.
-- Dead agents neither produce, trade, consume, nor pay living cost.
+- Dead agents neither produce, trade, consume, nor pay subsistence costs.
 - Reaching the floor does not top the agent up (`main.py:_apply_living_cost`).
+- A death during the subsistence step is logged with cause `living_cost`; the
+  cause covers both the fixed cost and the unmet-demand penalty.
+
+Money is finite and the subsistence charge is a sink, so every run eventually
+reaches extinction if it runs long enough. `ITERATIONS` defaults to 1000, which
+is below the extinction point for the checked-in seed and keeps final metrics
+meaningful. The metric `extinction_iteration` records the first iteration at
+which no agent is alive (`null` before then). Runs longer than that point report
+zero-valued wealth metrics, so experiments should treat extinction explicitly.
 
 ## Iteration order
 
 1. Expire active shocks and activate scheduled ones.
 2. Decay trust and deliver delayed reputation observations.
-3. Pay due reciprocal repayments.
+3. Pay due reciprocal repayments and update trust from the outcome.
 4. Social transfers between living agents.
 5. Goods production, if the market is enabled.
 6. Market trade for goods, if the market is enabled.
 7. Consumption of goods, if the market is enabled.
-8. Living cost for every living agent.
+8. Subsistence cost for every living agent (fixed cost plus unmet-demand
+   penalty).
 9. Adaptation of risk tolerance.
 10. Metrics and agent snapshots.
 
@@ -53,12 +78,13 @@ only move value between agents.
 `transfer_log` records every completed gift and repayment (iteration, giver,
 receiver, amount, and kind). `trade_log` records every market trade (iteration,
 buyer, seller, quantity, price, and money). `death_log` records every death and
-its cause (`gift`, `repayment`, `market`, or `living_cost`). They are
-append-only observations written after a step has been decided, so they cannot
-change the simulation. `agent_history` stores one row per agent and iteration,
-including resources, goods, risk tolerance, alive status, and public reputation
-when enabled. The `living_cost_paid` metric records the money removed by the
-living-cost sink each iteration, so total money can be reconciled from the logs.
+its cause (`gift`, `repayment`, `market`, or `living_cost`). They are append-only
+observations written after a step has been decided, so they cannot change the
+simulation. `agent_history` stores one row per agent and iteration, including
+resources, goods, risk tolerance, alive status, and public reputation when
+enabled. The `living_cost_paid` metric records the money removed by the
+subsistence sink each iteration, so total money can be reconciled from the logs
+as `previous_total - living_cost_paid`.
 
 `replay.py` packages those observations into a versioned JSON replay
 (`schema_version`, `meta`, `agents`, `ticks`, and typed `events`). The replay is
@@ -67,22 +93,32 @@ positions or drawing details. The world visualization reads the replay; huts,
 paths, coin boxes, and terrain are a presentation layer only, not part of the
 model. Its outer meadow is a visual mirror of total money (`series.total`), not
 an extra resource stock or a second ledger; the bushes and ponds thin only when
-the recorded total falls, which in the default rules means the living-cost sink.
+the recorded total falls.
 
 ## Minimal market rules
 
 The market is optional and disabled by default; with `MARKET.ENABLED: false`
 the simulation behaves exactly like the transfer-only model.
 
-- Every living agent produces `production_rate` goods per iteration. The rate
-  is drawn once at initialization from `MARKET.PRODUCTION_RANGE`.
+- Every living agent produces `production_rate` goods per iteration. The rate is
+  drawn once at initialization from `MARKET.PRODUCTION_RANGE`.
 - Every living agent needs `consumption_need` goods per iteration, drawn from
   `MARKET.CONSUMPTION_RANGE`.
-- Agents first consume their own goods. A shortfall is bought from other living
-  agents' surplus, defined as `goods - consumption_need`, so sellers keep
-  enough to cover their own need.
-- The price is fixed at `MARKET.PRICE` money per good (no price discovery yet).
-- A buyer may spend down to `SIMULATION.RESOURCE_FLOOR` but not below it.
+- Agents consume their own goods first. A shortfall is bought from other living
+  agents' surplus, defined as `goods - consumption_need`, so sellers keep enough
+  to cover their own need.
+- A buyer will not pay more than `MARKET.UNMET_DEMAND_PENALTY` per good. Above
+  that price the emergency cost of unmet demand is cheaper than the good, so
+  the buyer refuses to trade.
+- A buyer keeps `RESOURCE_FLOOR + LIVING_COST` in money and spends only the
+  remainder, so trade cannot consume the money needed for the fixed subsistence
+  cost.
+- A seller's market income is capped by `MAX_RESOURCES_AFTER_RECEIVING`, the
+  same ceiling that applies to gifts.
+- The price starts at `MARKET.PRICE` and adjusts once per iteration:
+  `imbalance = (unmet_demand - leftover_goods) / total_demand`, then
+  `next_price = price * (1 + PRICE_ADJUSTMENT * imbalance)`, clamped to
+  `MIN_PRICE` and `MAX_PRICE`. `PRICE_ADJUSTMENT: 0` keeps a fixed price.
 - Unsold goods stay in inventory. Unmet demand is recorded.
 - Goods held by dead agents are stranded but still counted in total goods.
 
@@ -94,9 +130,12 @@ never create gift debts.
 
 When `SOCIAL.RECIPROCITY_ENABLED` is true, each gift is recorded as a debt from
 the receiver to the giver. After `REPAY_DELAY` iterations the debtor attempts a
-repayment with probability `REPAY_PROBABILITY`, returning `REPAY_FRACTION` of
-the gift while staying at or above `RESOURCE_FLOOR`. Repayments are ordinary
-money transfers, so they conserve total money.
+repayment with its own hidden `repayment_probability`, returning
+`REPAY_FRACTION` of the gift while staying at or above `RESOURCE_FLOOR`.
+`repayment_probability` is drawn once at initialization from
+`SOCIAL.REPAY_PROBABILITY_RANGE`; the legacy scalar `REPAY_PROBABILITY` is still
+accepted for old configurations and sets every agent to the same value.
+Repayments are ordinary money transfers, so they conserve total money.
 
 `repayment_log` records the debtor, creditor, original gift iteration,
 repayment iteration, delay, and amount. Metrics include `altruism_volume`,
@@ -105,39 +144,55 @@ repayment iteration, delay, and amount. Metrics include `altruism_volume`,
 
 ## Trust and reputation (optional)
 
+Reputation is a belief about repayment, not gratitude for receiving a gift.
 Disabled by default. When `TRUST.ENABLED` is true:
 
 - every agent starts with public reputation and private beliefs equal to
   `INITIAL_BELIEF`;
-- after a successful transfer, the receiver observes the giver as cooperative;
-- the private belief moves toward 1 by `LEARNING_RATE`, then blends with public
-  reputation by `PUBLIC_WEIGHT`;
-- public reputation moves toward the observed value (1 plus `BIAS` and Gaussian
-  `NOISE`, clipped to [0, 1]);
+- when a scheduled debt comes due, the creditor observes whether the debtor
+  repaid (`1`) or defaulted (`0`);
+- the private belief of that creditor moves toward the observation by
+  `LEARNING_RATE`, then blends with public reputation by `PUBLIC_WEIGHT`;
+- public reputation moves toward the observed value (the outcome plus `BIAS`
+  and Gaussian `NOISE`, clipped to [0, 1]);
 - observations reach public reputation after `DELAY` iterations;
 - beliefs and reputation are pulled back toward the prior by `DECAY` each
   iteration.
 
+Gifts by themselves do not raise reputation. An agent that never repays is
+therefore distinguishable from one that does, and with heterogeneous
+`repayment_probability` reputation is statistically predictive of future
+repayment.
+
 Trust only records and scores behaviour; it does not move money or goods, so the
 conservation ledger is unchanged. `reputation_error` compares public reputation
-with each agent's observed giving rate, while `reputation_brier` scores this
-iteration's predictions against observed reciprocation.
+with each agent's observed repayment rate, while `reputation_brier` scores this
+iteration's predictions against the observed repayment outcomes.
 
 ### Belief-based decisions
 
-When `TRUST.DECISION_WEIGHT` is greater than 0, giving and accepting blend the
-legacy affordability scores with a trust decision:
+Reputation affects *receiver selection*, not the give or accept probability.
+Counting the same belief in selection, giving, and acceptance would cube its
+effect; a single channel keeps it linear and interpretable.
 
-- expected net payoff = `belief * RETURN_MULTIPLIER - 1`;
+When `TRUST.DECISION_WEIGHT` is greater than 0 and reciprocity is enabled:
+
+- expected return per unit = `belief * REPAY_FRACTION`;
+- expected net payoff = `belief * REPAY_FRACTION - 1`;
 - trust probability = logistic(`expected net payoff / risk_tolerance`);
-- final probability = `(1 - DECISION_WEIGHT) * legacy + DECISION_WEIGHT * trust`;
-- receiver selection multiplies each candidate's memory weight by the same
-  trust factor, so trusted agents are approached more often.
+- receiver selection multiplies each candidate's memory weight by
+  `(1 - DECISION_WEIGHT) + DECISION_WEIGHT * trust_probability`.
+
+If reciprocity is disabled, expected return is zero, so trust cannot make
+giving look profitable. Giving and acceptance use the legacy affordability
+scores, and accepting a gift is always weakly dominant because repayment is
+optional and default has no penalty.
 
 `RISK_TOLERANCE` is drawn once per agent from `AGENTS.RISK_TOLERANCE` and stays
-fixed. Each attempted transfer is recorded in `decision_log` with the belief,
-risk tolerance, probabilities, offered amount, and outcome, so decisions remain
-explainable. Metrics report the mean give/accept probabilities.
+fixed (except for the optional shock adaptation described below). Each attempted
+transfer is recorded in `decision_log` with the belief, risk tolerance,
+probabilities, offered amount, and outcome, so decisions remain explainable.
+Metrics report the mean give/accept probabilities.
 
 The decision layer only changes which transfers happen; it never creates or
 destroys money or goods.
@@ -164,18 +219,20 @@ level, or `None` if it never does.
 
 ## Invariants
 
-1. A social transfer or market trade never changes total money.
+1. A social transfer, repayment, or market trade never changes total money.
 2. Total goods change only by `produced - consumed`.
-3. Total money changes only by `-LIVING_COST * living_agents`.
+3. Total money changes only by `-living_cost_paid`, where
+   `living_cost_paid = sum(min(living_cost_due_i, resources_i - floor))`.
 4. No agent's money becomes negative.
 5. Dead agents do not participate in any step.
 6. Trust beliefs and public reputation always stay within [0, 1].
 7. The trust layer never changes money or goods totals.
+8. Market prices stay within `[MIN_PRICE, MAX_PRICE]`.
 
 ## Open decisions
 
-- Replace the living-cost money sink with paid consumption once prices react to
-  scarcity.
-- Decide whether stranded goods pass to other agents when an owner dies.
-- Add price discovery to replace the fixed `MARKET.PRICE`.
+- Pass stranded goods to other agents when an owner dies.
+- Decide whether defaulted debt should remain outstanding and reduce future
+  credit access.
+- Decide whether production should respond to the market price.
 - Decide whether private beliefs should fully replace the legacy memory deque.

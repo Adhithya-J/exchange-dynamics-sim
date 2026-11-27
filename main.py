@@ -27,8 +27,12 @@ config = CONFIG
 DEFAULT_MARKET_SETTINGS: dict[str, Any] = {
     "ENABLED": False,
     "PRICE": 1.0,
+    "PRICE_ADJUSTMENT": 0.0,
+    "MIN_PRICE": 0.1,
+    "MAX_PRICE": 10.0,
     "PRODUCTION_RANGE": (0.0, 0.0),
     "CONSUMPTION_RANGE": (0.0, 0.0),
+    "UNMET_DEMAND_PENALTY": 0.0,
 }
 
 # Trust settings used when a custom configuration omits the section. Trust is
@@ -43,13 +47,12 @@ DEFAULT_TRUST_SETTINGS: dict[str, Any] = {
     "BIAS": 0.0,
     "PUBLIC_WEIGHT": 0.3,
     "DECISION_WEIGHT": 0.0,
-    "RETURN_MULTIPLIER": 2.0,
 }
 
 # Social settings used when a custom configuration omits the section.
 DEFAULT_SOCIAL_SETTINGS: dict[str, Any] = {
     "RECIPROCITY_ENABLED": False,
-    "REPAY_PROBABILITY": 0.5,
+    "REPAY_PROBABILITY_RANGE": (0.2, 0.8),
     "REPAY_DELAY": 3,
     "REPAY_FRACTION": 1.0,
 }
@@ -77,6 +80,7 @@ class Agent:
         production_rate: float = 0.0,
         consumption_need: float = 0.0,
         risk_tolerance: float = 0.5,
+        repayment_probability: float = 0.5,
     ) -> None:
         self.id = id
         self.generosity_score = float(generosity_score)
@@ -87,6 +91,9 @@ class Agent:
         self.production_rate = float(production_rate)
         self.consumption_need = float(consumption_need)
         self.risk_tolerance = float(risk_tolerance)
+        # Hidden trait: the probability this agent repays a due gift. It is the
+        # behaviour that reputation is supposed to forecast.
+        self.repayment_probability = float(repayment_probability)
         self.memory: deque[str] = deque(maxlen=memory_size)
         # Private belief that another agent will reciprocate, keyed by id.
         self.beliefs: dict[str, float] = {}
@@ -123,6 +130,7 @@ class Agent:
             "production_rate": self.production_rate,
             "consumption_need": self.consumption_need,
             "risk_tolerance": self.risk_tolerance,
+            "repayment_probability": self.repayment_probability,
             "alive": self.is_alive,
             "memory": list(self.memory),
             "beliefs": dict(self.beliefs),
@@ -212,8 +220,8 @@ class ResourceSimulation:
         self._current_iteration = 0
         self.reputation: dict[str, float] = {}
         self._reputation_queue: list[tuple[int, str, float]] = []
-        self._giving_opportunities: dict[str, int] = {}
-        self._giving_successes: dict[str, int] = {}
+        self._repayment_opportunities: dict[str, int] = {}
+        self._repayment_successes: dict[str, float] = {}
         self._iteration_observations: list[tuple[float, float]] = []
         self.decision_log: list[dict[str, Any]] = []
         self._repayment_queue: list[dict[str, Any]] = []
@@ -232,6 +240,9 @@ class ResourceSimulation:
         self.shock_count = 0
         self._last_shock_iteration = 0
         self._last_unmet_by_agent: dict[str, float] = {}
+        self._last_living_cost_due = 0.0
+        self.extinction_iteration: int | None = None
+        self.price = self._market_settings()["price"]
 
     @staticmethod
     def _validated_range(value: Any, name: str) -> tuple[float, float]:
@@ -252,8 +263,12 @@ class ResourceSimulation:
         enabled = bool(merged["ENABLED"])
         try:
             price = float(merged["PRICE"])
+            price_adjustment = float(merged["PRICE_ADJUSTMENT"])
+            min_price = float(merged["MIN_PRICE"])
+            max_price = float(merged["MAX_PRICE"])
+            unmet_penalty = float(merged["UNMET_DEMAND_PENALTY"])
         except (TypeError, ValueError) as exc:
-            raise ValueError("MARKET.PRICE must be a number") from exc
+            raise ValueError("MARKET settings must be numeric") from exc
         production_range = self._validated_range(
             merged["PRODUCTION_RANGE"], "MARKET.PRODUCTION_RANGE"
         )
@@ -262,11 +277,23 @@ class ResourceSimulation:
         )
         if enabled and price <= 0:
             raise ValueError("MARKET.PRICE must be positive")
+        if not 0 <= price_adjustment <= 1:
+            raise ValueError("MARKET.PRICE_ADJUSTMENT must be between 0 and 1")
+        if min_price <= 0 or max_price < min_price:
+            raise ValueError(
+                "MARKET.MIN_PRICE must be positive and not exceed MAX_PRICE"
+            )
+        if unmet_penalty < 0:
+            raise ValueError("MARKET.UNMET_DEMAND_PENALTY must not be negative")
         return {
             "enabled": enabled,
             "price": price,
+            "price_adjustment": price_adjustment,
+            "min_price": min_price,
+            "max_price": max_price,
             "production_range": production_range,
             "consumption_range": consumption_range,
+            "unmet_demand_penalty": unmet_penalty,
         }
 
     def _trust_settings(self) -> dict[str, Any]:
@@ -284,7 +311,6 @@ class ResourceSimulation:
             bias = float(merged["BIAS"])
             public_weight = float(merged["PUBLIC_WEIGHT"])
             decision_weight = float(merged["DECISION_WEIGHT"])
-            return_multiplier = float(merged["RETURN_MULTIPLIER"])
         except (TypeError, ValueError) as exc:
             raise ValueError("TRUST settings must be numeric") from exc
         if not 0 <= initial_belief <= 1:
@@ -301,8 +327,6 @@ class ResourceSimulation:
             raise ValueError("TRUST.PUBLIC_WEIGHT must be between 0 and 1")
         if not 0 <= decision_weight <= 1:
             raise ValueError("TRUST.DECISION_WEIGHT must be between 0 and 1")
-        if return_multiplier <= 0:
-            raise ValueError("TRUST.RETURN_MULTIPLIER must be positive")
         return {
             "enabled": enabled,
             "initial_belief": initial_belief,
@@ -313,7 +337,6 @@ class ResourceSimulation:
             "bias": bias,
             "public_weight": public_weight,
             "decision_weight": decision_weight,
-            "return_multiplier": return_multiplier,
         }
 
     def _social_settings(self) -> dict[str, Any]:
@@ -323,20 +346,37 @@ class ResourceSimulation:
         merged = {**DEFAULT_SOCIAL_SETTINGS, **configured}
         enabled = bool(merged["RECIPROCITY_ENABLED"])
         try:
-            probability = float(merged["REPAY_PROBABILITY"])
             delay = int(merged["REPAY_DELAY"])
             fraction = float(merged["REPAY_FRACTION"])
         except (TypeError, ValueError) as exc:
             raise ValueError("SOCIAL settings must be numeric") from exc
-        if not 0 <= probability <= 1:
-            raise ValueError("SOCIAL.REPAY_PROBABILITY must be between 0 and 1")
+        if "REPAY_PROBABILITY" in configured:
+            # Backwards-compatible single-probability form.
+            try:
+                probability = float(configured["REPAY_PROBABILITY"])
+            except (TypeError, ValueError) as exc:
+                raise ValueError("SOCIAL settings must be numeric") from exc
+            if not 0 <= probability <= 1:
+                raise ValueError(
+                    "SOCIAL.REPAY_PROBABILITY must be between 0 and 1"
+                )
+            probability_range = (probability, probability)
+        else:
+            probability_range = self._validated_range(
+                merged["REPAY_PROBABILITY_RANGE"],
+                "SOCIAL.REPAY_PROBABILITY_RANGE",
+            )
+            if probability_range[1] > 1:
+                raise ValueError(
+                    "SOCIAL.REPAY_PROBABILITY_RANGE values must be between 0 and 1"
+                )
         if delay < 0:
             raise ValueError("SOCIAL.REPAY_DELAY must not be negative")
         if fraction < 0:
             raise ValueError("SOCIAL.REPAY_FRACTION must not be negative")
         return {
             "enabled": enabled,
-            "repay_probability": probability,
+            "repay_probability_range": probability_range,
             "repay_delay": delay,
             "repay_fraction": fraction,
         }
@@ -361,7 +401,7 @@ class ResourceSimulation:
         )
 
     def _process_repayments(self, iteration: int) -> dict[str, Any]:
-        """Pay due gifts back when the debtor can afford it."""
+        """Pay due gifts back and record whether each debtor reciprocated."""
 
         settings = self._social_settings()
         empty = {
@@ -397,16 +437,19 @@ class ResourceSimulation:
         volume = 0.0
         floor = self.config["SIMULATION"]["RESOURCE_FLOOR"]
         for entry in due:
-            if self.random.random() >= settings["repay_probability"]:
-                continue
             debtor = self._agent_by_id(entry["debtor"])
             creditor = self._agent_by_id(entry["creditor"])
-            if not debtor.is_alive or not creditor.is_alive:
-                continue
-            spendable = max(0.0, debtor.resources - floor)
-            amount = min(
-                entry["amount"] * settings["repay_fraction"], spendable
-            )
+            amount = 0.0
+            if debtor.is_alive and creditor.is_alive:
+                if self.random.random() < debtor.repayment_probability:
+                    spendable = max(0.0, debtor.resources - floor)
+                    amount = min(
+                        entry["amount"] * settings["repay_fraction"], spendable
+                    )
+            # A failed roll, a dead counterparty, or an unaffordable debt is a
+            # default. It is recorded as an observation so reputation can learn
+            # whom to trust instead of rising on every gift.
+            self._observe_repayment(debtor, creditor, 1.0 if amount > 0 else 0.0)
             if amount <= 0:
                 continue
             debtor.resources -= amount
@@ -638,8 +681,8 @@ class ResourceSimulation:
     def _initialize_trust(self) -> None:
         settings = self._trust_settings()
         self._reputation_queue = []
-        self._giving_opportunities = {agent.id: 0 for agent in self.agents}
-        self._giving_successes = {agent.id: 0 for agent in self.agents}
+        self._repayment_opportunities = {agent.id: 0 for agent in self.agents}
+        self._repayment_successes = {agent.id: 0.0 for agent in self.agents}
         self._iteration_observations = []
         for agent in self.agents:
             agent.beliefs = {}
@@ -697,44 +740,50 @@ class ResourceSimulation:
             return observer.beliefs[other_id]
         return self.reputation.get(other_id, settings["initial_belief"])
 
-    def _observe_reciprocation(self, giver: Agent, receiver: Agent) -> None:
-        """Update private and public trust after a successful transfer."""
+    def _observe_repayment(
+        self, debtor: Agent, creditor: Agent, outcome: float
+    ) -> None:
+        """Update trust from whether a due gift was actually repaid."""
 
         settings = self._trust_settings()
         if not settings["enabled"]:
             return
+        outcome = float(np.clip(outcome, 0.0, 1.0))
         prior = settings["initial_belief"]
-        self._giving_successes[giver.id] = (
-            self._giving_successes.get(giver.id, 0) + 1
+        self._repayment_opportunities[debtor.id] = (
+            self._repayment_opportunities.get(debtor.id, 0) + 1
+        )
+        self._repayment_successes[debtor.id] = (
+            self._repayment_successes.get(debtor.id, 0.0) + outcome
         )
 
-        observed = 1.0 + settings["bias"]
+        observed = outcome + settings["bias"]
         noise = settings["noise"] + self._information_noise()
         if noise > 0:
             observed += self.random.gauss(0.0, noise)
         observed = float(np.clip(observed, 0.0, 1.0))
 
-        predicted = self.reputation.get(giver.id, prior)
-        self._iteration_observations.append((predicted, 1.0))
+        predicted = self.reputation.get(debtor.id, prior)
+        self._iteration_observations.append((predicted, outcome))
 
         if settings["delay"] == 0:
-            self._apply_reputation_observation(giver.id, observed)
+            self._apply_reputation_observation(debtor.id, observed)
         else:
             self._reputation_queue.append(
                 (
                     self._current_iteration + settings["delay"],
-                    giver.id,
+                    debtor.id,
                     observed,
                 )
             )
 
-        private = receiver.beliefs.get(giver.id, prior)
-        private = private + settings["learning_rate"] * (1.0 - private)
+        private = creditor.beliefs.get(debtor.id, prior)
+        private = private + settings["learning_rate"] * (observed - private)
         private = (
             (1.0 - settings["public_weight"]) * private
-            + settings["public_weight"] * self.reputation.get(giver.id, prior)
+            + settings["public_weight"] * self.reputation.get(debtor.id, prior)
         )
-        receiver.beliefs[giver.id] = float(np.clip(private, 0.0, 1.0))
+        creditor.beliefs[debtor.id] = float(np.clip(private, 0.0, 1.0))
 
     def _trust_metrics(self) -> dict[str, Any]:
         settings = self._trust_settings()
@@ -756,12 +805,14 @@ class ResourceSimulation:
         reputation_values = list(self.reputation.values())
         errors = []
         for agent in self.agents:
-            opportunities = self._giving_opportunities.get(agent.id, 0)
+            opportunities = self._repayment_opportunities.get(agent.id, 0)
             if opportunities == 0:
                 continue
-            giving_rate = self._giving_successes.get(agent.id, 0) / opportunities
+            repayment_rate = (
+                self._repayment_successes.get(agent.id, 0.0) / opportunities
+            )
             errors.append(
-                abs(self.reputation.get(agent.id, prior) - giving_rate)
+                abs(self.reputation.get(agent.id, prior) - repayment_rate)
             )
         if self._iteration_observations:
             brier = float(
@@ -811,11 +862,13 @@ class ResourceSimulation:
         count = self.config["SIMULATION"]["AGENTS"]
         market = self._market_settings()
         trust = self._trust_settings()
+        social = self._social_settings()
         risk_lower, risk_upper = self._validated_range(
             self.config["AGENTS"].get("RISK_TOLERANCE", [0.0, 1.0]),
             "AGENTS.RISK_TOLERANCE",
         )
         use_trust_decisions = trust["enabled"] and trust["decision_weight"] > 0
+        repay_lower, repay_upper = social["repay_probability_range"]
 
         self.agents = [
             Agent(
@@ -840,6 +893,11 @@ class ResourceSimulation:
                     if use_trust_decisions
                     else 0.5
                 ),
+                repayment_probability=(
+                    self.random.uniform(repay_lower, repay_upper)
+                    if social["enabled"]
+                    else 0.5
+                ),
             )
             for index in range(count)
         ]
@@ -862,6 +920,10 @@ class ResourceSimulation:
         self.shock_count = 0
         self._last_shock_iteration = 0
         self._last_unmet_by_agent = {}
+        self._last_living_cost_due = 0.0
+        self.extinction_iteration: int | None = None
+        self.price = market["price"]
+        self.decision_log = []
         self._initialize_trust()
         self._record_agent_snapshot(iteration=0)
         return self.agents
@@ -977,7 +1039,7 @@ class ResourceSimulation:
             for candidate, base_weight in zip(candidates, weights):
                 probability = self._trust_decision_probability(sender, candidate)
                 factor = (1.0 - decision_weight) + decision_weight * probability
-                trust_weights.append(base_weight * (0.01 + factor))
+                trust_weights.append(base_weight * factor)
             return self.random.choices(
                 candidates, weights=trust_weights, k=1
             )[0]
@@ -987,35 +1049,35 @@ class ResourceSimulation:
         return self.random.choices(candidates, weights=weights, k=1)[0]
 
     def _trust_decision_probability(self, agent: Agent, other: Agent) -> float:
-        """Return the probability of cooperating based on expected payoff."""
+        """Return the probability of cooperating based on expected repayment."""
 
         settings = self._trust_settings()
+        social = self._social_settings()
         belief = self.belief_for(agent, other.id)
-        expected_net = belief * settings["return_multiplier"] - 1.0
+        expected_return = (
+            belief * social["repay_fraction"] if social["enabled"] else 0.0
+        )
+        expected_net = expected_return - 1.0
         temperature = max(agent.risk_tolerance, 0.05)
         return float(1.0 / (1.0 + np.exp(-expected_net / temperature)))
 
     def _give_probability(self, agent: Agent, receiver: Agent | None = None) -> float:
-        legacy = self.affordability.effective_generosity(agent)
-        if receiver is None:
-            return legacy
-        settings = self._trust_settings()
-        weight = settings["decision_weight"] if settings["enabled"] else 0.0
-        if weight <= 0:
-            return legacy
-        trust = self._trust_decision_probability(agent, receiver)
-        return float(np.clip((1.0 - weight) * legacy + weight * trust, 0.0, 1.0))
+        """Return the legacy giving probability.
+
+        Trust affects receiver selection, not the give probability again. This
+        keeps the belief from being counted in selection and in the decision.
+        """
+
+        return self.affordability.effective_generosity(agent)
 
     def _receive_probability(self, agent: Agent, giver: Agent | None = None) -> float:
-        legacy = self.affordability.effective_acceptance(agent)
-        if giver is None:
-            return legacy
-        settings = self._trust_settings()
-        weight = settings["decision_weight"] if settings["enabled"] else 0.0
-        if weight <= 0:
-            return legacy
-        trust = self._trust_decision_probability(agent, giver)
-        return float(np.clip((1.0 - weight) * legacy + weight * trust, 0.0, 1.0))
+        """Return the acceptance probability.
+
+        Accepting a gift has no downside in this model: repayment is optional
+        and default has no penalty. Trust therefore does not gate acceptance.
+        """
+
+        return self.affordability.effective_acceptance(agent)
 
     def _can_give(
         self,
@@ -1057,7 +1119,6 @@ class ResourceSimulation:
         if not giver.is_alive:
             self._log_death(giver, "gift")
         receiver.memory.append(giver.id)
-        self._observe_reciprocation(giver, receiver)
         self._schedule_repayment(giver, receiver, transfer_size)
         self.transfer_log.append(
             {
@@ -1080,16 +1141,11 @@ class ResourceSimulation:
         senders = list(self.agents)
         self.random.shuffle(senders)
         settings = self._trust_settings()
-        trust_enabled = settings["enabled"]
-        use_trust_decisions = trust_enabled and settings["decision_weight"] > 0
+        use_trust_decisions = settings["enabled"] and settings["decision_weight"] > 0
 
         for sender in senders:
             if not sender.is_alive:
                 continue
-            if trust_enabled:
-                self._giving_opportunities[sender.id] = (
-                    self._giving_opportunities.get(sender.id, 0) + 1
-                )
             if use_trust_decisions:
                 if not sender.can_give(giving_floor, minimum_transfer):
                     continue
@@ -1170,22 +1226,40 @@ class ResourceSimulation:
         return completed
 
     def _apply_living_cost(self) -> float:
-        """Charge living agents and return the money removed by the sink."""
+        """Charge subsistence costs and return the money removed by the sink.
+
+        Every living agent owes the fixed living cost plus an emergency cost for
+        each unit of unmet demand. The emergency cost is why goods have value:
+        consuming a good avoids it. The charge is capped by what the agent can
+        pay while staying at or above the resource floor, so ``paid`` is the
+        exact reduction in total money.
+        """
 
         cost = self.config["AGENTS"]["LIVING_COST"]
+        market = self._market_settings()
+        penalty_rate = (
+            market["unmet_demand_penalty"] if market["enabled"] else 0.0
+        )
         minimum = self.config["SIMULATION"]["RESOURCE_FLOOR"]
         paid = 0.0
+        due_total = 0.0
         for agent in self.agents:
             if not agent.is_alive:
                 continue
+            unmet = self._last_unmet_by_agent.get(agent.id, 0.0)
+            due = cost + penalty_rate * unmet
+            due_total += due
             before = agent.resources
-            agent.resources -= cost
+            spendable = max(0.0, before - minimum)
+            paid_here = min(due, spendable)
+            agent.resources = before - paid_here
             if agent.resources <= minimum:
                 # Reaching the floor is death, not a resource top-up.
                 agent.resources = minimum
             paid += before - agent.resources
             if not agent.is_alive:
                 self._log_death(agent, "living_cost")
+        self._last_living_cost_due = due_total
         return paid
 
     def _produce_goods(self) -> float:
@@ -1207,7 +1281,7 @@ class ResourceSimulation:
         settings = self._market_settings()
         self._last_unmet_by_agent = {}
         empty_cycle = {
-            "price": settings["price"],
+            "price": self.price,
             "goods_produced": 0.0,
             "goods_consumed": 0.0,
             "goods_traded": 0.0,
@@ -1217,19 +1291,29 @@ class ResourceSimulation:
         if not settings["enabled"]:
             return empty_cycle
 
-        price = settings["price"]
+        price = self.price
         floor = self.config["SIMULATION"]["RESOURCE_FLOOR"]
+        living_cost = max(0.0, self.config["AGENTS"]["LIVING_COST"])
+        receiving_ceil = self.config["AGENTS"]["MAX_RESOURCES_AFTER_RECEIVING"]
+        penalty = settings["unmet_demand_penalty"]
         produced = self._produce_goods()
         goods_traded = 0.0
         trade_volume = 0.0
 
         participants = [agent for agent in self.agents if agent.is_alive]
+        total_demand = float(sum(agent.consumption_need for agent in participants))
         self.random.shuffle(participants)
         for buyer in participants:
             shortfall = buyer.consumption_need - buyer.goods
             if shortfall <= 0:
                 continue
-            spendable = max(0.0, buyer.resources - floor)
+            # Goods are worth at most the emergency cost of leaving demand
+            # unmet. A buyer refuses to trade when the price exceeds that value.
+            if price > penalty:
+                continue
+            # Keep back the fixed living cost so trade cannot spend the money
+            # the agent needs to survive the cost step.
+            spendable = max(0.0, buyer.resources - floor - living_cost)
             requested = min(shortfall, spendable / price)
             if requested <= 0:
                 continue
@@ -1244,7 +1328,15 @@ class ResourceSimulation:
                 if requested <= 0:
                     break
                 surplus = seller.goods - seller.consumption_need
-                quantity = min(requested, surplus)
+                # Market income counts against the same receiving ceiling as
+                # gifts, so trade cannot bypass the accumulation cap.
+                seller_room = max(0.0, receiving_ceil - seller.resources)
+                quantity = min(
+                    requested,
+                    surplus,
+                    spendable / price,
+                    seller_room / price,
+                )
                 if quantity <= 0:
                     continue
                 cost = quantity * price
@@ -1252,6 +1344,7 @@ class ResourceSimulation:
                 buyer.goods += quantity
                 buyer.resources -= cost
                 seller.resources += cost
+                spendable -= cost
                 if not buyer.is_alive:
                     self._log_death(buyer, "market")
                 goods_traded += quantity
@@ -1279,6 +1372,20 @@ class ResourceSimulation:
             consumed += consumed_here
             unmet += unmet_here
             self._last_unmet_by_agent[agent.id] = unmet_here
+
+        # Simple price discovery: excess demand raises next iteration's price,
+        # excess inventory lowers it. Bounds keep the walk stable.
+        leftover = float(
+            sum(agent.goods for agent in participants)
+        )
+        if settings["price_adjustment"] > 0 and total_demand > 0:
+            imbalance = (unmet - leftover) / total_demand
+            next_price = price * (1.0 + settings["price_adjustment"] * imbalance)
+            self.price = float(
+                np.clip(
+                    next_price, settings["min_price"], settings["max_price"]
+                )
+            )
 
         return {
             "price": price,
@@ -1345,6 +1452,9 @@ class ResourceSimulation:
         transfer_volume = sum(amount for _, _, amount in completed)
         self.total_transfer_volume += transfer_volume
         statistics = MetricsCalculator.calculate_statistics(self.to_frame())
+        alive = int(sum(agent.is_alive for agent in self.agents))
+        if alive == 0 and self.extinction_iteration is None:
+            self.extinction_iteration = iteration
         statistics.update(
             {
                 "iteration": iteration,
@@ -1353,9 +1463,11 @@ class ResourceSimulation:
                 "transfer_volume": transfer_volume,
                 "total_transfer_volume": self.total_transfer_volume,
                 "goods_total": float(sum(agent.goods for agent in self.agents)),
-                "alive": int(sum(agent.is_alive for agent in self.agents)),
+                "alive": alive,
                 "altruism_volume": transfer_volume,
                 "living_cost_paid": living_cost_paid,
+                "living_cost_due": self._last_living_cost_due,
+                "extinction_iteration": self.extinction_iteration,
                 **repayments,
                 **market,
                 **self._trust_metrics(),

@@ -1,7 +1,6 @@
 """Tests for trust-based giving, receiving, and receiver selection."""
 
 from copy import deepcopy
-import math
 
 import pytest
 
@@ -44,29 +43,37 @@ def decision_config(agents: int = 3) -> dict:
             "BIAS": 0.0,
             "PUBLIC_WEIGHT": 0.0,
             "DECISION_WEIGHT": 1.0,
-            "RETURN_MULTIPLIER": 2.0,
+        }
+    )
+    config["SOCIAL"].update(
+        {
+            "RECIPROCITY_ENABLED": True,
+            "REPAY_PROBABILITY": 1.0,
+            "REPAY_DELAY": 0,
+            "REPAY_FRACTION": 1.0,
         }
     )
     return config
 
 
 class TestBeliefDecisions:
-    def test_higher_belief_raises_give_probability(self):
+    def test_higher_belief_raises_selection_trust(self):
         simulation = ResourceSimulation(decision_config())
         simulation.initialize_agents()
         sender, trusted, distrusted = simulation.agents
         sender.beliefs[trusted.id] = 0.9
         sender.beliefs[distrusted.id] = 0.1
 
-        trusted_probability = simulation._give_probability(sender, trusted)
-        distrusted_probability = simulation._give_probability(sender, distrusted)
-
-        assert trusted_probability > distrusted_probability
-        assert trusted_probability == pytest.approx(
-            1.0 / (1.0 + math.exp(-0.8 / 0.5))
+        assert simulation._trust_decision_probability(
+            sender, trusted
+        ) > simulation._trust_decision_probability(sender, distrusted)
+        # Giving itself uses the legacy affordability score; trust is counted
+        # once, in receiver selection, not again in the give probability.
+        assert simulation._give_probability(sender, trusted) == pytest.approx(
+            simulation.affordability.effective_generosity(sender)
         )
 
-    def test_higher_belief_raises_accept_probability(self):
+    def test_acceptance_does_not_depend_on_trust(self):
         simulation = ResourceSimulation(decision_config())
         simulation.initialize_agents()
         receiver, trusted, distrusted = simulation.agents
@@ -75,9 +82,9 @@ class TestBeliefDecisions:
 
         assert simulation._receive_probability(
             receiver, trusted
-        ) > simulation._receive_probability(receiver, distrusted)
+        ) == simulation._receive_probability(receiver, distrusted)
 
-    def test_risk_tolerance_flattens_positive_expected_payoff(self):
+    def test_risk_tolerance_flattens_expected_payoff(self):
         simulation = ResourceSimulation(decision_config())
         simulation.initialize_agents()
         other = Agent("other", 1.0, 1.0, 1000.0)
@@ -87,9 +94,31 @@ class TestBeliefDecisions:
         cautious.beliefs[other.id] = 0.9
         bold.beliefs[other.id] = 0.9
 
+        # A lower temperature sharpens a negative expected payoff; a higher
+        # risk-tolerance value flattens every probability toward 0.5.
         assert simulation._trust_decision_probability(
-            cautious, other
-        ) > simulation._trust_decision_probability(bold, other)
+            bold, other
+        ) > simulation._trust_decision_probability(cautious, other)
+
+    def test_expected_return_is_derived_from_repay_fraction(self):
+        full = ResourceSimulation(decision_config())
+        full.initialize_agents()
+        other = Agent("other", 1.0, 1.0, 1000.0)
+        sender = full.agents[0]
+        sender.beliefs[other.id] = 0.9
+        full.reputation[other.id] = 0.5
+
+        partial_config = decision_config()
+        partial_config["SOCIAL"]["REPAY_FRACTION"] = 0.5
+        partial = ResourceSimulation(partial_config)
+        partial.initialize_agents()
+        partial_sender = partial.agents[0]
+        partial_sender.beliefs[other.id] = 0.9
+        partial.reputation[other.id] = 0.5
+
+        assert full._trust_decision_probability(
+            sender, other
+        ) > partial._trust_decision_probability(partial_sender, other)
 
     def test_receiver_selection_favours_trusted_agents(self):
         simulation = ResourceSimulation(decision_config())
@@ -175,13 +204,6 @@ class TestDecisionValidation:
         config["TRUST"]["DECISION_WEIGHT"] = 1.5
 
         with pytest.raises(ValueError, match="DECISION_WEIGHT"):
-            ResourceSimulation(config).initialize_agents()
-
-    def test_return_multiplier_must_be_positive(self):
-        config = decision_config()
-        config["TRUST"]["RETURN_MULTIPLIER"] = 0.0
-
-        with pytest.raises(ValueError, match="RETURN_MULTIPLIER"):
             ResourceSimulation(config).initialize_agents()
 
     def test_negative_risk_tolerance_is_rejected(self):

@@ -1,8 +1,9 @@
 SIMULATION:
   # Agents in the run; more agents create more variety.
   AGENTS: 10
-  # Transfer-and-cost steps; more steps show longer-term change.
-  ITERATIONS: 5000
+  # Transfer-and-cost steps. The default stays below the finite-money
+  # extinction point for the checked-in seed, so final metrics stay meaningful.
+  ITERATIONS: 1000
   # Starting resources per agent; higher means more initial wealth.
   INITIAL_RESOURCES: 1000.0
   # Resource floor after costs; higher protects more wealth.
@@ -41,12 +42,21 @@ AFFORDABILITY:
 MARKET:
   # Turn production, trade, and consumption on.
   ENABLED: false
-  # Fixed money price per good.
+  # Starting money price per good. The price then adjusts each iteration.
   PRICE: 1.0
+  # Fraction of the supply/demand imbalance applied to next iteration's price.
+  # 0 keeps the fixed price; values above 0 add simple price discovery.
+  PRICE_ADJUSTMENT: 0.1
+  # Bounds for the adjusting price.
+  MIN_PRICE: 0.1
+  MAX_PRICE: 10.0
   # Goods produced per living agent per iteration.
   PRODUCTION_RANGE: [0.0, 2.0]
   # Goods needed per living agent per iteration.
   CONSUMPTION_RANGE: [1.0, 1.0]
+  # Money charged per unit of unmet demand at the living-cost step. This is the
+  # value of a good: buyers only purchase when the price is at or below it.
+  UNMET_DEMAND_PENALTY: 2.0
 
 # Environmental shocks and simple adaptation. Off by default.
 SHOCKS:
@@ -61,8 +71,9 @@ SHOCKS:
 SOCIAL:
   # Let recipients repay gifts after a delay.
   RECIPROCITY_ENABLED: false
-  # Chance a due gift is repaid.
-  REPAY_PROBABILITY: 0.5
+  # Hidden per-agent chance that a due gift is repaid. Drawing a range makes
+  # repayment behaviour heterogeneous, so reputation can actually predict it.
+  REPAY_PROBABILITY_RANGE: [0.2, 0.8]
   # Iterations between a gift and its attempted repayment.
   REPAY_DELAY: 3
   # Fraction of the gift returned.
@@ -86,10 +97,8 @@ TRUST:
   BIAS: 0.0
   # Weight of public reputation when blending into private belief.
   PUBLIC_WEIGHT: 0.3
-  # Blend trust-based decisions with legacy scores (0 legacy, 1 beliefs).
+  # Blend trust-based receiver selection with legacy scores (0 legacy, 1 trust).
   DECISION_WEIGHT: 0.0
-  # Expected return multiple for a gift in the belief model.
-  RETURN_MULTIPLIER: 2.0
 
 # Controls how much past exchanges affect recipient selection.
 MEMORY:
