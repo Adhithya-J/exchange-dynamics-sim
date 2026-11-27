@@ -41,6 +41,22 @@ The simulation records mean, median, standard deviation, total resources, and
 the Gini coefficient after each iteration. The source of truth is a list of
 `Agent` objects; Pandas is used only to expose the current state for analysis.
 
+## Market (optional)
+
+`config.yaml` has a `MARKET` section that is disabled by default. When
+`MARKET.ENABLED` is true, living agents also produce and consume one good:
+
+- each agent produces `PRODUCTION_RANGE` goods per iteration;
+- each agent needs `CONSUMPTION_RANGE` goods per iteration;
+- agents consume their own goods first and buy shortfalls from other agents'
+  surplus at the fixed `PRICE`;
+- unsold goods stay in inventory, and unmet demand is recorded.
+
+Transfers and market trades only move money between agents. Production creates
+goods, consumption destroys them, and the living cost remains an explicit money
+sink. `MODEL.md` documents the full ledger, and `tests/test_conservation.py`
+plus `tests/test_market.py` enforce it.
+
 ## Quick start
 
 ```bash
@@ -71,7 +87,7 @@ inspect `metrics_history` or the returned DataFrame.
 ## Project structure
 
 - `config.yaml` - default simulation parameters.
-- `main.py` - agents, simulation lifecycle, affordability, and metrics.
+- `main.py` - agents, simulation lifecycle, affordability, market, and metrics.
 - `utils/` - shared helpers, including YAML configuration loading.
 - `tests/` - unit and behavior tests for the model.
 - `visualize.py` - interactive Plotly visualization.

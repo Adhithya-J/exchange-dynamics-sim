@@ -35,6 +35,17 @@ AFFORDABILITY:
   # Maximum score [0, 1] used above MAX_RESOURCES.
   MAX_SCORE: 1.0
 
+# Optional goods market; off keeps the transfer-only model.
+MARKET:
+  # Turn production, trade, and consumption on.
+  ENABLED: false
+  # Fixed money price per good.
+  PRICE: 1.0
+  # Goods produced per living agent per iteration.
+  PRODUCTION_RANGE: [0.0, 2.0]
+  # Goods needed per living agent per iteration.
+  CONSUMPTION_RANGE: [1.0, 1.0]
+
 # Controls how much past exchanges affect recipient selection.
 MEMORY:
   # Number of previous givers remembered; higher means longer memory.

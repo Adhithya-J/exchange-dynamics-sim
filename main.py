@@ -22,6 +22,15 @@ CONFIG: dict[str, dict[str, Any]] = load_config()
 # who imported the original module-level configuration.
 config = CONFIG
 
+# Market settings used when a custom configuration omits the section. The
+# market is opt-in so existing transfer-only configurations keep working.
+DEFAULT_MARKET_SETTINGS: dict[str, Any] = {
+    "ENABLED": False,
+    "PRICE": 1.0,
+    "PRODUCTION_RANGE": (0.0, 0.0),
+    "CONSUMPTION_RANGE": (0.0, 0.0),
+}
+
 
 class Agent:
     """An individual with resources, social tendencies, and recipient memory."""
@@ -34,12 +43,18 @@ class Agent:
         initial_resources: float,
         memory_size: int = 10,
         resource_floor: float = 0.0,
+        goods: float = 0.0,
+        production_rate: float = 0.0,
+        consumption_need: float = 0.0,
     ) -> None:
         self.id = id
         self.generosity_score = float(generosity_score)
         self.acceptance_score = float(acceptance_score)
         self.resources = float(initial_resources)
         self.resource_floor = float(resource_floor)
+        self.goods = float(goods)
+        self.production_rate = float(production_rate)
+        self.consumption_need = float(consumption_need)
         self.memory: deque[str] = deque(maxlen=memory_size)
 
     @property
@@ -70,6 +85,9 @@ class Agent:
             "generosity_score": self.generosity_score,
             "acceptance_score": self.acceptance_score,
             "resources": self.resources,
+            "goods": self.goods,
+            "production_rate": self.production_rate,
+            "consumption_need": self.consumption_need,
             "alive": self.is_alive,
             "memory": list(self.memory),
         }
@@ -156,6 +174,42 @@ class ResourceSimulation:
         self.total_transfers = 0
         self.total_transfer_volume = 0.0
 
+    @staticmethod
+    def _validated_range(value: Any, name: str) -> tuple[float, float]:
+        if not isinstance(value, (list, tuple)) or len(value) != 2:
+            raise ValueError(f"{name} must be a sequence of two values")
+        lower, upper = float(value[0]), float(value[1])
+        if lower < 0 or upper < lower:
+            raise ValueError(
+                f"{name} must contain non-negative values in ascending order"
+            )
+        return lower, upper
+
+    def _market_settings(self) -> dict[str, Any]:
+        """Return validated market settings, defaulting to a disabled market."""
+
+        configured = self.config.get("MARKET") or {}
+        merged = {**DEFAULT_MARKET_SETTINGS, **configured}
+        enabled = bool(merged["ENABLED"])
+        try:
+            price = float(merged["PRICE"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("MARKET.PRICE must be a number") from exc
+        production_range = self._validated_range(
+            merged["PRODUCTION_RANGE"], "MARKET.PRODUCTION_RANGE"
+        )
+        consumption_range = self._validated_range(
+            merged["CONSUMPTION_RANGE"], "MARKET.CONSUMPTION_RANGE"
+        )
+        if enabled and price <= 0:
+            raise ValueError("MARKET.PRICE must be positive")
+        return {
+            "enabled": enabled,
+            "price": price,
+            "production_range": production_range,
+            "consumption_range": consumption_range,
+        }
+
     def initialize_agents(self) -> list[Agent]:
         """Create the initial population using the configured random seed."""
 
@@ -165,6 +219,7 @@ class ResourceSimulation:
         initial_resources = self.config["SIMULATION"]["INITIAL_RESOURCES"]
         resource_floor = self.config["SIMULATION"]["RESOURCE_FLOOR"]
         count = self.config["SIMULATION"]["AGENTS"]
+        market = self._market_settings()
 
         self.agents = [
             Agent(
@@ -174,6 +229,16 @@ class ResourceSimulation:
                 initial_resources=initial_resources,
                 memory_size=memory_size,
                 resource_floor=resource_floor,
+                production_rate=(
+                    self.random.uniform(*market["production_range"])
+                    if market["enabled"]
+                    else 0.0
+                ),
+                consumption_need=(
+                    self.random.uniform(*market["consumption_range"])
+                    if market["enabled"]
+                    else 0.0
+                ),
             )
             for index in range(count)
         ]
@@ -193,6 +258,7 @@ class ResourceSimulation:
                     "iteration": iteration,
                     "id": agent.id,
                     "resources": agent.resources,
+                    "goods": agent.goods,
                     "generosity_score": agent.generosity_score,
                     "acceptance_score": agent.acceptance_score,
                 }
@@ -354,6 +420,90 @@ class ResourceSimulation:
                 # Reaching the floor is death, not a resource top-up.
                 agent.resources = minimum
 
+    def _produce_goods(self) -> float:
+        """Add this iteration's production and return the goods created."""
+
+        produced = 0.0
+        for agent in self.agents:
+            if not agent.is_alive or agent.production_rate <= 0:
+                continue
+            agent.goods += agent.production_rate
+            produced += agent.production_rate
+        return produced
+
+    def _run_market_cycle(self) -> dict[str, float]:
+        """Produce, trade, and consume goods, returning per-iteration totals."""
+
+        settings = self._market_settings()
+        empty_cycle = {
+            "price": settings["price"],
+            "goods_produced": 0.0,
+            "goods_consumed": 0.0,
+            "goods_traded": 0.0,
+            "unmet_demand": 0.0,
+            "trade_volume": 0.0,
+        }
+        if not settings["enabled"]:
+            return empty_cycle
+
+        price = settings["price"]
+        floor = self.config["SIMULATION"]["RESOURCE_FLOOR"]
+        produced = self._produce_goods()
+        goods_traded = 0.0
+        trade_volume = 0.0
+
+        participants = [agent for agent in self.agents if agent.is_alive]
+        self.random.shuffle(participants)
+        for buyer in participants:
+            shortfall = buyer.consumption_need - buyer.goods
+            if shortfall <= 0:
+                continue
+            spendable = max(0.0, buyer.resources - floor)
+            requested = min(shortfall, spendable / price)
+            if requested <= 0:
+                continue
+            sellers = [
+                seller
+                for seller in participants
+                if seller.id != buyer.id
+                and seller.goods > seller.consumption_need
+            ]
+            self.random.shuffle(sellers)
+            for seller in sellers:
+                if requested <= 0:
+                    break
+                surplus = seller.goods - seller.consumption_need
+                quantity = min(requested, surplus)
+                if quantity <= 0:
+                    continue
+                cost = quantity * price
+                seller.goods -= quantity
+                buyer.goods += quantity
+                buyer.resources -= cost
+                seller.resources += cost
+                goods_traded += quantity
+                trade_volume += cost
+                requested -= quantity
+
+        consumed = 0.0
+        unmet = 0.0
+        for agent in self.agents:
+            if not agent.is_alive:
+                continue
+            consumed_here = min(agent.consumption_need, agent.goods)
+            agent.goods -= consumed_here
+            consumed += consumed_here
+            unmet += agent.consumption_need - consumed_here
+
+        return {
+            "price": price,
+            "goods_produced": produced,
+            "goods_consumed": consumed,
+            "goods_traded": goods_traded,
+            "unmet_demand": unmet,
+            "trade_volume": trade_volume,
+        }
+
     def to_frame(self) -> pd.DataFrame:
         """Return the current agent state as a dataframe for analysis."""
 
@@ -362,6 +512,9 @@ class ResourceSimulation:
             "generosity_score",
             "acceptance_score",
             "resources",
+            "goods",
+            "production_rate",
+            "consumption_need",
             "alive",
             "memory",
         ]
@@ -376,6 +529,7 @@ class ResourceSimulation:
             "iteration",
             "id",
             "resources",
+            "goods",
             "generosity_score",
             "acceptance_score",
         ]
@@ -387,6 +541,7 @@ class ResourceSimulation:
         if not self.agents:
             self.initialize_agents()
         completed = self._process_transfers()
+        market = self._run_market_cycle()
         self._apply_living_cost()
         iteration = len(self.metrics_history) + 1
         self.total_transfers += len(completed)
@@ -400,6 +555,8 @@ class ResourceSimulation:
                 "total_transfers": self.total_transfers,
                 "transfer_volume": transfer_volume,
                 "total_transfer_volume": self.total_transfer_volume,
+                "goods_total": float(sum(agent.goods for agent in self.agents)),
+                **market,
             }
         )
         self.metrics_history.append(statistics)

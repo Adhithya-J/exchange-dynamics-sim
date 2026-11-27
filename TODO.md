@@ -4,34 +4,35 @@ Task list derived from the roadmap in
 [`TRUST_SOCIETY_SCOPE.md`](TRUST_SOCIETY_SCOPE.md#implementation-order), expanded
 with the current state of the code.
 
-Current model: agents hold a single `resources` balance and make direct
-transfers based on fixed generosity/acceptance scores. There is no goods
-market, reputation, trust belief, or experiment harness yet.
+Current model: agents hold money (`resources`) and make direct transfers based
+on fixed generosity/acceptance scores. An optional goods market adds
+production, trade, and consumption. There is no reputation, trust belief, or
+experiment harness yet.
 
 ## 1. Define money, goods, utility, and conservation rules
 
-- [ ] Document what creates and destroys money and goods (production,
-      consumption, living cost, transfers).
-- [ ] Decide whether `LIVING_COST` is a real payment (to producers) or an
-      explicit sink; today it simply deletes resources
-      (`main.py:344-354`).
-- [ ] Add config keys and validation for money/goods units and initial
-      endowments.
-- [ ] Add tests asserting conservation holds except at documented sinks/sources.
+- [x] Document what creates and destroys money and goods (production,
+      consumption, living cost, transfers) in `MODEL.md`.
+- [x] Decide whether `LIVING_COST` is a real payment (to producers) or an
+      explicit sink; it remains an explicit money sink
+      (`ResourceSimulation._apply_living_cost`).
+- [x] Add config keys and validation for money/goods units and initial
+      endowments (`MARKET` section and `_market_settings`).
+- [x] Add tests asserting conservation holds except at documented sinks/sources.
 
 **Done when:** every change in total money/goods is attributable to a named
 rule, and tests enforce it.
 
 ## 2. Build a minimal market
 
-- [ ] Add goods inventory, production, and consumption to `Agent`.
-- [ ] Support producer/consumer roles or per-agent production/demand parameters.
-- [ ] Choose an initial price rule (fixed price before any market clearing).
-- [ ] Implement a step order: produce -> trade -> consume -> record.
-- [ ] Record inventory, unmet demand, and prices each iteration.
-- [ ] Add metrics for fulfilled demand, unmet demand, and trade volume.
-- [ ] Extend `config.yaml` and `utils/config.py` validation.
-- [ ] Add tests for clearing, inventory leftovers, and zero-demand cases.
+- [x] Add goods inventory, production, and consumption to `Agent`.
+- [x] Support producer/consumer roles or per-agent production/demand parameters.
+- [x] Choose an initial price rule (fixed `MARKET.PRICE`).
+- [x] Implement a step order: produce -> trade -> consume -> record.
+- [x] Record inventory, unmet demand, and prices each iteration.
+- [x] Add metrics for fulfilled demand, unmet demand, and trade volume.
+- [x] Extend `config.yaml` and validation for the market settings.
+- [x] Add tests for clearing, inventory leftovers, and zero-demand cases.
 
 **Done when:** a run reports fulfilled/unmet demand and goods conservation,
 with no regressions in the existing transfer tests.
