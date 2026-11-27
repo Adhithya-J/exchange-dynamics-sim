@@ -23,6 +23,8 @@ AGENTS:
   MAX_RESOURCES_AFTER_RECEIVING: 10000.0
   # Fixed amount lost per iteration; subtractive cost.
   LIVING_COST: 1.0
+  # Risk tolerance range; higher means more willing to act on uncertain trust.
+  RISK_TOLERANCE: [0.0, 1.0]
 
 # Turns resources into effective giving and acceptance chances.
 AFFORDABILITY:
@@ -34,6 +36,60 @@ AFFORDABILITY:
   MIN_SCORE: 0.0
   # Maximum score [0, 1] used above MAX_RESOURCES.
   MAX_SCORE: 1.0
+
+# Optional goods market; off keeps the transfer-only model.
+MARKET:
+  # Turn production, trade, and consumption on.
+  ENABLED: false
+  # Fixed money price per good.
+  PRICE: 1.0
+  # Goods produced per living agent per iteration.
+  PRODUCTION_RANGE: [0.0, 2.0]
+  # Goods needed per living agent per iteration.
+  CONSUMPTION_RANGE: [1.0, 1.0]
+
+# Environmental shocks and simple adaptation. Off by default.
+SHOCKS:
+  ENABLED: false
+  # Events keyed by 1-based iteration; type is scarcity or information.
+  # Example: [{iteration: 100, type: scarcity, magnitude: 0.5, duration: 10}]
+  SCHEDULE: []
+  # Risk-tolerance change per iteration when demand is unmet.
+  ADAPTATION_RATE: 0.05
+
+# Altruistic gifts and optional reciprocity. Repayments are separate from trade.
+SOCIAL:
+  # Let recipients repay gifts after a delay.
+  RECIPROCITY_ENABLED: false
+  # Chance a due gift is repaid.
+  REPAY_PROBABILITY: 0.5
+  # Iterations between a gift and its attempted repayment.
+  REPAY_DELAY: 3
+  # Fraction of the gift returned.
+  REPAY_FRACTION: 1.0
+
+# Private trust beliefs and noisy public reputation. Off by default.
+TRUST:
+  # Turn belief and reputation tracking on.
+  ENABLED: false
+  # Prior belief that another agent will reciprocate, in [0, 1].
+  INITIAL_BELIEF: 0.5
+  # How quickly beliefs and reputation move toward new evidence.
+  LEARNING_RATE: 0.2
+  # Per-iteration pull back toward the prior, in [0, 1].
+  DECAY: 0.02
+  # Standard deviation of noise on public observations.
+  NOISE: 0.0
+  # Iterations before an observation reaches public reputation.
+  DELAY: 0
+  # Constant bias added to public observations.
+  BIAS: 0.0
+  # Weight of public reputation when blending into private belief.
+  PUBLIC_WEIGHT: 0.3
+  # Blend trust-based decisions with legacy scores (0 legacy, 1 beliefs).
+  DECISION_WEIGHT: 0.0
+  # Expected return multiple for a gift in the belief model.
+  RETURN_MULTIPLIER: 2.0
 
 # Controls how much past exchanges affect recipient selection.
 MEMORY:
