@@ -66,8 +66,12 @@ configurable `LEARNING_RATE`, `DECAY`, `NOISE`, `DELAY`, `BIAS`, and
 `PUBLIC_WEIGHT`. The simulation reports `mean_trust`, `mean_reputation`,
 `reputation_error`, and `reputation_brier`.
 
-The trust layer only records behaviour; it does not change transfers or
-conservation. `tests/test_trust.py` covers the update and noise rules.
+Set `TRUST.DECISION_WEIGHT` above 0 to use those beliefs in giving and
+accepting decisions. Expected payoff is `belief * RETURN_MULTIPLIER - 1`, turned
+into a probability with each agent's fixed `RISK_TOLERANCE`, then blended with
+the legacy score. Trusted agents are also selected as receivers more often.
+`decision_log` records each attempt; `tests/test_trust.py` and
+`tests/test_decisions.py` cover the update and decision rules.
 
 ## Quick start
 

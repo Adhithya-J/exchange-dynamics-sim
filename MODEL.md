@@ -81,6 +81,25 @@ conservation ledger is unchanged. `reputation_error` compares public reputation
 with each agent's observed giving rate, while `reputation_brier` scores this
 iteration's predictions against observed reciprocation.
 
+### Belief-based decisions
+
+When `TRUST.DECISION_WEIGHT` is greater than 0, giving and accepting blend the
+legacy affordability scores with a trust decision:
+
+- expected net payoff = `belief * RETURN_MULTIPLIER - 1`;
+- trust probability = logistic(`expected net payoff / risk_tolerance`);
+- final probability = `(1 - DECISION_WEIGHT) * legacy + DECISION_WEIGHT * trust`;
+- receiver selection multiplies each candidate's memory weight by the same
+  trust factor, so trusted agents are approached more often.
+
+`RISK_TOLERANCE` is drawn once per agent from `AGENTS.RISK_TOLERANCE` and stays
+fixed. Each attempted transfer is recorded in `decision_log` with the belief,
+risk tolerance, probabilities, offered amount, and outcome, so decisions remain
+explainable. Metrics report the mean give/accept probabilities.
+
+The decision layer only changes which transfers happen; it never creates or
+destroys money or goods.
+
 ## Invariants
 
 1. A social transfer or market trade never changes total money.

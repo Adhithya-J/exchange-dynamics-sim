@@ -23,6 +23,8 @@ AGENTS:
   MAX_RESOURCES_AFTER_RECEIVING: 10000.0
   # Fixed amount lost per iteration; subtractive cost.
   LIVING_COST: 1.0
+  # Risk tolerance range; higher means more willing to act on uncertain trust.
+  RISK_TOLERANCE: [0.0, 1.0]
 
 # Turns resources into effective giving and acceptance chances.
 AFFORDABILITY:
@@ -64,6 +66,10 @@ TRUST:
   BIAS: 0.0
   # Weight of public reputation when blending into private belief.
   PUBLIC_WEIGHT: 0.3
+  # Blend trust-based decisions with legacy scores (0 legacy, 1 beliefs).
+  DECISION_WEIGHT: 0.0
+  # Expected return multiple for a gift in the belief model.
+  RETURN_MULTIPLIER: 2.0
 
 # Controls how much past exchanges affect recipient selection.
 MEMORY:

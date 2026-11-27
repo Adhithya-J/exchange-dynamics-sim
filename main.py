@@ -42,6 +42,8 @@ DEFAULT_TRUST_SETTINGS: dict[str, Any] = {
     "DELAY": 0,
     "BIAS": 0.0,
     "PUBLIC_WEIGHT": 0.3,
+    "DECISION_WEIGHT": 0.0,
+    "RETURN_MULTIPLIER": 2.0,
 }
 
 
@@ -59,6 +61,7 @@ class Agent:
         goods: float = 0.0,
         production_rate: float = 0.0,
         consumption_need: float = 0.0,
+        risk_tolerance: float = 0.5,
     ) -> None:
         self.id = id
         self.generosity_score = float(generosity_score)
@@ -68,6 +71,7 @@ class Agent:
         self.goods = float(goods)
         self.production_rate = float(production_rate)
         self.consumption_need = float(consumption_need)
+        self.risk_tolerance = float(risk_tolerance)
         self.memory: deque[str] = deque(maxlen=memory_size)
         # Private belief that another agent will reciprocate, keyed by id.
         self.beliefs: dict[str, float] = {}
@@ -103,6 +107,7 @@ class Agent:
             "goods": self.goods,
             "production_rate": self.production_rate,
             "consumption_need": self.consumption_need,
+            "risk_tolerance": self.risk_tolerance,
             "alive": self.is_alive,
             "memory": list(self.memory),
             "beliefs": dict(self.beliefs),
@@ -195,6 +200,7 @@ class ResourceSimulation:
         self._giving_opportunities: dict[str, int] = {}
         self._giving_successes: dict[str, int] = {}
         self._iteration_observations: list[tuple[float, float]] = []
+        self.decision_log: list[dict[str, Any]] = []
 
     @staticmethod
     def _validated_range(value: Any, name: str) -> tuple[float, float]:
@@ -246,6 +252,8 @@ class ResourceSimulation:
             delay = int(merged["DELAY"])
             bias = float(merged["BIAS"])
             public_weight = float(merged["PUBLIC_WEIGHT"])
+            decision_weight = float(merged["DECISION_WEIGHT"])
+            return_multiplier = float(merged["RETURN_MULTIPLIER"])
         except (TypeError, ValueError) as exc:
             raise ValueError("TRUST settings must be numeric") from exc
         if not 0 <= initial_belief <= 1:
@@ -260,6 +268,10 @@ class ResourceSimulation:
             raise ValueError("TRUST.DELAY must not be negative")
         if not 0 <= public_weight <= 1:
             raise ValueError("TRUST.PUBLIC_WEIGHT must be between 0 and 1")
+        if not 0 <= decision_weight <= 1:
+            raise ValueError("TRUST.DECISION_WEIGHT must be between 0 and 1")
+        if return_multiplier <= 0:
+            raise ValueError("TRUST.RETURN_MULTIPLIER must be positive")
         return {
             "enabled": enabled,
             "initial_belief": initial_belief,
@@ -269,6 +281,8 @@ class ResourceSimulation:
             "delay": delay,
             "bias": bias,
             "public_weight": public_weight,
+            "decision_weight": decision_weight,
+            "return_multiplier": return_multiplier,
         }
 
     def _initialize_trust(self) -> None:
@@ -380,6 +394,8 @@ class ResourceSimulation:
                 "reputation_error": 0.0,
                 "reputation_brier": 0.0,
                 "trust_observations": 0,
+                "mean_give_probability": 0.0,
+                "mean_accept_probability": 0.0,
             }
 
         prior = settings["initial_belief"]
@@ -407,6 +423,12 @@ class ResourceSimulation:
             )
         else:
             brier = 0.0
+        give_probabilities = [
+            decision["give_probability"] for decision in self.decision_log
+        ]
+        accept_probabilities = [
+            decision["accept_probability"] for decision in self.decision_log
+        ]
         return {
             "mean_trust": float(np.mean(beliefs)) if beliefs else prior,
             "mean_reputation": (
@@ -415,6 +437,16 @@ class ResourceSimulation:
             "reputation_error": float(np.mean(errors)) if errors else 0.0,
             "reputation_brier": brier,
             "trust_observations": len(self._iteration_observations),
+            "mean_give_probability": (
+                float(np.mean(give_probabilities))
+                if give_probabilities
+                else 0.0
+            ),
+            "mean_accept_probability": (
+                float(np.mean(accept_probabilities))
+                if accept_probabilities
+                else 0.0
+            ),
         }
 
     def initialize_agents(self) -> list[Agent]:
@@ -427,6 +459,12 @@ class ResourceSimulation:
         resource_floor = self.config["SIMULATION"]["RESOURCE_FLOOR"]
         count = self.config["SIMULATION"]["AGENTS"]
         market = self._market_settings()
+        trust = self._trust_settings()
+        risk_lower, risk_upper = self._validated_range(
+            self.config["AGENTS"].get("RISK_TOLERANCE", [0.0, 1.0]),
+            "AGENTS.RISK_TOLERANCE",
+        )
+        use_trust_decisions = trust["enabled"] and trust["decision_weight"] > 0
 
         self.agents = [
             Agent(
@@ -445,6 +483,11 @@ class ResourceSimulation:
                     self.random.uniform(*market["consumption_range"])
                     if market["enabled"]
                     else 0.0
+                ),
+                risk_tolerance=(
+                    self.random.uniform(risk_lower, risk_upper)
+                    if use_trust_decisions
+                    else 0.5
                 ),
             )
             for index in range(count)
@@ -470,6 +513,7 @@ class ResourceSimulation:
                     "goods": agent.goods,
                     "generosity_score": agent.generosity_score,
                     "acceptance_score": agent.acceptance_score,
+                    "risk_tolerance": agent.risk_tolerance,
                 }
             )
 
@@ -502,30 +546,19 @@ class ResourceSimulation:
             )
         return lower, upper
 
-    def _find_receiver(
-        self, sender: Agent, minimum_transfer: float | None = None
-    ) -> Agent | None:
-        if minimum_transfer is None:
-            minimum_transfer, _ = self._transfer_amount_bounds()
-        receiving_ceil = self.config["AGENTS"]["MAX_RESOURCES_AFTER_RECEIVING"]
-        candidates = [
-            agent
-            for agent in self.agents
-            if agent.id != sender.id
-            and agent.can_receive(receiving_ceil, minimum_transfer)
-        ]
-        if not candidates:
-            return None
-
-        memory_fraction = self.config["MEMORY"]["PREFERENCE_FRACTION"]
-        if not 0 <= memory_fraction <= 1:
-            raise ValueError("PREFERENCE_FRACTION must be between 0 and 1")
+    def _memory_weights(
+        self,
+        sender: Agent,
+        candidates: list[Agent],
+        memory_fraction: float,
+    ) -> list[float] | None:
+        """Return memory-based weights, or None when memory is not used."""
 
         remembered_candidates = [
             candidate for candidate in candidates if candidate.id in sender.memory
         ]
         if not remembered_candidates or memory_fraction == 0:
-            return self.random.choice(candidates)
+            return None
 
         candidate_memory_scores: dict[str, float] = {}
         for idx, agent_id in enumerate(sender.memory):
@@ -546,20 +579,96 @@ class ResourceSimulation:
                 memory_share = candidate_memory_scores[candidate.id] / total_memory_score
                 weight += memory_fraction * memory_share
             weights.append(weight)
+        return weights
+
+    def _find_receiver(
+        self, sender: Agent, minimum_transfer: float | None = None
+    ) -> Agent | None:
+        if minimum_transfer is None:
+            minimum_transfer, _ = self._transfer_amount_bounds()
+        receiving_ceil = self.config["AGENTS"]["MAX_RESOURCES_AFTER_RECEIVING"]
+        candidates = [
+            agent
+            for agent in self.agents
+            if agent.id != sender.id
+            and agent.can_receive(receiving_ceil, minimum_transfer)
+        ]
+        if not candidates:
+            return None
+
+        memory_fraction = self.config["MEMORY"]["PREFERENCE_FRACTION"]
+        if not 0 <= memory_fraction <= 1:
+            raise ValueError("PREFERENCE_FRACTION must be between 0 and 1")
+
+        weights = self._memory_weights(sender, candidates, memory_fraction)
+        trust = self._trust_settings()
+        decision_weight = trust["decision_weight"] if trust["enabled"] else 0.0
+        if decision_weight > 0:
+            if weights is None:
+                weights = [1.0 / len(candidates)] * len(candidates)
+            trust_weights = []
+            for candidate, base_weight in zip(candidates, weights):
+                probability = self._trust_decision_probability(sender, candidate)
+                factor = (1.0 - decision_weight) + decision_weight * probability
+                trust_weights.append(base_weight * (0.01 + factor))
+            return self.random.choices(
+                candidates, weights=trust_weights, k=1
+            )[0]
+
+        if weights is None:
+            return self.random.choice(candidates)
         return self.random.choices(candidates, weights=weights, k=1)[0]
 
-    def _can_give(self, agent: Agent, transfer_size: float) -> bool:
+    def _trust_decision_probability(self, agent: Agent, other: Agent) -> float:
+        """Return the probability of cooperating based on expected payoff."""
+
+        settings = self._trust_settings()
+        belief = self.belief_for(agent, other.id)
+        expected_net = belief * settings["return_multiplier"] - 1.0
+        temperature = max(agent.risk_tolerance, 0.05)
+        return float(1.0 / (1.0 + np.exp(-expected_net / temperature)))
+
+    def _give_probability(self, agent: Agent, receiver: Agent | None = None) -> float:
+        legacy = self.affordability.effective_generosity(agent)
+        if receiver is None:
+            return legacy
+        settings = self._trust_settings()
+        weight = settings["decision_weight"] if settings["enabled"] else 0.0
+        if weight <= 0:
+            return legacy
+        trust = self._trust_decision_probability(agent, receiver)
+        return float(np.clip((1.0 - weight) * legacy + weight * trust, 0.0, 1.0))
+
+    def _receive_probability(self, agent: Agent, giver: Agent | None = None) -> float:
+        legacy = self.affordability.effective_acceptance(agent)
+        if giver is None:
+            return legacy
+        settings = self._trust_settings()
+        weight = settings["decision_weight"] if settings["enabled"] else 0.0
+        if weight <= 0:
+            return legacy
+        trust = self._trust_decision_probability(agent, giver)
+        return float(np.clip((1.0 - weight) * legacy + weight * trust, 0.0, 1.0))
+
+    def _can_give(
+        self,
+        agent: Agent,
+        transfer_size: float,
+        receiver: Agent | None = None,
+    ) -> bool:
         giving_floor = self.config["AGENTS"]["MIN_RESOURCES_AFTER_GIVING"]
         return (
             agent.can_give(giving_floor, transfer_size)
-            and self.random.random() < self.affordability.effective_generosity(agent)
+            and self.random.random() < self._give_probability(agent, receiver)
         )
 
-    def _can_receive(self, agent: Agent, transfer_size: float) -> bool:
+    def _can_receive(
+        self, agent: Agent, transfer_size: float, giver: Agent | None = None
+    ) -> bool:
         receiving_ceil = self.config["AGENTS"]["MAX_RESOURCES_AFTER_RECEIVING"]
         return (
             agent.can_receive(receiving_ceil, transfer_size)
-            and self.random.random() < self.affordability.effective_acceptance(agent)
+            and self.random.random() < self._receive_probability(agent, giver)
         )
 
     def _execute_transfer(
@@ -580,7 +689,9 @@ class ResourceSimulation:
 
         senders = list(self.agents)
         self.random.shuffle(senders)
-        trust_enabled = self._trust_settings()["enabled"]
+        settings = self._trust_settings()
+        trust_enabled = settings["enabled"]
+        use_trust_decisions = trust_enabled and settings["decision_weight"] > 0
 
         for sender in senders:
             if not sender.is_alive:
@@ -589,6 +700,48 @@ class ResourceSimulation:
                 self._giving_opportunities[sender.id] = (
                     self._giving_opportunities.get(sender.id, 0) + 1
                 )
+            if use_trust_decisions:
+                if not sender.can_give(giving_floor, minimum_transfer):
+                    continue
+                receiver = self._find_receiver(sender, minimum_transfer)
+                if receiver is None:
+                    continue
+                feasible_maximum = min(
+                    maximum_transfer,
+                    sender.resources - giving_floor,
+                    receiving_ceil - receiver.resources,
+                )
+                if feasible_maximum < minimum_transfer:
+                    continue
+                transfer_size = self.random.uniform(
+                    minimum_transfer, feasible_maximum
+                )
+                give_probability = self._give_probability(sender, receiver)
+                accept_probability = self._receive_probability(receiver, sender)
+                gave = self.random.random() < give_probability
+                accepted = False
+                if gave:
+                    accepted = self.random.random() < accept_probability
+                self.decision_log.append(
+                    {
+                        "iteration": self._current_iteration,
+                        "giver": sender.id,
+                        "receiver": receiver.id,
+                        "belief": self.belief_for(sender, receiver.id),
+                        "risk_tolerance": sender.risk_tolerance,
+                        "give_probability": give_probability,
+                        "accept_probability": accept_probability,
+                        "offered_amount": transfer_size,
+                        "gave": gave,
+                        "accepted": accepted,
+                    }
+                )
+                if gave and accepted:
+                    completed.append(
+                        self._execute_transfer(sender, receiver, transfer_size)
+                    )
+                continue
+
             if not self._can_give(sender, minimum_transfer):
                 continue
             receiver = self._find_receiver(sender, minimum_transfer)
@@ -732,6 +885,7 @@ class ResourceSimulation:
             "goods",
             "production_rate",
             "consumption_need",
+            "risk_tolerance",
             "alive",
             "memory",
         ]
@@ -749,6 +903,7 @@ class ResourceSimulation:
             "goods",
             "generosity_score",
             "acceptance_score",
+            "risk_tolerance",
         ]
         return pd.DataFrame(self.agent_history, columns=columns)
 
@@ -760,6 +915,7 @@ class ResourceSimulation:
         iteration = len(self.metrics_history) + 1
         self._current_iteration = iteration
         self._iteration_observations = []
+        self.decision_log = []
         self._decay_trust()
         self._process_reputation_queue()
         completed = self._process_transfers()

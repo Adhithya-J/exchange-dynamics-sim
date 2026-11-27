@@ -51,12 +51,11 @@ the simulation reports how wrong those beliefs are.
 
 ## 4. Replace fixed probabilities with belief-based decisions
 
-- [ ] Base give/receive decisions on expected payoff and trust beliefs instead
-      of `effective_generosity` / `effective_acceptance`
-      (`main.py:95-105`).
-- [ ] Add risk tolerance and update it, or hold it fixed per agent.
-- [ ] Keep decisions explainable (record the inputs used).
-- [ ] Add tests that a higher-trust belief increases cooperation.
+- [x] Base give/receive decisions on expected payoff and trust beliefs, blended
+      with the legacy scores by `TRUST.DECISION_WEIGHT`.
+- [x] Add risk tolerance held fixed per agent.
+- [x] Keep decisions explainable (`decision_log` records the inputs used).
+- [x] Add tests that a higher-trust belief increases cooperation.
 
 **Done when:** decisions are driven by beliefs about other agents, not static
 scores.
