@@ -46,6 +46,14 @@ DEFAULT_TRUST_SETTINGS: dict[str, Any] = {
     "RETURN_MULTIPLIER": 2.0,
 }
 
+# Social settings used when a custom configuration omits the section.
+DEFAULT_SOCIAL_SETTINGS: dict[str, Any] = {
+    "RECIPROCITY_ENABLED": False,
+    "REPAY_PROBABILITY": 0.5,
+    "REPAY_DELAY": 3,
+    "REPAY_FRACTION": 1.0,
+}
+
 
 class Agent:
     """An individual with resources, social tendencies, and recipient memory."""
@@ -201,6 +209,12 @@ class ResourceSimulation:
         self._giving_successes: dict[str, int] = {}
         self._iteration_observations: list[tuple[float, float]] = []
         self.decision_log: list[dict[str, Any]] = []
+        self._repayment_queue: list[dict[str, Any]] = []
+        self.repayment_log: list[dict[str, Any]] = []
+        self.total_gifts = 0
+        self.total_repayments = 0
+        self.total_repayment_volume = 0.0
+        self.total_repayment_delay = 0
 
     @staticmethod
     def _validated_range(value: Any, name: str) -> tuple[float, float]:
@@ -283,6 +297,138 @@ class ResourceSimulation:
             "public_weight": public_weight,
             "decision_weight": decision_weight,
             "return_multiplier": return_multiplier,
+        }
+
+    def _social_settings(self) -> dict[str, Any]:
+        """Return validated altruism and reciprocity settings."""
+
+        configured = self.config.get("SOCIAL") or {}
+        merged = {**DEFAULT_SOCIAL_SETTINGS, **configured}
+        enabled = bool(merged["RECIPROCITY_ENABLED"])
+        try:
+            probability = float(merged["REPAY_PROBABILITY"])
+            delay = int(merged["REPAY_DELAY"])
+            fraction = float(merged["REPAY_FRACTION"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("SOCIAL settings must be numeric") from exc
+        if not 0 <= probability <= 1:
+            raise ValueError("SOCIAL.REPAY_PROBABILITY must be between 0 and 1")
+        if delay < 0:
+            raise ValueError("SOCIAL.REPAY_DELAY must not be negative")
+        if fraction < 0:
+            raise ValueError("SOCIAL.REPAY_FRACTION must not be negative")
+        return {
+            "enabled": enabled,
+            "repay_probability": probability,
+            "repay_delay": delay,
+            "repay_fraction": fraction,
+        }
+
+    def _schedule_repayment(
+        self, giver: Agent, receiver: Agent, amount: float
+    ) -> None:
+        """Record a gift and schedule a possible reciprocal repayment."""
+
+        self.total_gifts += 1
+        settings = self._social_settings()
+        if not settings["enabled"]:
+            return
+        self._repayment_queue.append(
+            {
+                "due": self._current_iteration + settings["repay_delay"],
+                "gift_iteration": self._current_iteration,
+                "debtor": receiver.id,
+                "creditor": giver.id,
+                "amount": amount,
+            }
+        )
+
+    def _process_repayments(self, iteration: int) -> dict[str, Any]:
+        """Pay due gifts back when the debtor can afford it."""
+
+        settings = self._social_settings()
+        empty = {
+            "repayments": 0,
+            "repayment_volume": 0.0,
+            "total_repayments": self.total_repayments,
+            "reciprocity_rate": (
+                self.total_repayments / self.total_gifts
+                if self.total_gifts
+                else 0.0
+            ),
+            "outstanding_debt": float(
+                sum(entry["amount"] for entry in self._repayment_queue)
+            ),
+            "mean_repayment_delay": (
+                self.total_repayment_delay / self.total_repayments
+                if self.total_repayments
+                else 0.0
+            ),
+        }
+        if not settings["enabled"] or not self._repayment_queue:
+            return empty
+
+        due = [
+            entry for entry in self._repayment_queue if entry["due"] <= iteration
+        ]
+        self._repayment_queue = [
+            entry
+            for entry in self._repayment_queue
+            if entry["due"] > iteration
+        ]
+        count = 0
+        volume = 0.0
+        floor = self.config["SIMULATION"]["RESOURCE_FLOOR"]
+        for entry in due:
+            if self.random.random() >= settings["repay_probability"]:
+                continue
+            debtor = self._agent_by_id(entry["debtor"])
+            creditor = self._agent_by_id(entry["creditor"])
+            if not debtor.is_alive or not creditor.is_alive:
+                continue
+            spendable = max(0.0, debtor.resources - floor)
+            amount = min(
+                entry["amount"] * settings["repay_fraction"], spendable
+            )
+            if amount <= 0:
+                continue
+            debtor.resources -= amount
+            creditor.resources += amount
+            delay = iteration - entry["gift_iteration"]
+            self.repayment_log.append(
+                {
+                    "gift_iteration": entry["gift_iteration"],
+                    "repayment_iteration": iteration,
+                    "delay": delay,
+                    "debtor": entry["debtor"],
+                    "creditor": entry["creditor"],
+                    "scheduled_amount": entry["amount"],
+                    "amount": amount,
+                }
+            )
+            count += 1
+            volume += amount
+            self.total_repayments += 1
+            self.total_repayment_volume += amount
+            self.total_repayment_delay += delay
+
+        return {
+            "repayments": count,
+            "repayment_volume": volume,
+            "total_repayments": self.total_repayments,
+            "reciprocity_rate": (
+                self.total_repayments / self.total_gifts
+                if self.total_gifts
+                else 0.0
+            ),
+            "outstanding_debt": float(
+                sum(entry["amount"] for entry in self._repayment_queue)
+            ),
+            "mean_repayment_delay": (
+                self.total_repayment_delay / self.total_repayments
+                if self.total_repayments
+                else 0.0
+            ),
         }
 
     def _initialize_trust(self) -> None:
@@ -497,6 +643,12 @@ class ResourceSimulation:
         self.total_transfers = 0
         self.total_transfer_volume = 0.0
         self._current_iteration = 0
+        self._repayment_queue = []
+        self.repayment_log = []
+        self.total_gifts = 0
+        self.total_repayments = 0
+        self.total_repayment_volume = 0.0
+        self.total_repayment_delay = 0
         self._initialize_trust()
         self._record_agent_snapshot(iteration=0)
         return self.agents
@@ -678,6 +830,7 @@ class ResourceSimulation:
         receiver.resources += transfer_size
         receiver.memory.append(giver.id)
         self._observe_reciprocation(giver, receiver)
+        self._schedule_repayment(giver, receiver, transfer_size)
         return (giver.id, receiver.id, transfer_size)
 
     def _process_transfers(self) -> list[tuple[str, str, float]]:
@@ -918,6 +1071,7 @@ class ResourceSimulation:
         self.decision_log = []
         self._decay_trust()
         self._process_reputation_queue()
+        repayments = self._process_repayments(iteration)
         completed = self._process_transfers()
         market = self._run_market_cycle()
         self._apply_living_cost()
@@ -934,6 +1088,8 @@ class ResourceSimulation:
                 "total_transfer_volume": self.total_transfer_volume,
                 "goods_total": float(sum(agent.goods for agent in self.agents)),
                 "alive": int(sum(agent.is_alive for agent in self.agents)),
+                "altruism_volume": transfer_volume,
+                **repayments,
                 **market,
                 **self._trust_metrics(),
             }

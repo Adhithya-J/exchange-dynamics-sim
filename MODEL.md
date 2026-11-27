@@ -61,6 +61,23 @@ the simulation behaves exactly like the transfer-only model.
 - Unsold goods stay in inventory. Unmet demand is recorded.
 - Goods held by dead agents are stranded but still counted in total goods.
 
+## Altruism and reciprocity (optional)
+
+Every transfer between agents is an altruistic gift: the giver pays an explicit
+cost and the receiver gains the same amount. Market trades are separate and
+never create gift debts.
+
+When `SOCIAL.RECIPROCITY_ENABLED` is true, each gift is recorded as a debt from
+the receiver to the giver. After `REPAY_DELAY` iterations the debtor attempts a
+repayment with probability `REPAY_PROBABILITY`, returning `REPAY_FRACTION` of
+the gift while staying at or above `RESOURCE_FLOOR`. Repayments are ordinary
+money transfers, so they conserve total money.
+
+`repayment_log` records the debtor, creditor, original gift iteration,
+repayment iteration, delay, and amount. Metrics include `altruism_volume`,
+`repayments`, `repayment_volume`, `reciprocity_rate`, `outstanding_debt`, and
+`mean_repayment_delay`.
+
 ## Trust and reputation (optional)
 
 Disabled by default. When `TRUST.ENABLED` is true:

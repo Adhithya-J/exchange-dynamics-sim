@@ -48,6 +48,17 @@ MARKET:
   # Goods needed per living agent per iteration.
   CONSUMPTION_RANGE: [1.0, 1.0]
 
+# Altruistic gifts and optional reciprocity. Repayments are separate from trade.
+SOCIAL:
+  # Let recipients repay gifts after a delay.
+  RECIPROCITY_ENABLED: false
+  # Chance a due gift is repaid.
+  REPAY_PROBABILITY: 0.5
+  # Iterations between a gift and its attempted repayment.
+  REPAY_DELAY: 3
+  # Fraction of the gift returned.
+  REPAY_FRACTION: 1.0
+
 # Private trust beliefs and noisy public reputation. Off by default.
 TRUST:
   # Turn belief and reputation tracking on.

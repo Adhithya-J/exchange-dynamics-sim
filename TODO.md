@@ -62,12 +62,12 @@ scores.
 
 ## 5. Add altruism and reciprocity as a separate social layer
 
-- [ ] Represent altruistic transfers with an explicit giver cost and recipient
+- [x] Represent altruistic transfers with an explicit giver cost and recipient
       benefit.
-- [ ] Track reciprocity (who repaid whom, and how quickly).
-- [ ] Keep this layer separate from market transactions.
-- [ ] Add metrics for altruism volume and reciprocity rates.
-- [ ] Add conservation tests for the social layer.
+- [x] Track reciprocity (who repaid whom, and how quickly) in `repayment_log`.
+- [x] Keep this layer separate from market transactions.
+- [x] Add metrics for altruism volume and reciprocity rates.
+- [x] Add conservation tests for the social layer.
 
 **Done when:** altruism can be enabled/disabled independently of the market and
 is measured on its own terms.

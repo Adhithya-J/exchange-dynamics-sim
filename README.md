@@ -57,6 +57,15 @@ goods, consumption destroys them, and the living cost remains an explicit money
 sink. `MODEL.md` documents the full ledger, and `tests/test_conservation.py`
 plus `tests/test_market.py` enforce it.
 
+## Altruism and reciprocity (optional)
+
+Direct transfers are the altruism layer; market trades are kept separate. Set
+`SOCIAL.RECIPROCITY_ENABLED: true` to schedule a possible repayment after each
+gift. `REPAY_PROBABILITY`, `REPAY_DELAY`, and `REPAY_FRACTION` control the
+attempt. `repayment_log` records who repaid whom and how quickly, while metrics
+report `altruism_volume`, `reciprocity_rate`, `outstanding_debt`, and
+`mean_repayment_delay`. `tests/test_social.py` covers the rules.
+
 ## Trust and reputation (optional)
 
 Set `TRUST.ENABLED: true` to add private beliefs and public reputation. Every
