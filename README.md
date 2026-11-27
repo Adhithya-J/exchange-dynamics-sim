@@ -121,6 +121,34 @@ The command writes `results/runs.csv`, `results/runs_summary.csv`, and
 `results/runs_summary.json`. Use `--config` to start from a custom YAML file and
 `--metrics` to choose which final metrics to aggregate.
 
+## Replay export
+
+The simulation can write a versioned, headless replay log instead of only an
+HTML page. The log is the stable boundary between the model and any renderer:
+
+```bash
+python main.py --replay replay.json.gz --iterations 500
+# or run the exporter directly
+python replay.py --output replay.json.gz --iterations 500
+```
+
+`replay.py` writes compact JSON (gzip when the path ends in `.gz`) and validates
+it on both write and load. A replay contains:
+
+- `schema_version` and `meta`: the format version, actual iteration count, seed,
+  config, and enabled feature flags;
+- `agents`: stable ids, labels, colors, and initial traits;
+- `ticks`: one entry per iteration, with per-agent resources, goods, alive
+  status, risk tolerance, reputation, and summary metrics such as Gini and the
+  commons stock ratio;
+- `events`: typed `gift`, `repayment`, `trade`, `death`, and `shock` records,
+  each with a tick, phase, sequence number, and stable id.
+
+Deaths are recorded explicitly with their cause (`gift`, `repayment`, `market`,
+or `living_cost`) instead of being inferred from a resource crossing. The
+`living_cost_paid` metric records the only money sink, so total resources can be
+reconciled from the replay alone.
+
 ## Quick start
 
 ```bash
@@ -169,6 +197,7 @@ inspect `metrics_history` or the returned DataFrame.
 - `utils/` - shared helpers, including YAML configuration loading.
 - `tests/` - unit and behavior tests for the model.
 - `visualize.py` - animated world view plus the legacy Plotly chart.
+- `replay.py` - versioned JSON replay export and validation.
 - `templates/world.html` - self-contained HTML/CSS/Canvas replay renderer.
 - `experiments.py` - seed and parameter sweep runner with confidence intervals.
 - `TRUST_SOCIETY_SCOPE.md` - research scope and roadmap.

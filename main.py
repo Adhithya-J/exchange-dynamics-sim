@@ -222,6 +222,7 @@ class ResourceSimulation:
         # are never used to decide the next simulation step.
         self.transfer_log: list[dict[str, Any]] = []
         self.trade_log: list[dict[str, Any]] = []
+        self.death_log: list[dict[str, Any]] = []
         self.total_gifts = 0
         self.total_repayments = 0
         self.total_repayment_volume = 0.0
@@ -410,6 +411,8 @@ class ResourceSimulation:
                 continue
             debtor.resources -= amount
             creditor.resources += amount
+            if not debtor.is_alive:
+                self._log_death(debtor, "repayment")
             delay = iteration - entry["gift_iteration"]
             self.repayment_log.append(
                 {
@@ -855,6 +858,7 @@ class ResourceSimulation:
         self.total_repayment_delay = 0
         self._active_shocks = []
         self.shock_log = []
+        self.death_log = []
         self.shock_count = 0
         self._last_shock_iteration = 0
         self._last_unmet_by_agent = {}
@@ -1034,11 +1038,24 @@ class ResourceSimulation:
             and self.random.random() < self._receive_probability(agent, giver)
         )
 
+    def _log_death(self, agent: Agent, cause: str) -> None:
+        """Record a death observed immediately after a cost was paid."""
+
+        self.death_log.append(
+            {
+                "iteration": self._current_iteration,
+                "agent": agent.id,
+                "cause": cause,
+            }
+        )
+
     def _execute_transfer(
         self, giver: Agent, receiver: Agent, transfer_size: float
     ) -> tuple[str, str, float]:
         giver.resources -= transfer_size
         receiver.resources += transfer_size
+        if not giver.is_alive:
+            self._log_death(giver, "gift")
         receiver.memory.append(giver.id)
         self._observe_reciprocation(giver, receiver)
         self._schedule_repayment(giver, receiver, transfer_size)
@@ -1152,16 +1169,24 @@ class ResourceSimulation:
             completed.append(self._execute_transfer(giver, receiver, transfer_size))
         return completed
 
-    def _apply_living_cost(self) -> None:
+    def _apply_living_cost(self) -> float:
+        """Charge living agents and return the money removed by the sink."""
+
         cost = self.config["AGENTS"]["LIVING_COST"]
         minimum = self.config["SIMULATION"]["RESOURCE_FLOOR"]
+        paid = 0.0
         for agent in self.agents:
             if not agent.is_alive:
                 continue
+            before = agent.resources
             agent.resources -= cost
             if agent.resources <= minimum:
                 # Reaching the floor is death, not a resource top-up.
                 agent.resources = minimum
+            paid += before - agent.resources
+            if not agent.is_alive:
+                self._log_death(agent, "living_cost")
+        return paid
 
     def _produce_goods(self) -> float:
         """Add this iteration's production and return the goods created."""
@@ -1227,6 +1252,8 @@ class ResourceSimulation:
                 buyer.goods += quantity
                 buyer.resources -= cost
                 seller.resources += cost
+                if not buyer.is_alive:
+                    self._log_death(buyer, "market")
                 goods_traded += quantity
                 trade_volume += cost
                 requested -= quantity
@@ -1312,7 +1339,7 @@ class ResourceSimulation:
         repayments = self._process_repayments(iteration)
         completed = self._process_transfers()
         market = self._run_market_cycle()
-        self._apply_living_cost()
+        living_cost_paid = self._apply_living_cost()
         self._adapt_to_scarcity()
         self.total_transfers += len(completed)
         transfer_volume = sum(amount for _, _, amount in completed)
@@ -1328,6 +1355,7 @@ class ResourceSimulation:
                 "goods_total": float(sum(agent.goods for agent in self.agents)),
                 "alive": int(sum(agent.is_alive for agent in self.agents)),
                 "altruism_volume": transfer_volume,
+                "living_cost_paid": living_cost_paid,
                 **repayments,
                 **market,
                 **self._trust_metrics(),
@@ -1367,10 +1395,20 @@ def main() -> None:
         default=None,
         help="Override the configured number of iterations",
     )
+    parser.add_argument(
+        "--replay",
+        type=str,
+        default=None,
+        help="Write a versioned replay log to this path (.gz is compressed)",
+    )
     args = parser.parse_args()
     cfg = load_config(args.config) if args.config else None
     simulation = ResourceSimulation(cfg)
     final_state = simulation.run(iterations=args.iterations)
+    if args.replay:
+        from replay import export_replay
+
+        print(f"Replay written to {export_replay(simulation, args.replay)}")
     print(final_state.head())
     print("\nFinal statistics:")
     print(simulation.metrics_history[-1])

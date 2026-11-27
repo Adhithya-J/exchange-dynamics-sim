@@ -23,24 +23,12 @@ from plotly.colors import qualitative
 from plotly.subplots import make_subplots
 
 from main import CONFIG, MetricsCalculator, ResourceSimulation
+from replay import AGENT_COLORS
 from utils import load_config
 
 # Stable identity colors for the world view. The same color follows an agent
 # into every chart so selections stay legible across the animation.
-WORLD_AGENT_COLORS = [
-    "#2f6fed",
-    "#d97706",
-    "#0f9d76",
-    "#d6336c",
-    "#7c3aed",
-    "#0e7490",
-    "#ea580c",
-    "#65a30d",
-    "#9f1239",
-    "#475569",
-    "#a16207",
-    "#0891b2",
-]
+WORLD_AGENT_COLORS = AGENT_COLORS
 
 GIFT_EVENT = 0
 REPAYMENT_EVENT = 1

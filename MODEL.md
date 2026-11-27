@@ -52,15 +52,23 @@ only move value between agents.
 
 `transfer_log` records every completed gift and repayment (iteration, giver,
 receiver, amount, and kind). `trade_log` records every market trade (iteration,
-buyer, seller, quantity, price, and money). They are append-only observations
-written after a step has been decided, so they cannot change the simulation.
-`agent_history` stores one row per agent and iteration, including resources,
-goods, risk tolerance, alive status, and public reputation when enabled. The
-world visualization reads these logs and snapshots; positions in the world are
-a presentation layer only, not part of the model. Its commons pond is a visual
-mirror of total money (`series.total`), not an extra resource stock or a second
-ledger; it shrinks only when the recorded total falls, which in the default
-rules means the living-cost sink.
+buyer, seller, quantity, price, and money). `death_log` records every death and
+its cause (`gift`, `repayment`, `market`, or `living_cost`). They are
+append-only observations written after a step has been decided, so they cannot
+change the simulation. `agent_history` stores one row per agent and iteration,
+including resources, goods, risk tolerance, alive status, and public reputation
+when enabled. The `living_cost_paid` metric records the money removed by the
+living-cost sink each iteration, so total money can be reconciled from the logs.
+
+`replay.py` packages those observations into a versioned JSON replay
+(`schema_version`, `meta`, `agents`, `ticks`, and typed `events`). The replay is
+the contract between the model and a renderer; it records state and events, not
+positions or drawing details. The world visualization still reads the in-memory
+logs and snapshots; positions in the world are a presentation layer only, not
+part of the model. Its commons pond is a visual mirror of total money
+(`series.total`), not an extra resource stock or a second ledger; it shrinks only
+when the recorded total falls, which in the default rules means the living-cost
+sink.
 
 ## Minimal market rules
 

@@ -1,0 +1,574 @@
+{
+  "agents": [
+    {
+      "acceptance": 0.6527972108735757,
+      "color": "#2f6fed",
+      "consumption_need": 0.0,
+      "generosity": 0.629533105933265,
+      "id": "agent-001",
+      "initial_resources": 10.0,
+      "initial_risk_tolerance": 0.5,
+      "label": "A001",
+      "production_rate": 0.0
+    },
+    {
+      "acceptance": 0.62535270033364,
+      "color": "#d97706",
+      "consumption_need": 0.0,
+      "generosity": 0.7603737892159415,
+      "id": "agent-002",
+      "initial_resources": 10.0,
+      "initial_risk_tolerance": 0.5,
+      "label": "A002",
+      "production_rate": 0.0
+    },
+    {
+      "acceptance": 0.7279911209194049,
+      "color": "#0f9d76",
+      "consumption_need": 0.0,
+      "generosity": 0.7143528017226757,
+      "id": "agent-003",
+      "initial_resources": 10.0,
+      "initial_risk_tolerance": 0.5,
+      "label": "A003",
+      "production_rate": 0.0
+    }
+  ],
+  "events": [
+    {
+      "actor": "agent-002",
+      "amount": 2.672688605483038,
+      "id": "1:0",
+      "phase": "exchange",
+      "seq": 0,
+      "target": "agent-003",
+      "tick": 1,
+      "type": "gift"
+    },
+    {
+      "actor": "agent-001",
+      "amount": 4.789798802829949,
+      "id": "1:1",
+      "phase": "exchange",
+      "seq": 1,
+      "target": "agent-002",
+      "tick": 1,
+      "type": "gift"
+    },
+    {
+      "actor": "agent-001",
+      "amount": 1.0563744158509987,
+      "id": "2:0",
+      "phase": "exchange",
+      "seq": 0,
+      "target": "agent-002",
+      "tick": 2,
+      "type": "gift"
+    },
+    {
+      "actor": "agent-003",
+      "amount": 1.4711689523134734,
+      "id": "2:1",
+      "phase": "exchange",
+      "seq": 1,
+      "target": "agent-001",
+      "tick": 2,
+      "type": "gift"
+    },
+    {
+      "actor": "agent-001",
+      "amount": null,
+      "cause": "living_cost",
+      "id": "2:2",
+      "phase": "cost",
+      "seq": 2,
+      "target": null,
+      "tick": 2,
+      "type": "death"
+    },
+    {
+      "actor": "agent-002",
+      "amount": 2.489590170902925,
+      "id": "3:0",
+      "phase": "exchange",
+      "seq": 0,
+      "target": "agent-003",
+      "tick": 3,
+      "type": "gift"
+    },
+    {
+      "actor": "agent-003",
+      "amount": 1.8238348512773062,
+      "id": "3:1",
+      "phase": "exchange",
+      "seq": 1,
+      "target": "agent-002",
+      "tick": 3,
+      "type": "gift"
+    },
+    {
+      "actor": "agent-003",
+      "amount": 1.675173683859609,
+      "id": "4:0",
+      "phase": "exchange",
+      "seq": 0,
+      "target": "agent-002",
+      "tick": 4,
+      "type": "gift"
+    },
+    {
+      "actor": "agent-002",
+      "amount": 1.3274200431830794,
+      "id": "4:1",
+      "phase": "exchange",
+      "seq": 1,
+      "target": "agent-003",
+      "tick": 4,
+      "type": "gift"
+    },
+    {
+      "actor": "agent-003",
+      "amount": null,
+      "cause": "living_cost",
+      "id": "4:2",
+      "phase": "cost",
+      "seq": 2,
+      "target": null,
+      "tick": 4,
+      "type": "death"
+    }
+  ],
+  "meta": {
+    "agent_count": 3,
+    "config": {
+      "AFFORDABILITY": {
+        "MAX_RESOURCES": 300.0,
+        "MAX_SCORE": 1.0,
+        "MIN_RESOURCES": 50.0,
+        "MIN_SCORE": 0.0
+      },
+      "AGENTS": {
+        "ACCEPTANCE": [
+          0.6,
+          0.95
+        ],
+        "GENEROSITY": [
+          0.5,
+          0.9
+        ],
+        "LIVING_COST": 3.0,
+        "MAX_RESOURCES_AFTER_RECEIVING": 10000.0,
+        "MIN_RESOURCES_AFTER_GIVING": 0.0,
+        "RISK_TOLERANCE": [
+          0.0,
+          1.0
+        ]
+      },
+      "MARKET": {
+        "CONSUMPTION_RANGE": [
+          1.0,
+          1.0
+        ],
+        "ENABLED": false,
+        "PRICE": 1.0,
+        "PRODUCTION_RANGE": [
+          0.0,
+          2.0
+        ]
+      },
+      "MEMORY": {
+        "PREFERENCE_FRACTION": 0.5,
+        "SIZE": 10
+      },
+      "SHOCKS": {
+        "ADAPTATION_RATE": 0.05,
+        "ENABLED": false,
+        "SCHEDULE": []
+      },
+      "SIMULATION": {
+        "AGENTS": 3,
+        "INITIAL_RESOURCES": 10.0,
+        "ITERATIONS": 4,
+        "RANDOM_SEED": 7,
+        "RESOURCE_FLOOR": 0.0,
+        "TRANSFER_AMOUNT_RANGE": [
+          1.0,
+          5.0
+        ]
+      },
+      "SOCIAL": {
+        "RECIPROCITY_ENABLED": false,
+        "REPAY_DELAY": 3,
+        "REPAY_FRACTION": 1.0,
+        "REPAY_PROBABILITY": 0.5
+      },
+      "TRUST": {
+        "BIAS": 0.0,
+        "DECAY": 0.02,
+        "DECISION_WEIGHT": 0.0,
+        "DELAY": 0,
+        "ENABLED": false,
+        "INITIAL_BELIEF": 0.5,
+        "LEARNING_RATE": 0.2,
+        "NOISE": 0.0,
+        "PUBLIC_WEIGHT": 0.3,
+        "RETURN_MULTIPLIER": 2.0
+      }
+    },
+    "features": {
+      "market": false,
+      "reciprocity": false,
+      "shocks": false,
+      "trust": false
+    },
+    "generator": "exchange-dynamics-sim",
+    "initial_resources": 10.0,
+    "initial_total": 30.0,
+    "iterations": 4,
+    "living_cost": 3.0,
+    "resource_floor": 0.0,
+    "seed": 7,
+    "transfer_range": [
+      1.0,
+      5.0
+    ]
+  },
+  "schema_version": 1,
+  "ticks": [
+    {
+      "agents": [
+        {
+          "alive": true,
+          "goods": 0.0,
+          "id": "agent-001",
+          "reputation": null,
+          "resources": 10.0,
+          "risk_tolerance": 0.5
+        },
+        {
+          "alive": true,
+          "goods": 0.0,
+          "id": "agent-002",
+          "reputation": null,
+          "resources": 10.0,
+          "risk_tolerance": 0.5
+        },
+        {
+          "alive": true,
+          "goods": 0.0,
+          "id": "agent-003",
+          "reputation": null,
+          "resources": 10.0,
+          "risk_tolerance": 0.5
+        }
+      ],
+      "iteration": 0,
+      "metrics": {
+        "alive": 3,
+        "gini": 0.0,
+        "goods_total": 0.0,
+        "iteration": 0,
+        "living_cost_paid": 0.0,
+        "max": 10.0,
+        "mean": 10.0,
+        "median": 10.0,
+        "min": 10.0,
+        "std": 0.0,
+        "stock_ratio": 1.0,
+        "total": 30.0
+      }
+    },
+    {
+      "agents": [
+        {
+          "alive": true,
+          "goods": 0.0,
+          "id": "agent-001",
+          "reputation": null,
+          "resources": 2.2102011971700506,
+          "risk_tolerance": 0.5
+        },
+        {
+          "alive": true,
+          "goods": 0.0,
+          "id": "agent-002",
+          "reputation": null,
+          "resources": 9.11711019734691,
+          "risk_tolerance": 0.5
+        },
+        {
+          "alive": true,
+          "goods": 0.0,
+          "id": "agent-003",
+          "reputation": null,
+          "resources": 9.672688605483039,
+          "risk_tolerance": 0.5
+        }
+      ],
+      "iteration": 1,
+      "metrics": {
+        "alive": 3,
+        "altruism_volume": 7.462487408312987,
+        "gini": 0.23690436216866628,
+        "goods_consumed": 0.0,
+        "goods_produced": 0.0,
+        "goods_total": 0.0,
+        "goods_traded": 0.0,
+        "iteration": 1,
+        "iterations_since_shock": 0,
+        "living_cost_paid": 9.0,
+        "max": 9.672688605483039,
+        "mean": 7.0,
+        "mean_accept_probability": 0.0,
+        "mean_give_probability": 0.0,
+        "mean_repayment_delay": 0.0,
+        "mean_reputation": 0.0,
+        "mean_risk_tolerance": 0.5,
+        "mean_trust": 0.0,
+        "median": 9.11711019734691,
+        "min": 2.2102011971700506,
+        "outstanding_debt": 0.0,
+        "price": 1.0,
+        "production_modifier": 1.0,
+        "reciprocity_rate": 0.0,
+        "repayment_volume": 0.0,
+        "repayments": 0,
+        "reputation_brier": 0.0,
+        "reputation_error": 0.0,
+        "reputation_noise": 0.0,
+        "shock_active": 0,
+        "shock_count": 0,
+        "std": 3.3944853582038204,
+        "stock_ratio": 0.7,
+        "total": 21.0,
+        "total_repayments": 0,
+        "total_transfer_volume": 7.462487408312987,
+        "total_transfers": 2,
+        "trade_volume": 0.0,
+        "transfer_volume": 7.462487408312987,
+        "transfers": 2,
+        "trust_observations": 0,
+        "unmet_demand": 0.0
+      }
+    },
+    {
+      "agents": [
+        {
+          "alive": false,
+          "goods": 0.0,
+          "id": "agent-001",
+          "reputation": null,
+          "resources": 0.0,
+          "risk_tolerance": 0.5
+        },
+        {
+          "alive": true,
+          "goods": 0.0,
+          "id": "agent-002",
+          "reputation": null,
+          "resources": 7.173484613197909,
+          "risk_tolerance": 0.5
+        },
+        {
+          "alive": true,
+          "goods": 0.0,
+          "id": "agent-003",
+          "reputation": null,
+          "resources": 5.201519653169566,
+          "risk_tolerance": 0.5
+        }
+      ],
+      "iteration": 2,
+      "metrics": {
+        "alive": 2,
+        "altruism_volume": 2.527543368164472,
+        "gini": 0.38645021630114257,
+        "goods_consumed": 0.0,
+        "goods_produced": 0.0,
+        "goods_total": 0.0,
+        "goods_traded": 0.0,
+        "iteration": 2,
+        "iterations_since_shock": 0,
+        "living_cost_paid": 8.624995733632526,
+        "max": 7.173484613197909,
+        "mean": 4.125001422122492,
+        "mean_accept_probability": 0.0,
+        "mean_give_probability": 0.0,
+        "mean_repayment_delay": 0.0,
+        "mean_reputation": 0.0,
+        "mean_risk_tolerance": 0.5,
+        "mean_trust": 0.0,
+        "median": 5.201519653169566,
+        "min": 0.0,
+        "outstanding_debt": 0.0,
+        "price": 1.0,
+        "production_modifier": 1.0,
+        "reciprocity_rate": 0.0,
+        "repayment_volume": 0.0,
+        "repayments": 0,
+        "reputation_brier": 0.0,
+        "reputation_error": 0.0,
+        "reputation_noise": 0.0,
+        "shock_active": 0,
+        "shock_count": 0,
+        "std": 3.0258760715181676,
+        "stock_ratio": 0.4125001422122491,
+        "total": 12.375004266367474,
+        "total_repayments": 0,
+        "total_transfer_volume": 9.99003077647746,
+        "total_transfers": 4,
+        "trade_volume": 0.0,
+        "transfer_volume": 2.527543368164472,
+        "transfers": 2,
+        "trust_observations": 0,
+        "unmet_demand": 0.0
+      }
+    },
+    {
+      "agents": [
+        {
+          "alive": false,
+          "goods": 0.0,
+          "id": "agent-001",
+          "reputation": null,
+          "resources": 0.0,
+          "risk_tolerance": 0.5
+        },
+        {
+          "alive": true,
+          "goods": 0.0,
+          "id": "agent-002",
+          "reputation": null,
+          "resources": 3.5077292935722895,
+          "risk_tolerance": 0.5
+        },
+        {
+          "alive": true,
+          "goods": 0.0,
+          "id": "agent-003",
+          "reputation": null,
+          "resources": 2.867274972795185,
+          "risk_tolerance": 0.5
+        }
+      ],
+      "iteration": 3,
+      "metrics": {
+        "alive": 2,
+        "altruism_volume": 4.3134250221802315,
+        "gini": 0.3668211185444974,
+        "goods_consumed": 0.0,
+        "goods_produced": 0.0,
+        "goods_total": 0.0,
+        "goods_traded": 0.0,
+        "iteration": 3,
+        "iterations_since_shock": 0,
+        "living_cost_paid": 6.0,
+        "max": 3.5077292935722895,
+        "mean": 2.1250014221224913,
+        "mean_accept_probability": 0.0,
+        "mean_give_probability": 0.0,
+        "mean_repayment_delay": 0.0,
+        "mean_reputation": 0.0,
+        "mean_risk_tolerance": 0.5,
+        "mean_trust": 0.0,
+        "median": 2.867274972795185,
+        "min": 0.0,
+        "outstanding_debt": 0.0,
+        "price": 1.0,
+        "production_modifier": 1.0,
+        "reciprocity_rate": 0.0,
+        "repayment_volume": 0.0,
+        "repayments": 0,
+        "reputation_brier": 0.0,
+        "reputation_error": 0.0,
+        "reputation_noise": 0.0,
+        "shock_active": 0,
+        "shock_count": 0,
+        "std": 1.5251816760127244,
+        "stock_ratio": 0.21250014221224914,
+        "total": 6.375004266367474,
+        "total_repayments": 0,
+        "total_transfer_volume": 14.30345579865769,
+        "total_transfers": 6,
+        "trade_volume": 0.0,
+        "transfer_volume": 4.3134250221802315,
+        "transfers": 2,
+        "trust_observations": 0,
+        "unmet_demand": 0.0
+      }
+    },
+    {
+      "agents": [
+        {
+          "alive": false,
+          "goods": 0.0,
+          "id": "agent-001",
+          "reputation": null,
+          "resources": 0.0,
+          "risk_tolerance": 0.5
+        },
+        {
+          "alive": true,
+          "goods": 0.0,
+          "id": "agent-002",
+          "reputation": null,
+          "resources": 0.855482934248819,
+          "risk_tolerance": 0.5
+        },
+        {
+          "alive": false,
+          "goods": 0.0,
+          "id": "agent-003",
+          "reputation": null,
+          "resources": 0.0,
+          "risk_tolerance": 0.5
+        }
+      ],
+      "iteration": 4,
+      "metrics": {
+        "alive": 1,
+        "altruism_volume": 3.0025937270426883,
+        "gini": 0.6666666666666666,
+        "goods_consumed": 0.0,
+        "goods_produced": 0.0,
+        "goods_total": 0.0,
+        "goods_traded": 0.0,
+        "iteration": 4,
+        "iterations_since_shock": 0,
+        "living_cost_paid": 5.519521332118655,
+        "max": 0.855482934248819,
+        "mean": 0.28516097808293966,
+        "mean_accept_probability": 0.0,
+        "mean_give_probability": 0.0,
+        "mean_repayment_delay": 0.0,
+        "mean_reputation": 0.0,
+        "mean_risk_tolerance": 0.5,
+        "mean_trust": 0.0,
+        "median": 0.0,
+        "min": 0.0,
+        "outstanding_debt": 0.0,
+        "price": 1.0,
+        "production_modifier": 1.0,
+        "reciprocity_rate": 0.0,
+        "repayment_volume": 0.0,
+        "repayments": 0,
+        "reputation_brier": 0.0,
+        "reputation_error": 0.0,
+        "reputation_noise": 0.0,
+        "shock_active": 0,
+        "shock_count": 0,
+        "std": 0.40327852266447023,
+        "stock_ratio": 0.028516097808293967,
+        "total": 0.855482934248819,
+        "total_repayments": 0,
+        "total_transfer_volume": 17.30604952570038,
+        "total_transfers": 8,
+        "trade_volume": 0.0,
+        "transfer_volume": 3.0025937270426883,
+        "transfers": 2,
+        "trust_observations": 0,
+        "unmet_demand": 0.0
+      }
+    }
+  ]
+}

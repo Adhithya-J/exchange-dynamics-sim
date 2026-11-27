@@ -209,5 +209,9 @@ __marimo__/
 
 sim-env
 
+# Generated charts and local replay exports are ignored.
+/replay.json
+/replay.json.gz
+
 # Generated charts are ignored, but the world renderer template is source.
 !templates/world.html
