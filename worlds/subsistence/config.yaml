@@ -1,0 +1,93 @@
+# Goods-only subsistence world.
+#
+# Agents start with nothing, gather whole berries and wood from a shared
+# commons, eat, store food, and optionally barter. There is no money and no
+# unit of account: the trade price is only a whole-berry-per-wood ratio.
+
+SIMULATION:
+  AGENTS: 10
+  ITERATIONS: 1000
+  RANDOM_SEED: 42
+
+# Feature switches. A world composes only the layers that are enabled here.
+FEATURES:
+  # Direct transfers between agents. Off by default; see the GIFTING section.
+  GIFTING: false
+  # Barter exchange of berries and wood at a relative price.
+  TRADE: true
+  # Wood provides storage capacity for berries.
+  STORAGE: true
+  # Berries held outside storage spoil at the end of the iteration.
+  SPOILAGE: true
+  # Reserved for the shared social utilities; not used by this world yet.
+  TRUST: false
+  RECIPROCITY: false
+  SHOCKS: false
+
+AGENTS:
+  # Efficiency multipliers on the time costs below. A higher berry skill
+  # means more berries per minute; a higher wood skill means more wood per
+  # minute.
+  BERRY_SKILL_RANGE: [0.7, 1.8]
+  WOOD_SKILL_RANGE: [0.7, 1.8]
+  # One iteration is a finite working day.
+  TIME_PER_ITERATION: 100.0
+  # Minutes of work per whole berry at skill 1.
+  BERRY_TIME_COST: 10.0
+  # Minutes of work per whole wood at skill 1. Chopping is much slower.
+  WOOD_TIME_COST: 120.0
+  # Health is a whole-day buffer. Full health survives this many days without
+  # food.
+  MAX_HEALTH: 10
+  STARTING_HEALTH: 10
+  # Berries needed for a full day's food.
+  FOOD_PER_ITERATION: 6
+  HEAL_PER_MEAL: 1
+  STARVATION_RATE: 1
+  STARTING_BERRIES: 0
+  STARTING_WOOD: 0
+  # How many days of food an agent tries to keep, subject to storage.
+  RESERVE_DAYS: 4
+  # How many extra units an agent produces beyond its own target when it is
+  # specialising for trade.
+  TRADE_SURPLUS: 1
+  # Upper bound on the wood an agent deliberately keeps for storage.
+  MAX_WOOD_TARGET: 20
+
+# Shared natural stocks. Stocks and harvests are whole units. Berry bushes
+# regrow steadily; wood regrows much more slowly.
+COMMONS:
+  BERRIES:
+    INITIAL: 2000
+    CAPACITY: 3000
+    REGENERATION: 120.0
+    EXTRACTION_EFFICIENCY: 1.0
+  WOOD:
+    INITIAL: 80
+    CAPACITY: 120
+    REGENERATION: 1.0
+    EXTRACTION_EFFICIENCY: 1.0
+
+STORAGE:
+  # Eight blocks of wood store ten berries. Storage is proportional, so four
+  # wood stores five berries and one wood stores one berry.
+  WOOD_PER_CONTAINER: 8
+  BERRIES_PER_CONTAINER: 10
+  # Each wood block has this chance of wearing out each iteration.
+  WOOD_DECAY_CHANCE: 0.03
+  # Fraction of stored berries lost each iteration. Zero means sealed storage.
+  STORED_SPOIL_RATE: 0.0
+
+TRADE:
+  # Relative price: whole berries given per whole unit of wood.
+  INITIAL_PRICE: 4
+  # Fraction of the supply/demand imbalance applied to next iteration's price.
+  PRICE_ADJUSTMENT: 0.1
+  MIN_PRICE: 1
+  MAX_PRICE: 6
+
+GIFTING:
+  PROBABILITY: 0.25
+  # Whole berries per gift.
+  AMOUNT_RANGE: [1, 3]
+  MIN_RESERVE: 2

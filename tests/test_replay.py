@@ -21,6 +21,7 @@ def golden_config() -> dict:
     """A small run that exercises gifts, the living-cost sink, and deaths."""
 
     config = deepcopy(CONFIG)
+    config["GIFTING"]["ENABLED"] = True
     config["SIMULATION"].update(
         {
             "AGENTS": 3,
@@ -50,6 +51,7 @@ def layered_config() -> dict:
     """A run with every optional layer enabled, for conservation checks."""
 
     config = deepcopy(CONFIG)
+    config["GIFTING"]["ENABLED"] = True
     config["SIMULATION"].update(
         {
             "AGENTS": 4,

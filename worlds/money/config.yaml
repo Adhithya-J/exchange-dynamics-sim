@@ -90,6 +90,12 @@ SHOCKS:
   # Risk-tolerance change per iteration when demand is unmet.
   ADAPTATION_RATE: 0.05
 
+# Direct transfers between agents. Off by default so a run can isolate the
+# market, trust, and shock layers. Turn it on to restore the original gift
+# model.
+GIFTING:
+  ENABLED: false
+
 # Altruistic gifts and optional reciprocity. Repayments are separate from trade.
 SOCIAL:
   # Let recipients repay gifts after a delay.

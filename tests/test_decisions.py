@@ -8,7 +8,9 @@ from main import CONFIG, Agent, ResourceSimulation
 
 
 def make_config() -> dict:
-    return deepcopy(CONFIG)
+    config = deepcopy(CONFIG)
+    config["GIFTING"]["ENABLED"] = True
+    return config
 
 
 def decision_config(agents: int = 3) -> dict:

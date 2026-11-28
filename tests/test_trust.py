@@ -9,7 +9,9 @@ from main import CONFIG, ResourceSimulation
 
 
 def make_config() -> dict:
-    return deepcopy(CONFIG)
+    config = deepcopy(CONFIG)
+    config["GIFTING"]["ENABLED"] = True
+    return config
 
 
 def trust_config(agents: int = 2, initial_resources: float = 100.0) -> dict:

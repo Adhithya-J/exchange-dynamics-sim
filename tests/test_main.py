@@ -14,7 +14,9 @@ from main import (
 
 
 def make_config() -> dict:
-    return deepcopy(CONFIG)
+    config = deepcopy(CONFIG)
+    config["GIFTING"]["ENABLED"] = True
+    return config
 
 
 class TestMetricsCalculator:
@@ -362,3 +364,28 @@ class TestResourceSimulation:
 
         with pytest.raises(ValueError, match="positive values"):
             simulation._transfer_amount_bounds()
+
+
+def test_gifting_is_off_by_default_in_the_money_world():
+    config = deepcopy(CONFIG)
+    config["SIMULATION"].update({"AGENTS": 3, "RANDOM_SEED": 1})
+    config["AGENTS"].update({"GENEROSITY": (1.0, 1.0), "ACCEPTANCE": (1.0, 1.0)})
+    simulation = ResourceSimulation(config)
+
+    simulation.run(iterations=10)
+
+    assert simulation.total_gifts == 0
+    assert simulation.transfer_log == []
+
+
+def test_gifting_can_be_enabled_in_the_money_world():
+    config = deepcopy(CONFIG)
+    config["GIFTING"]["ENABLED"] = True
+    config["SIMULATION"].update({"AGENTS": 3, "RANDOM_SEED": 1})
+    config["AGENTS"].update({"GENEROSITY": (1.0, 1.0), "ACCEPTANCE": (1.0, 1.0)})
+    simulation = ResourceSimulation(config)
+
+    simulation.run(iterations=10)
+
+    assert simulation.total_gifts > 0
+    assert any(entry["type"] == "gift" for entry in simulation.transfer_log)

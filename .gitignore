@@ -212,6 +212,9 @@ sim-env
 # Generated charts and local replay exports are ignored.
 /replay.json
 /replay.json.gz
+/replay-subsistence.json.gz
+/simulation-subsistence.html
+/results/
 
 # Viewer dependencies and captured frames.
 viewer/node_modules/
@@ -219,3 +222,4 @@ viewer/node_modules/
 
 # The viewer shell is source even though generated charts are ignored.
 !viewer/index.html
+!worlds/subsistence/viewer/index.html

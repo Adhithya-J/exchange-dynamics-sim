@@ -11,6 +11,7 @@ from visualize import (
 
 def gift_config() -> dict:
     config = deepcopy(CONFIG)
+    config["GIFTING"]["ENABLED"] = True
     config["SIMULATION"].update(
         {
             "AGENTS": 3,
