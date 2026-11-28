@@ -411,7 +411,11 @@ class CreditLayer(FeatureLayer):
         principal: int,
         collateral: int,
     ) -> float:
-        if self.settings["mode"] == "reciprocal":
+        # A crate-capacity loan is secured by the lent crate itself, so it has
+        # no goods interest in either mode. Whole-crate interest would round a
+        # one-crate principal to a two-crate repayment (100%), which is not a
+        # useful risk price. Market pricing applies to wood and berry loans.
+        if good == "crates" or self.settings["mode"] == "reciprocal":
             return 0.0
         probability = self._risk_probability(borrower)
         break_even = (1.0 - probability) / max(probability, 1e-6)

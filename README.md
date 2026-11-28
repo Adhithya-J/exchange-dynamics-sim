@@ -175,15 +175,16 @@ CREDIT:
 
 A loan can move wood, berries, or a whole crate. Crate lending is direct
 capacity lending: the borrower gets storage now and returns a crate later. The
-lent crate also serves as collateral. Defaults seize pledged crates and then the
-borrower's stock of the loan good; the rest is a claim loss, not destroyed goods.
+lent crate also serves as collateral, so crate-capacity loans carry no goods
+interest in either mode. Defaults seize pledged crates and then the borrower's
+stock of the loan good; the rest is a claim loss, not destroyed goods.
 
 ![Credit and trust in the subsistence viewer](docs/subsistence-credit.png)
 
-*A market-credit run. The selected villager has defaulted on a crate loan,
-has borrowed four wood and two crate-capacities, has lent seven berries, and
-carries a 75% trust score. The feed shows a default, a gift, crate-capacity
-loans, and repayments in the same iteration.*
+*A market-credit run. The selected wood specialist has defaulted on a wood
+loan, owes five wood, six berries, and one crate-capacity, and has lent similar
+amounts. Trust is 75%. The feed shows the default, gifts, and a new risk-priced
+wood loan.*
 
 To write only a replay:
 

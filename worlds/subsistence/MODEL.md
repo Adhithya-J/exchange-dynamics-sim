@@ -472,6 +472,8 @@ each side has a concurrent-loan limit.
 Crate lending is direct capacity lending: the lender transfers one crate, the
 borrower uses the storage, and repayment is one crate. The lent crate is also
 the collateral, so a default can return it to the lender if it still exists.
+Because the loan is secured by the lent crate, crate-capacity loans carry no
+goods interest in either mode; market interest prices wood and berry loans.
 
 ### Reciprocal mode
 
