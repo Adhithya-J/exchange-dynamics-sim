@@ -236,6 +236,15 @@ agent.stock += usable
 waste = raw - usable
 ```
 
+Chopping is slow, so a fractional wood yield is carried instead of rounded.
+The agent keeps the fraction of the next block (always below one block) and only
+whole blocks enter storage. A villager whose effective yield is 0.4 wood per day
+therefore produces one block every third day, never a surprise block. When the
+forest cannot supply the planned whole blocks, the shortfall is recorded as
+`wood_blocked`: a partially chopped block is kept, while unfulfilled whole
+blocks are wasted, like standing at an empty copse. This keeps the daily plan
+auditable against the gathered total.
+
 Berries regrow quickly and are abundant. Wood regrows much more slowly and is
 the scarce, valuable resource. Density is measured against the initial stock
 and capped at 1, so a stock above its initial level is still treated as full;
@@ -749,7 +758,7 @@ The world records, among others: `alive`, `mean_health`, `total_berries`,
 `berries_commons_pct`, `wood_commons_pct`, `gini_berries`, `gini_wood`,
 `barter_price`, `last_crate_price`, `mean_price_belief`, `market_participants`,
 `market_traders`, `failed_trades`, `berries_gathered`, `wood_gathered`,
-`berries_eaten`, `unmet_food`, `berries_spoiled`, `wood_decayed`,
+`wood_blocked`, `berries_eaten`, `unmet_food`, `berries_spoiled`, `wood_decayed`,
 `commons_waste_berries`, `commons_waste_wood`, `storage_capacity`,
 `storage_used`, `storage_utilization`, `trade_berries`, `trade_wood`,
 `crate_trades`, `trade_crates`, `gifts`, `gift_berries`, `mean_trust`,

@@ -378,6 +378,7 @@ class SubsistenceWorld:
         self._last_gathered_wood = 0
         self._last_waste_berries = 0
         self._last_waste_wood = 0
+        self._last_blocked_wood = 0
         self._last_regenerated_berries = 0
         self._last_regenerated_wood = 0
         self._last_berries_spoiled = 0
@@ -974,6 +975,7 @@ class SubsistenceWorld:
         self._last_gathered_wood = 0
         self._last_waste_berries = 0
         self._last_waste_wood = 0
+        self._last_blocked_wood = 0
         self._last_regenerated_berries = 0
         self._last_regenerated_wood = 0
         self._last_berries_spoiled = 0
@@ -1476,18 +1478,41 @@ class SubsistenceWorld:
         attribute = f"commons_{resource}"
         stock = int(getattr(self, attribute))
         efficiency = settings["extraction_efficiency"]
+        carried = 0.0
         if resource == "wood":
             # Chopping is slow, so carry the fractional part of a block into
             # the next day. Whole blocks are still the only wood ever stored.
-            total = agent.wood_progress + max(0.0, requested)
+            # The carried fraction stays below one block, so a fractional
+            # chopper can never bank a windfall and convert two blocks at once.
+            carried = agent.wood_progress
+            total = carried + max(0.0, requested)
             requested_whole = int(math.floor(total + EPSILON))
-            agent.wood_progress = max(0.0, total - requested_whole)
+            remainder = max(0.0, min(0.999999, total - requested_whole))
         else:
             requested_whole = self._stochastic_round(requested)
-        if requested_whole <= 0 or stock <= 0:
+            remainder = 0.0
+        if requested_whole <= 0:
+            if resource == "wood":
+                agent.wood_progress = remainder
+            return 0
+        if stock <= 0:
+            # The commons is empty. No new work converts, but the fraction of
+            # a block already chopped is not silently discarded.
+            if resource == "wood":
+                agent.wood_progress = carried
+                self._last_blocked_wood += requested_whole
             return 0
         usable_cap = int(stock * efficiency)
         usable = min(requested_whole, usable_cap)
+        if resource == "wood":
+            if usable <= 0:
+                agent.wood_progress = carried
+                self._last_blocked_wood += requested_whole
+                return 0
+            # Work that the thinning forest could not supply is wasted, like
+            # standing at an empty copse; the finished fraction carries on.
+            agent.wood_progress = remainder
+            self._last_blocked_wood += max(0, requested_whole - usable)
         if usable <= 0:
             return 0
         raw = (
@@ -2391,6 +2416,7 @@ class SubsistenceWorld:
             ),
             "berries_gathered": self._last_gathered_berries,
             "wood_gathered": self._last_gathered_wood,
+            "wood_blocked": self._last_blocked_wood,
             "berries_eaten": int(
                 sum(agent.meals_eaten for agent in self.agents)
             ),

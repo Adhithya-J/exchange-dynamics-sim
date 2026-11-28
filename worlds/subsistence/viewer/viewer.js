@@ -342,6 +342,7 @@
         plannedB: series.plannedB[t][index],
         plannedW: series.plannedW[t][index],
         plannedCrates: series.plannedCrates[t][index],
+        woodProgress: series.woodProgress[t][index],
         gatheredB: series.gatheredB[t][index],
         gatheredW: series.gatheredW[t][index],
         postTradeB: series.postTradeB[t][index],
@@ -1388,6 +1389,7 @@
         detail("Effective max", formatNumber(potentialB, 1) + " b · " + formatNumber(potentialW, 1) + " w") +
         detail("Harvest density", formatPercent(metrics.commonsBerriesPct) + " b · " + formatPercent(metrics.commonsWoodPct) + " w") +
         detail("Gathered", formatNumber(agentState.gatheredB, 0) + " b · " + formatNumber(agentState.gatheredW, 0) + " w") +
+        detail("Chopping", formatNumber(agentState.woodProgress, 2) + " of next block") +
         creditDetails +
         "</div>" +
         "<div class=\"labour-legend\"><span>berry " + formatPercent(agent.labour > 0 ? agentState.laborB / agent.labour : 0) + "</span>" +

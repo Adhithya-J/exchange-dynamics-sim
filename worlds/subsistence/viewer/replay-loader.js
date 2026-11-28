@@ -270,6 +270,7 @@
       plannedB: "planned_berries",
       plannedW: "planned_wood",
       plannedCrates: "planned_crates",
+      woodProgress: "wood_progress",
       gatheredB: "gathered_berries",
       gatheredW: "gathered_wood",
       postTradeB: "post_trade_berries",
