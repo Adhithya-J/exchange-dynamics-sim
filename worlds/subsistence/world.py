@@ -64,11 +64,13 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
     "FOOD_PER_ITERATION": 6,
     "HEAL_PER_MEAL": 1,
     "STARVATION_RATE": 1,
-    "STARTING_BERRIES": 0,
+    "STARTING_BERRIES": 10,
     "STARTING_WOOD": 0,
+    "STARTING_CRATES": 1,
     "RESERVE_DAYS": 4,
     "TRADE_SURPLUS": 1,
     "MAX_WOOD_TARGET": 20,
+    "MAX_CRATES_TARGET": 3,
 }
 
 DEFAULT_RESOURCE_SETTINGS: dict[str, float] = {
@@ -83,15 +85,21 @@ DEFAULT_COMMONS_MIN_DENSITY = 0.10
 DEFAULT_STORAGE_SETTINGS: dict[str, float] = {
     "WOOD_PER_CONTAINER": 8,
     "BERRIES_PER_CONTAINER": 10,
-    "WOOD_DECAY_CHANCE": 0.03,
+    "BASE_CRAFT_MINUTES": 100.0,
+    "CRATE_WEAR_RATE": 0.01,
+    "CRATE_USE_WEAR_FACTOR": 1.0,
+    "WOOD_DECAY_CHANCE": 0.0,
     "STORED_SPOIL_RATE": 0.0,
 }
 
 DEFAULT_TRADE_SETTINGS: dict[str, float] = {
     "INITIAL_PRICE": 5,
-    "PRICE_ADJUSTMENT": 0.1,
     "MIN_PRICE": 1,
-    "MAX_PRICE": 6,
+    "MAX_PRICE": 20,
+    "BELIEF_NOISE": 1,
+    "GOSSIP_STEP": 1,
+    "BELIEF_BAND": 3,
+    "MAX_CRATE_PRICE": 400,
 }
 
 DEFAULT_GIFTING_SETTINGS: dict[str, Any] = {
@@ -121,6 +129,8 @@ class Agent:
         berries: int = 0,
         wood: int = 0,
         specialisation_z: float = 0.0,
+        crates: list[float] | None = None,
+        price_belief: int = 5,
     ) -> None:
         self.id = id
         self.berry_skill = float(berry_skill)
@@ -135,15 +145,22 @@ class Agent:
         self.storage_berries_per_container = int(storage_berries_per_container)
         self.berries = int(berries)
         self.wood = int(wood)
+        self.crates: list[float] = [float(value) for value in (crates or [])]
+        self.price_belief = int(price_belief)
         # Fractional wood work completed toward the next whole block. It
         # persists across iterations so slow chopping is not lost each day.
         self.wood_progress = 0.0
+        # Minutes invested in the crate currently being built.
+        self.craft_progress = 0.0
 
         # Per-iteration observations, reset before each gathering step.
         self.labor_berries = 0.0
         self.labor_wood = 0.0
+        self.labor_craft = 0.0
         self.planned_berries = 0.0
         self.planned_wood = 0.0
+        self.planned_crates = 0
+        self.crafted_crates = 0
         self.gathered_berries = 0
         self.gathered_wood = 0
         self.meals_eaten = 0
@@ -162,12 +179,20 @@ class Agent:
         return self.specialisation_z
 
     @property
+    def crate_count(self) -> int:
+        return len(self.crates)
+
+    @property
+    def crate_durability(self) -> float:
+        if not self.crates:
+            return 0.0
+        return float(sum(self.crates) / len(self.crates))
+
+    @property
     def storage_capacity(self) -> int:
-        if self.storage_wood_per_container <= 0:
+        if self.storage_berries_per_container <= 0:
             return 0
-        return (
-            self.wood * self.storage_berries_per_container
-        ) // self.storage_wood_per_container
+        return self.crate_count * self.storage_berries_per_container
 
     @property
     def max_berries_per_day(self) -> float:
@@ -204,6 +229,10 @@ class Agent:
             "max_health": self.max_health,
             "berries": self.berries,
             "wood": self.wood,
+            "crates": self.crate_count,
+            "crate_durability": self.crate_durability,
+            "craft_progress": self.craft_progress,
+            "price_belief": self.price_belief,
             "storage_capacity": self.storage_capacity,
             "berry_skill": self.berry_skill,
             "wood_skill": self.wood_skill,
@@ -215,9 +244,12 @@ class Agent:
             "max_wood_per_day": self.max_wood_per_day,
             "labor_berries": self.labor_berries,
             "labor_wood": self.labor_wood,
+            "labor_craft": self.labor_craft,
             "wood_progress": self.wood_progress,
             "planned_berries": self.planned_berries,
             "planned_wood": self.planned_wood,
+            "planned_crates": self.planned_crates,
+            "crafted_crates": self.crafted_crates,
             "gathered_berries": self.gathered_berries,
             "gathered_wood": self.gathered_wood,
             "meals_eaten": self.meals_eaten,
@@ -255,15 +287,20 @@ class SubsistenceWorld:
         self.initial_commons_wood = 0
         self._current_berries_density = 0.0
         self._current_wood_density = 0.0
-        self.price = float(self.trade_settings["initial_price"])
-        self.trade_price = int(self.trade_settings["initial_price"])
-        self.initial_price = self.trade_price
-        self._last_trade_price = self.trade_price
+        self.initial_price = int(self.trade_settings["initial_price"])
+        self.last_market_price = self.initial_price
+        self.last_crate_price = 0
+        self.average_trade_price = self.initial_price
+        self._market_participants = 0
+        self._market_traders = 0
+        self._failed_trades = 0
+        self._gossip_price = self.initial_price
         self._current_iteration = 0
         self.extinction_iteration: int | None = None
 
         self.gather_log: list[dict[str, Any]] = []
         self.trade_log: list[dict[str, Any]] = []
+        self.craft_log: list[dict[str, Any]] = []
         self.gift_log: list[dict[str, Any]] = []
         self.spoil_log: list[dict[str, Any]] = []
         self.death_log: list[dict[str, Any]] = []
@@ -277,8 +314,13 @@ class SubsistenceWorld:
         self._last_regenerated_wood = 0
         self._last_berries_spoiled = 0
         self._last_wood_decayed = 0
+        self._last_crates_crafted = 0
+        self._last_crates_worn = 0
+        self._last_wood_crafted = 0
         self._last_trade_berries = 0
         self._last_trade_wood = 0
+        self._last_crate_trades = 0
+        self._last_trade_crates = 0
         self._last_gifts = 0
         self._last_gift_berries = 0
 
@@ -338,9 +380,11 @@ class SubsistenceWorld:
             starvation = int(merged["STARVATION_RATE"])
             starting_berries = int(merged["STARTING_BERRIES"])
             starting_wood = int(merged["STARTING_WOOD"])
+            starting_crates = int(merged["STARTING_CRATES"])
             reserve_days = int(merged["RESERVE_DAYS"])
             trade_surplus = int(merged["TRADE_SURPLUS"])
             max_wood_target = int(merged["MAX_WOOD_TARGET"])
+            max_crates_target = int(merged["MAX_CRATES_TARGET"])
         except (TypeError, ValueError) as exc:
             raise ValueError(
                 "AGENTS health, food, and starting stock settings must be whole "
@@ -379,7 +423,7 @@ class SubsistenceWorld:
             raise ValueError("AGENTS.HEAL_PER_MEAL must not be negative")
         if starvation < 0:
             raise ValueError("AGENTS.STARVATION_RATE must not be negative")
-        if starting_berries < 0 or starting_wood < 0:
+        if starting_berries < 0 or starting_wood < 0 or starting_crates < 0:
             raise ValueError("AGENTS starting goods must not be negative")
         if reserve_days < 0:
             raise ValueError("AGENTS.RESERVE_DAYS must not be negative")
@@ -387,6 +431,8 @@ class SubsistenceWorld:
             raise ValueError("AGENTS.TRADE_SURPLUS must not be negative")
         if max_wood_target < 0:
             raise ValueError("AGENTS.MAX_WOOD_TARGET must not be negative")
+        if max_crates_target < 0:
+            raise ValueError("AGENTS.MAX_CRATES_TARGET must not be negative")
         return {
             "skill_z_range": skill_z_range,
             "berry_intercept": berry_intercept,
@@ -405,9 +451,11 @@ class SubsistenceWorld:
             "starvation_rate": starvation,
             "starting_berries": starting_berries,
             "starting_wood": starting_wood,
+            "starting_crates": starting_crates,
             "reserve_days": reserve_days,
             "trade_surplus": trade_surplus,
             "max_wood_target": max_wood_target,
+            "max_crates_target": max_crates_target,
         }
 
     def _resource_settings(self, name: str) -> dict[str, float]:
@@ -464,6 +512,9 @@ class SubsistenceWorld:
         try:
             wood_per_container = int(merged["WOOD_PER_CONTAINER"])
             berries_per_container = int(merged["BERRIES_PER_CONTAINER"])
+            base_craft_minutes = float(merged["BASE_CRAFT_MINUTES"])
+            crate_wear_rate = float(merged["CRATE_WEAR_RATE"])
+            crate_use_wear = float(merged["CRATE_USE_WEAR_FACTOR"])
             wood_decay = float(merged["WOOD_DECAY_CHANCE"])
             stored_spoil = float(merged["STORED_SPOIL_RATE"])
         except (TypeError, ValueError) as exc:
@@ -475,6 +526,14 @@ class SubsistenceWorld:
             raise ValueError("STORAGE.WOOD_PER_CONTAINER must be positive")
         if berries_per_container < 0:
             raise ValueError("STORAGE.BERRIES_PER_CONTAINER must not be negative")
+        if base_craft_minutes <= 0:
+            raise ValueError("STORAGE.BASE_CRAFT_MINUTES must be positive")
+        if not 0 <= crate_wear_rate <= 1:
+            raise ValueError("STORAGE.CRATE_WEAR_RATE must be between 0 and 1")
+        if crate_use_wear < 0:
+            raise ValueError(
+                "STORAGE.CRATE_USE_WEAR_FACTOR must not be negative"
+            )
         if not 0 <= wood_decay <= 1:
             raise ValueError("STORAGE.WOOD_DECAY_CHANCE must be between 0 and 1")
         if not 0 <= stored_spoil <= 1:
@@ -482,6 +541,9 @@ class SubsistenceWorld:
         return {
             "wood_per_container": wood_per_container,
             "berries_per_container": berries_per_container,
+            "base_craft_minutes": base_craft_minutes,
+            "crate_wear_rate": crate_wear_rate,
+            "crate_use_wear_factor": crate_use_wear,
             "wood_decay_chance": wood_decay,
             "stored_spoil_rate": stored_spoil,
         }
@@ -491,17 +553,18 @@ class SubsistenceWorld:
         merged = {**DEFAULT_TRADE_SETTINGS, **configured}
         try:
             initial_price = int(merged["INITIAL_PRICE"])
-            adjustment = float(merged["PRICE_ADJUSTMENT"])
             min_price = int(merged["MIN_PRICE"])
             max_price = int(merged["MAX_PRICE"])
+            belief_noise = int(merged["BELIEF_NOISE"])
+            gossip_step = int(merged["GOSSIP_STEP"])
+            belief_band = int(merged["BELIEF_BAND"])
+            max_crate_price = int(merged["MAX_CRATE_PRICE"])
         except (TypeError, ValueError) as exc:
             raise ValueError(
-                "TRADE prices must be whole numbers and PRICE_ADJUSTMENT numeric"
+                "TRADE prices and belief settings must be whole numbers"
             ) from exc
         if initial_price <= 0:
             raise ValueError("TRADE.INITIAL_PRICE must be positive")
-        if not 0 <= adjustment <= 1:
-            raise ValueError("TRADE.PRICE_ADJUSTMENT must be between 0 and 1")
         if min_price <= 0 or max_price < min_price:
             raise ValueError(
                 "TRADE.MIN_PRICE must be positive and not exceed MAX_PRICE"
@@ -510,11 +573,22 @@ class SubsistenceWorld:
             raise ValueError(
                 "TRADE.INITIAL_PRICE must be within MIN_PRICE and MAX_PRICE"
             )
+        if belief_noise < 0:
+            raise ValueError("TRADE.BELIEF_NOISE must not be negative")
+        if gossip_step < 0:
+            raise ValueError("TRADE.GOSSIP_STEP must not be negative")
+        if belief_band < 0:
+            raise ValueError("TRADE.BELIEF_BAND must not be negative")
+        if max_crate_price <= 0:
+            raise ValueError("TRADE.MAX_CRATE_PRICE must be positive")
         return {
             "initial_price": initial_price,
-            "price_adjustment": adjustment,
             "min_price": min_price,
             "max_price": max_price,
+            "belief_noise": belief_noise,
+            "gossip_step": gossip_step,
+            "belief_band": belief_band,
+            "max_crate_price": max_crate_price,
         }
 
     def _gifting_settings(self) -> GiftSettings:
@@ -597,16 +671,38 @@ class SubsistenceWorld:
                     ),
                     berries=settings["starting_berries"],
                     wood=settings["starting_wood"],
+                    crates=(
+                        [1.0] * settings["starting_crates"]
+                        if self.features["STORAGE"]
+                        else []
+                    ),
                     specialisation_z=z,
                 )
             )
         self._agent_index = {agent.id: agent for agent in self.agents}
+        baseline = self._initial_price_belief()
+        beliefs = self.trade_settings
+        for agent in self.agents:
+            noise = self.random.randint(
+                -beliefs["belief_noise"], beliefs["belief_noise"]
+            )
+            agent.price_belief = int(
+                min(
+                    beliefs["max_price"],
+                    max(beliefs["min_price"], baseline + noise),
+                )
+            )
+        self.initial_price = baseline
+        self.last_market_price = baseline
+        self.last_crate_price = 0
+        self.average_trade_price = baseline
         self.metrics_history = []
         self.agent_history = []
         self._current_iteration = 0
         self.extinction_iteration = None
         self.gather_log = []
         self.trade_log = []
+        self.craft_log = []
         self.gift_log = []
         self.spoil_log = []
         self.death_log = []
@@ -619,13 +715,27 @@ class SubsistenceWorld:
         self.commons_wood = wood["initial"]
         self._current_berries_density = self._commons_density("berries")
         self._current_wood_density = self._commons_density("wood")
-        self.price = float(self.trade_settings["initial_price"])
-        self.trade_price = int(self.trade_settings["initial_price"])
-        self.initial_price = self.trade_price
-        self._last_trade_price = self.trade_price
         self._reset_iteration_state()
         self._record_agent_snapshot(iteration=0)
         return self.agents
+
+    def _initial_price_belief(self) -> int:
+        """Village baseline berries-per-wood opportunity cost."""
+
+        settings = self.trade_settings
+        costs = [
+            agent.opportunity_cost_of_wood
+            for agent in self.agents
+            if math.isfinite(agent.opportunity_cost_of_wood)
+            and agent.opportunity_cost_of_wood > 0
+        ]
+        if costs:
+            baseline = int(round(float(np.median(costs))))
+        else:
+            baseline = int(settings["initial_price"])
+        return int(
+            min(settings["max_price"], max(settings["min_price"], baseline))
+        )
 
     def _commons_density(self, resource: str) -> float:
         """Current stock as a fraction of the initial stock, capped at 1."""
@@ -691,8 +801,11 @@ class SubsistenceWorld:
         for agent in self.agents:
             agent.labor_berries = 0.0
             agent.labor_wood = 0.0
+            agent.labor_craft = 0.0
             agent.planned_berries = 0.0
             agent.planned_wood = 0.0
+            agent.planned_crates = 0
+            agent.crafted_crates = 0
             agent.gathered_berries = 0
             agent.gathered_wood = 0
             agent.meals_eaten = 0
@@ -707,11 +820,19 @@ class SubsistenceWorld:
         self._last_regenerated_wood = 0
         self._last_berries_spoiled = 0
         self._last_wood_decayed = 0
+        self._last_crates_crafted = 0
+        self._last_crates_worn = 0
+        self._last_wood_crafted = 0
         self._last_trade_berries = 0
         self._last_trade_wood = 0
-        self._last_trade_price = self.trade_price
+        self._last_crate_trades = 0
+        self._last_trade_crates = 0
         self._last_gifts = 0
         self._last_gift_berries = 0
+        self._market_participants = 0
+        self._market_traders = 0
+        self._failed_trades = 0
+        self._gossip_price = self.last_market_price
 
     def run_iteration(self) -> dict[str, Any]:
         """Run one finite day: gather, exchange, eat, then spoil."""
@@ -783,24 +904,66 @@ class SubsistenceWorld:
             else:
                 self._last_regenerated_wood = amount
 
+    def _target_crates(self, agent: Agent) -> int:
+        if not self.features["STORAGE"] or not self.features["SPOILAGE"]:
+            return 0
+        settings = self.storage_settings
+        berries_per_crate = settings["berries_per_container"]
+        if berries_per_crate <= 0:
+            return 0
+        reserve = min(
+            self.agent_settings["reserve_days"]
+            * self.agent_settings["food_per_iteration"],
+            self.agent_settings["max_crates_target"] * berries_per_crate,
+        )
+        return int(math.ceil(reserve / berries_per_crate))
+
     def _target_wood(self, agent: Agent) -> int:
         if not self.features["STORAGE"] or not self.features["SPOILAGE"]:
             return 0
         settings = self.storage_settings
-        berries_per_container = settings["berries_per_container"]
-        wood_per_container = settings["wood_per_container"]
-        if berries_per_container <= 0 or wood_per_container <= 0:
+        wood_per_crate = settings["wood_per_container"]
+        if wood_per_crate <= 0:
             return 0
-        max_storage = (
-            self.agent_settings["max_wood_target"] * berries_per_container
-        ) // wood_per_container
-        reserve = min(
-            self.agent_settings["reserve_days"]
-            * self.agent_settings["food_per_iteration"],
-            max_storage,
+        missing = max(0, self._target_crates(agent) - agent.crate_count)
+        material = missing * wood_per_crate
+        return max(
+            0, min(self.agent_settings["max_wood_target"], material)
         )
-        target = math.ceil(reserve * wood_per_container / berries_per_container)
-        return max(0, min(self.agent_settings["max_wood_target"], target))
+
+    def _craft_minutes(self, agent: Agent) -> float:
+        if agent.wood_skill <= 0:
+            return float("inf")
+        return (
+            self.storage_settings["base_craft_minutes"] / agent.wood_skill
+        )
+
+    def _complete_crafts(self, agent: Agent) -> None:
+        craft_minutes = self._craft_minutes(agent)
+        wood_per_crate = self.storage_settings["wood_per_container"]
+        if not math.isfinite(craft_minutes) or craft_minutes <= 0:
+            return
+        while (
+            agent.craft_progress + EPSILON >= craft_minutes
+            and agent.wood >= wood_per_crate
+        ):
+            agent.craft_progress = max(
+                0.0, agent.craft_progress - craft_minutes
+            )
+            agent.wood -= wood_per_crate
+            agent.crates.append(1.0)
+            agent.planned_crates += 1
+            agent.crafted_crates += 1
+            self._last_crates_crafted += 1
+            self._last_wood_crafted += wood_per_crate
+            self.craft_log.append(
+                {
+                    "iteration": self._current_iteration,
+                    "agent": agent.id,
+                    "crates": 1,
+                    "wood": wood_per_crate,
+                }
+            )
 
     def _target_berries(self, agent: Agent) -> int:
         food = self.agent_settings["food_per_iteration"]
@@ -808,7 +971,7 @@ class SubsistenceWorld:
         if not self.features["SPOILAGE"]:
             return max(food, reserve)
         capacity = agent.storage_capacity if self.features["STORAGE"] else 0
-        return max(food, min(capacity, reserve))
+        return food + min(capacity, reserve)
 
     def _rational_berry_cap(self, agent: Agent) -> float:
         """Most new berries worth picking today, before planned barter.
@@ -852,6 +1015,9 @@ class SubsistenceWorld:
         wood_minutes = self.effective_wood_minutes(
             agent, self._current_wood_density
         )
+        craft_minutes = self._craft_minutes(agent)
+        wood_per_crate = self.storage_settings["wood_per_container"]
+        price = max(1, int(agent.price_belief))
         berry_value_per_minute = (
             agent.berry_skill * berry_density / agent.berry_time_cost
             if agent.berry_time_cost > 0 and math.isfinite(berry_minutes)
@@ -860,7 +1026,7 @@ class SubsistenceWorld:
         wood_value_per_minute = (
             agent.wood_skill
             * wood_density
-            * self.trade_price
+            * price
             / agent.wood_time_cost
             if agent.wood_time_cost > 0 and math.isfinite(wood_minutes)
             else 0.0
@@ -869,6 +1035,13 @@ class SubsistenceWorld:
         if not wood_has_value:
             # Wood is only fuel for storage here; do not spend berry time on it.
             wood_value_per_minute = 0.0
+        target_crates = self._target_crates(agent)
+        own_crate_need = max(0, target_crates - agent.crate_count)
+        finish_craft_minutes = (
+            max(0.0, craft_minutes - agent.craft_progress)
+            if math.isfinite(craft_minutes)
+            else float("inf")
+        )
 
         def spend_berries(amount: float) -> None:
             nonlocal remaining
@@ -892,6 +1065,23 @@ class SubsistenceWorld:
             agent.labor_wood += used / agent.time_per_iteration
             remaining -= used
 
+        def spend_craft(minutes: float) -> None:
+            nonlocal remaining
+            if (
+                minutes <= 0
+                or remaining <= 0
+                or not math.isfinite(craft_minutes)
+                or agent.wood < wood_per_crate
+            ):
+                return
+            used = min(remaining, minutes)
+            if used <= 0:
+                return
+            agent.craft_progress += used
+            agent.labor_craft += used / agent.time_per_iteration
+            remaining -= used
+            self._complete_crafts(agent)
+
         def spend_leftover_wood() -> None:
             if remaining <= 0 or wood_value_per_minute <= 0:
                 return
@@ -901,24 +1091,49 @@ class SubsistenceWorld:
             wood_cap = self._target_wood(agent) + surplus
             spend_wood(max(0.0, wood_cap - agent.wood - agent.planned_wood))
 
+        # Finish any crate whose craft minutes were already accumulated.
+        self._complete_crafts(agent)
+
         # With trade, pick the activity with the higher density-adjusted
-        # market value per minute. A wood specialist chops first, finishing
-        # the next whole block, then gathers food with any remaining time. A
-        # berry specialist covers food and its crate, then produces a small
-        # surplus to buy wood. Any time left after the rational berry cap goes
-        # to chopping instead of picking berries that would only spoil.
+        # market value per minute. Wood specialists prioritize crafting when
+        # they have material, then chop; berry specialists cover food and the
+        # crate, then use leftover time for carpentry or wood.
         if self.features["TRADE"]:
-            target_berries = self._target_berries(agent)
             rational_target = self._rational_berry_target(agent)
             target_wood = self._target_wood(agent)
+            can_craft = (
+                agent.wood >= wood_per_crate
+                and math.isfinite(craft_minutes)
+            )
 
             if wood_value_per_minute > berry_value_per_minute:
-                wood_cap = target_wood + settings["trade_surplus"]
-                if agent.wood < wood_cap and math.isfinite(wood_minutes):
-                    needed = max(0.0, 1.0 - agent.wood_progress)
-                    minutes_for_block = min(remaining, needed * wood_minutes)
-                    if minutes_for_block > 0:
-                        spend_wood(minutes_for_block / wood_minutes)
+                # Secure a small food floor before specializing in wood or
+                # carpentry; the rest of the ration still comes from trade.
+                spend_berries(
+                    max(0, min(food, 1) - agent.berries)
+                )
+                should_craft = can_craft and (
+                    own_crate_need > 0
+                    or agent.craft_progress > 0
+                    or agent.berries >= food
+                    or agent.crate_count > target_crates
+                )
+                if should_craft:
+                    minutes = min(
+                        remaining,
+                        finish_craft_minutes
+                        if finish_craft_minutes > 0
+                        else craft_minutes,
+                    )
+                    spend_craft(minutes)
+                if remaining > 0:
+                    wood_cap = target_wood + settings["trade_surplus"]
+                    spend_wood(
+                        max(
+                            0.0,
+                            wood_cap - agent.wood - agent.planned_wood,
+                        )
+                    )
                 if remaining > 0:
                     spend_berries(max(0, food - agent.berries))
                     spend_berries(
@@ -939,24 +1154,21 @@ class SubsistenceWorld:
                         - agent.planned_berries,
                     )
                 )
-                wood_deficit = max(0, target_wood - agent.wood)
-                purchase_target = 1 if wood_deficit > 0 else 0
-                berries_for_wood = min(
-                    purchase_target * self.trade_price, 8
-                )
-                barter_allowance = berries_for_wood
-                if purchase_target > 0:
-                    barter_allowance += settings["trade_surplus"]
-                current_surplus = max(0, agent.berries - target_berries)
-                barter_need = max(0, barter_allowance - current_surplus)
-                if barter_need > 0:
-                    berry_cap = rational_target + barter_need
-                    spend_berries(
-                        max(
-                            0.0,
-                            berry_cap
-                            - agent.berries
-                            - agent.planned_berries,
+                # Extra berry picking for speculative barter is deliberately
+                # omitted: without a matching trade it would only rot. Any
+                # existing surplus above target is still offered in the market.
+                if (
+                    remaining > 0
+                    and can_craft
+                    and own_crate_need > 0
+                    and agent.berries + agent.planned_berries >= food
+                ):
+                    spend_craft(
+                        min(
+                            remaining,
+                            finish_craft_minutes
+                            if finish_craft_minutes > 0
+                            else craft_minutes,
                         )
                     )
             spend_leftover_wood()
@@ -965,8 +1177,25 @@ class SubsistenceWorld:
         # Without trade, aim for self-sufficiency.
         spend_berries(max(0, food - agent.berries))
 
+        if own_crate_need > 0 and agent.wood >= wood_per_crate:
+            spend_craft(
+                min(
+                    remaining,
+                    finish_craft_minutes
+                    if finish_craft_minutes > 0
+                    else craft_minutes,
+                )
+            )
+
         if self.features["STORAGE"] and self.features["SPOILAGE"]:
-            spend_wood(max(0, self._target_wood(agent) - agent.wood))
+            spend_wood(
+                max(
+                    0.0,
+                    self._target_wood(agent)
+                    - agent.wood
+                    - agent.planned_wood,
+                )
+            )
 
         if self.features["STORAGE"] and self.features["SPOILAGE"]:
             target = self._rational_berry_target(agent)
@@ -1057,146 +1286,472 @@ class SubsistenceWorld:
             self._last_gifts += 1
             self._last_gift_berries += gift["amount"]
 
-    def _trade_offers(
-        self, agents: Iterable[Agent]
-    ) -> tuple[dict[str, int], dict[str, int]]:
-        price = self.trade_price
-        if price <= 0:
-            return {}, {}
+    def _survival_urgency(self, agent: Agent) -> int:
         food = self.agent_settings["food_per_iteration"]
-        berry_offers: dict[str, int] = {}
-        wood_offers: dict[str, int] = {}
+        if agent.health <= 1 or agent.berries <= 0:
+            return 2
+        if agent.berries < food:
+            return 1
+        return 0
+
+    def _effective_wood_opportunity(self, agent: Agent) -> float:
+        max_wood = self.effective_max_wood_per_day(
+            agent, self._current_wood_density
+        )
+        max_berries = self.effective_max_berries_per_day(
+            agent, self._current_berries_density
+        )
+        if max_wood <= 0:
+            return float(self.trade_settings["max_price"])
+        return max_berries / max_wood
+
+    def _effective_berry_rate(self, agent: Agent) -> float:
+        if agent.time_per_iteration <= 0:
+            return 0.0
+        return (
+            self.effective_max_berries_per_day(
+                agent, self._current_berries_density
+            )
+            / agent.time_per_iteration
+        )
+
+    def _crate_cost_and_belief(
+        self, agent: Agent, belief: int
+    ) -> tuple[float, float]:
+        wood_per_crate = self.storage_settings["wood_per_container"]
+        wood_opportunity = self._effective_wood_opportunity(agent)
+        craft_minutes = self._craft_minutes(agent)
+        berry_rate = self._effective_berry_rate(agent)
+        time_value = (
+            craft_minutes * berry_rate if math.isfinite(craft_minutes) else 0.0
+        )
+        cost = wood_per_crate * wood_opportunity + time_value
+        believed = wood_per_crate * belief + time_value
+        return cost, believed
+
+    def _wood_seller_min(self, agent: Agent, belief: int) -> int:
+        settings = self.trade_settings
+        food = self.agent_settings["food_per_iteration"]
+        wood_rate = self.effective_max_wood_per_day(
+            agent, self._current_wood_density
+        )
+        subsistence = int(math.ceil(food / max(0.5, wood_rate)))
+        opportunity = self._effective_wood_opportunity(agent)
+        raw = max(
+            0.2 * opportunity + 0.8 * float(belief),
+            float(subsistence),
+        )
+        if agent.health < agent.max_health or agent.berries < food:
+            raw += 1
+        price = int(round(raw))
+        return int(
+            min(settings["max_price"], max(settings["min_price"], price))
+        )
+
+    def _wood_buyer_max(self, agent: Agent, belief: int) -> int:
+        settings = self.trade_settings
+        food = self.agent_settings["food_per_iteration"]
+        budget = max(0, agent.berries - food)
+        opportunity = self._effective_wood_opportunity(agent)
+        raw = 0.2 * opportunity + 0.8 * float(belief)
+        urgency = 1 if agent.berries > agent.storage_capacity else 0
+        price = int(round(raw)) + urgency
+        daily_surplus = self.effective_max_berries_per_day(
+            agent, self._current_berries_density
+        ) - food
+        sustainable = max(1, int(math.ceil(daily_surplus)))
+        if budget > 0:
+            price = min(price, budget, sustainable)
+        return int(
+            min(settings["max_price"], max(settings["min_price"], price))
+        )
+
+    def _crate_seller_min(self, agent: Agent, belief: int) -> int:
+        opportunity, believed = self._crate_cost_and_belief(agent, belief)
+        raw = 0.8 * opportunity + 0.2 * believed
+        if agent.health < agent.max_health:
+            raw += 2
+        return int(
+            min(
+                self.trade_settings["max_crate_price"],
+                max(1, round(raw)),
+            )
+        )
+
+    def _crate_buyer_max(self, agent: Agent, belief: int) -> int:
+        opportunity, believed = self._crate_cost_and_belief(agent, belief)
+        raw = 0.8 * opportunity + 0.2 * believed
+        urgency = 1 if agent.berries > agent.storage_capacity else 0
+        raw += 2 * urgency
+        food = self.agent_settings["food_per_iteration"]
+        budget = max(0, agent.berries - food)
+        if budget > 0:
+            raw = min(raw, float(budget))
+        return int(
+            min(
+                self.trade_settings["max_crate_price"],
+                max(1, round(raw)),
+            )
+        )
+
+    def _crate_market_plan(
+        self, agents: Iterable[Agent], beliefs: dict[str, int]
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        food = self.agent_settings["food_per_iteration"]
+        sellers: list[dict[str, Any]] = []
+        buyers: list[dict[str, Any]] = []
+        for agent in agents:
+            target_crates = self._target_crates(agent)
+            berry_target = self._target_berries(agent)
+            berry_deficit = max(0, berry_target - agent.berries)
+            berry_budget = max(0, agent.berries - food)
+            hungry = agent.berries < food
+            keep = target_crates
+            if hungry:
+                keep = max(0, target_crates - 1)
+            surplus = max(0, agent.crate_count - keep)
+            need = max(0, target_crates - agent.crate_count)
+            if surplus > 0 and berry_deficit > 0:
+                sellers.append(
+                    {
+                        "agent": agent,
+                        "qty": surplus,
+                        "price": self._crate_seller_min(
+                            agent, beliefs[agent.id]
+                        ),
+                    }
+                )
+            if need > 0 and berry_budget > 0:
+                buyers.append(
+                    {
+                        "agent": agent,
+                        "qty": need,
+                        "price": self._crate_buyer_max(
+                            agent, beliefs[agent.id]
+                        ),
+                        "budget": berry_budget,
+                    }
+                )
+        return sellers, buyers
+
+    def _wood_market_plan(
+        self, agents: Iterable[Agent], beliefs: dict[str, int]
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        food = self.agent_settings["food_per_iteration"]
+        wood_per_crate = self.storage_settings["wood_per_container"]
+        sellers: list[dict[str, Any]] = []
+        buyers: list[dict[str, Any]] = []
         for agent in agents:
             berry_target = self._target_berries(agent)
-            wood_target = self._target_wood(agent)
-            if agent.berries < food:
-                # A hungry agent will sell storage wood before it starves.
-                wood_target = 0
-            berry_surplus = max(0, agent.berries - berry_target)
-            wood_surplus = max(0, agent.wood - wood_target)
             berry_deficit = max(0, berry_target - agent.berries)
-            wood_deficit = max(0, wood_target - agent.wood)
-            if berry_surplus > 0 and wood_deficit > 0:
-                wood_wanted = min(wood_deficit, berry_surplus // price)
-                if wood_wanted > 0:
-                    berry_offers[agent.id] = wood_wanted * price
-            elif wood_surplus > 0 and berry_deficit > 0:
-                wood_wanted = min(
-                    wood_surplus, math.ceil(berry_deficit / price)
+            berry_budget = max(0, agent.berries - food)
+            hungry = agent.berries < food
+            # Keep at most one crate's material for own use. A hungry agent
+            # without storage sells down to zero. Wood specialists sell at
+            # most one block a day so they can slowly accumulate crate stock.
+            if agent.wood_skill > agent.berry_skill:
+                reserve = 0
+            else:
+                reserve = (
+                    0
+                    if hungry
+                    else min(agent.wood, wood_per_crate)
                 )
-                if wood_wanted > 0:
-                    wood_offers[agent.id] = wood_wanted
-            elif agent.wood > 0 and berry_deficit > 0:
-                # A wood-rich agent below its own wood target will still sell
-                # storage wood to cover a berry deficit, especially food.
-                wood_wanted = min(
-                    agent.wood, math.ceil(berry_deficit / price)
+            surplus = max(0, agent.wood - reserve)
+            if agent.wood_skill > agent.berry_skill:
+                surplus = min(surplus, 1)
+            target_wood = self._target_wood(agent)
+            need = max(
+                0, min(target_wood, wood_per_crate) - agent.wood
+            )
+            if surplus > 0 and berry_deficit > 0:
+                sellers.append(
+                    {
+                        "agent": agent,
+                        "qty": surplus,
+                        "price": self._wood_seller_min(
+                            agent, beliefs[agent.id]
+                        ),
+                    }
                 )
-                if wood_wanted > 0:
-                    wood_offers[agent.id] = wood_wanted
-        return berry_offers, wood_offers
+            if need > 0 and berry_budget > 0:
+                buyers.append(
+                    {
+                        "agent": agent,
+                        "qty": need,
+                        "price": self._wood_buyer_max(
+                            agent, beliefs[agent.id]
+                        ),
+                        "budget": berry_budget,
+                    }
+                )
+        return sellers, buyers
+
+    def _match_market(
+        self,
+        good: str,
+        sellers: list[dict[str, Any]],
+        buyers: list[dict[str, Any]],
+    ) -> tuple[
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+    ]:
+        settings = self.trade_settings
+        self.random.shuffle(sellers)
+        self.random.shuffle(buyers)
+        seller_done = {id(entry): 0 for entry in sellers}
+        buyer_done = {id(entry): 0 for entry in buyers}
+        trades: list[dict[str, Any]] = []
+
+        for seller in sellers:
+            seller_agent = seller["agent"]
+            for buyer in buyers:
+                if seller["qty"] <= 0 or buyer["qty"] <= 0:
+                    continue
+                if buyer["budget"] <= 0:
+                    continue
+                if seller["price"] > buyer["price"]:
+                    continue
+                if good == "wood":
+                    price = int(
+                        min(
+                            settings["max_price"],
+                            max(
+                                settings["min_price"],
+                                (seller["price"] + buyer["price"]) // 2,
+                            ),
+                        )
+                    )
+                else:
+                    price = int(
+                        min(
+                            settings["max_crate_price"],
+                            max(1, (seller["price"] + buyer["price"]) // 2),
+                        )
+                    )
+                affordable = buyer["budget"] // price if price > 0 else 0
+                qty = min(seller["qty"], buyer["qty"], affordable)
+                if qty <= 0:
+                    continue
+                buyer_agent = buyer["agent"]
+                berries = qty * price
+                if good == "wood":
+                    seller_agent.wood -= qty
+                    buyer_agent.wood += qty
+                    self._last_trade_wood += qty
+                    self.trade_log.append(
+                        {
+                            "iteration": self._current_iteration,
+                            "good": "wood",
+                            "seller": seller_agent.id,
+                            "buyer": buyer_agent.id,
+                            "berry_seller": buyer_agent.id,
+                            "wood_seller": seller_agent.id,
+                            "quantity": qty,
+                            "wood": qty,
+                            "berries": berries,
+                            "price": price,
+                        }
+                    )
+                else:
+                    for _ in range(qty):
+                        if seller_agent.crates:
+                            buyer_agent.crates.append(
+                                seller_agent.crates.pop()
+                            )
+                    self._last_crate_trades += qty
+                    self._last_trade_crates += qty
+                    self.trade_log.append(
+                        {
+                            "iteration": self._current_iteration,
+                            "good": "crate",
+                            "seller": seller_agent.id,
+                            "buyer": buyer_agent.id,
+                            "berry_seller": buyer_agent.id,
+                            "crate_seller": seller_agent.id,
+                            "quantity": qty,
+                            "crates": qty,
+                            "berries": berries,
+                            "price": price,
+                        }
+                    )
+                buyer_agent.berries -= berries
+                seller_agent.berries += berries
+                self._last_trade_berries += berries
+                buyer["budget"] -= berries
+                seller["qty"] -= qty
+                buyer["qty"] -= qty
+                seller_done[id(seller)] += qty
+                buyer_done[id(buyer)] += qty
+                trades.append(
+                    {
+                        "good": good,
+                        "seller": seller_agent.id,
+                        "buyer": buyer_agent.id,
+                        "qty": qty,
+                        "price": price,
+                    }
+                )
+                if seller["qty"] <= 0:
+                    break
+                if buyer["qty"] <= 0:
+                    continue
+
+        failed_sellers = [
+            seller for seller in sellers if seller_done[id(seller)] == 0
+        ]
+        failed_buyers = [
+            buyer for buyer in buyers if buyer_done[id(buyer)] == 0
+        ]
+        return trades, failed_sellers, failed_buyers
 
     def _process_trade(self) -> None:
         living = [agent for agent in self.agents if agent.is_alive]
         if len(living) < 2:
             return
-        price = self.trade_price
-        berry_offers, wood_offers = self._trade_offers(living)
-        total_berry_supply = int(sum(berry_offers.values()))
-        total_wood_supply = int(sum(wood_offers.values()))
-        berry_demand = total_wood_supply * price
 
-        berry_traded = min(total_berry_supply, berry_demand)
-        if berry_traded <= 0:
-            self._update_barter_price(price, total_berry_supply, berry_demand)
-            return
+        # Strict information lag: every reservation and trade this phase uses
+        # the villager's belief at the start of the tick. Updates are applied
+        # only after all markets have cleared.
+        start_beliefs = {agent.id: agent.price_belief for agent in living}
 
-        berry_left = {agent_id: amount for agent_id, amount in berry_offers.items()}
-        wood_left = {agent_id: amount for agent_id, amount in wood_offers.items()}
-        berry_sellers = [self._agent_index[agent_id] for agent_id in berry_left]
-        wood_sellers = [self._agent_index[agent_id] for agent_id in wood_left]
-        self.random.shuffle(berry_sellers)
-        self.random.shuffle(wood_sellers)
-        berry_iterator = iter(
-            [agent for agent in berry_sellers if berry_left[agent.id] > 0]
+        crate_sellers, crate_buyers = self._crate_market_plan(
+            living, start_beliefs
         )
-        wood_iterator = iter(
-            [agent for agent in wood_sellers if wood_left[agent.id] > 0]
+        crate_trades, crate_failed_sellers, crate_failed_buyers = (
+            self._match_market("crate", crate_sellers, crate_buyers)
         )
-        berry_seller = next(berry_iterator, None)
-        wood_seller = next(wood_iterator, None)
 
-        while berry_seller is not None and wood_seller is not None:
-            if berry_left[berry_seller.id] < price:
-                berry_seller = next(berry_iterator, None)
-                continue
-            if wood_left[wood_seller.id] <= 0:
-                wood_seller = next(wood_iterator, None)
-                continue
-            wood_trade = min(
-                berry_left[berry_seller.id] // price,
-                wood_left[wood_seller.id],
+        # Recompute the raw-wood market with post-crate holdings, but still
+        # with start-of-tick beliefs.
+        wood_sellers, wood_buyers = self._wood_market_plan(
+            living, start_beliefs
+        )
+        wood_trades, wood_failed_sellers, wood_failed_buyers = (
+            self._match_market("wood", wood_sellers, wood_buyers)
+        )
+
+        participants = {
+            entry["agent"].id
+            for entry in (
+                crate_sellers
+                + crate_buyers
+                + wood_sellers
+                + wood_buyers
             )
-            if wood_trade <= 0:
-                break
-            berries = wood_trade * price
-            berry_seller.berries -= berries
-            wood_seller.berries += berries
-            wood_seller.wood -= wood_trade
-            berry_seller.wood += wood_trade
-            berry_left[berry_seller.id] -= berries
-            wood_left[wood_seller.id] -= wood_trade
-            self._last_trade_berries += berries
-            self._last_trade_wood += wood_trade
-            self.trade_log.append(
-                {
-                    "iteration": self._current_iteration,
-                    "berry_seller": berry_seller.id,
-                    "wood_seller": wood_seller.id,
-                    "berries": berries,
-                    "wood": wood_trade,
-                    "price": price,
-                }
-            )
-            if berry_left[berry_seller.id] < price:
-                berry_seller = next(berry_iterator, None)
-            if wood_left[wood_seller.id] <= 0:
-                wood_seller = next(wood_iterator, None)
+        }
+        trades = crate_trades + wood_trades
+        failed_sellers = crate_failed_sellers + wood_failed_sellers
+        failed_buyers = crate_failed_buyers + wood_failed_buyers
+        self._market_participants = len(participants)
+        self._market_traders = len(
+            {trade["seller"] for trade in trades}
+            | {trade["buyer"] for trade in trades}
+        )
+        self._failed_trades = len(failed_sellers) + len(failed_buyers)
 
-        self._update_barter_price(price, total_berry_supply, berry_demand)
+        self._apply_belief_updates(
+            living,
+            start_beliefs,
+            trades,
+            participants,
+            failed_sellers,
+            failed_buyers,
+        )
 
-    def _update_barter_price(
+    def _apply_belief_updates(
         self,
-        price: int,
-        berry_supply: int,
-        berry_demand: int,
+        living: Iterable[Agent],
+        start_beliefs: dict[str, int],
+        trades: list[dict[str, Any]],
+        participants: set[str],
+        failed_sellers: list[dict[str, Any]],
+        failed_buyers: list[dict[str, Any]],
     ) -> None:
-        """Set next iteration's whole-berry price from this iteration's offers.
-
-        ``price`` is berries per wood. Scarce berries raise the value of
-        berries relative to wood, so one wood buys fewer berries: the ratio
-        falls when berry demand exceeds supply.
-        """
-
-        if berry_supply <= 0 and berry_demand <= 0:
-            return
-        denominator = max(berry_supply, berry_demand)
-        imbalance = (berry_demand - berry_supply) / denominator
         settings = self.trade_settings
-        self.price = float(
-            np.clip(
-                self.price * (1.0 - settings["price_adjustment"] * imbalance),
-                settings["min_price"],
-                settings["max_price"],
-            )
+        wood_per_crate = self.storage_settings["wood_per_container"]
+        trade_prices: dict[str, list[int]] = {}
+        equivalent_prices: list[int] = []
+        crate_prices: list[int] = []
+
+        for trade in trades:
+            if trade["good"] == "wood":
+                equivalent = int(trade["price"])
+            else:
+                crate_prices.append(int(trade["price"]))
+                equivalent = max(
+                    1, int(round(trade["price"] / wood_per_crate))
+                )
+            equivalent_prices.append(equivalent)
+            for agent_id in (trade["seller"], trade["buyer"]):
+                trade_prices.setdefault(agent_id, []).append(equivalent)
+
+        gossip_price = (
+            int(round(float(np.mean(equivalent_prices))))
+            if equivalent_prices
+            else None
         )
-        self.trade_price = int(
-            np.clip(
-                round(self.price),
-                settings["min_price"],
-                settings["max_price"],
+        if gossip_price is not None:
+            self.last_market_price = gossip_price
+        if crate_prices:
+            self.last_crate_price = int(
+                round(float(np.mean(crate_prices)))
             )
+        self.average_trade_price = self.last_market_price
+        self._gossip_price = (
+            gossip_price if gossip_price is not None else self.last_market_price
         )
+
+        updates = dict(start_beliefs)
+        for agent_id, prices in trade_prices.items():
+            target = int(round(float(np.mean(prices))))
+            current = start_beliefs[agent_id]
+            if target > current:
+                step = 1
+            elif target < current:
+                step = -1
+            else:
+                step = 0
+            updates[agent_id] = current + step
+        if gossip_price is not None:
+            for agent_id in participants:
+                if agent_id in trade_prices:
+                    continue
+                current = start_beliefs[agent_id]
+                if gossip_price > current:
+                    step = settings["gossip_step"]
+                elif gossip_price < current:
+                    step = -settings["gossip_step"]
+                else:
+                    step = 0
+                updates[agent_id] = current + step
+        for entry in failed_sellers:
+            agent_id = entry["agent"].id
+            updates[agent_id] = updates.get(
+                agent_id, start_beliefs[agent_id]
+            ) - 1
+        for entry in failed_buyers:
+            agent_id = entry["agent"].id
+            updates[agent_id] = updates.get(
+                agent_id, start_beliefs[agent_id]
+            ) + 1
+
+        low = max(
+            settings["min_price"],
+            self.initial_price - settings["belief_band"],
+        )
+        high = min(
+            settings["max_price"],
+            self.initial_price + settings["belief_band"],
+        )
+        for agent in living:
+            if agent.id not in participants:
+                continue
+            belief = updates.get(agent.id, start_beliefs[agent.id])
+            agent.price_belief = int(
+                min(high, max(low, belief))
+            )
 
     # ------------------------------------------------------------------
     # Consumption and spoilage
@@ -1234,6 +1789,30 @@ class SubsistenceWorld:
                         decayed += 1
                 agent.wood -= decayed
                 self._last_wood_decayed += decayed
+            wear = settings["crate_wear_rate"]
+            if agent.crates and wear > 0:
+                capacity = (
+                    agent.storage_capacity
+                    if self.features["STORAGE"]
+                    else 0
+                )
+                used = min(agent.berries, capacity)
+                utilization = used / capacity if capacity > 0 else 0.0
+                wear *= 1.0 + (
+                    settings["crate_use_wear_factor"] * utilization
+                )
+                worn_crates = [
+                    durability - wear for durability in agent.crates
+                ]
+                worn_count = sum(
+                    1 for durability in worn_crates if durability <= 0
+                )
+                agent.crates = [
+                    min(1.0, durability)
+                    for durability in worn_crates
+                    if durability > 0
+                ]
+                self._last_crates_worn += worn_count
             capacity = agent.storage_capacity if self.features["STORAGE"] else 0
             if not self.features["SPOILAGE"]:
                 continue
@@ -1281,9 +1860,20 @@ class SubsistenceWorld:
     def _metrics(self, iteration: int) -> dict[str, Any]:
         living = [agent for agent in self.agents if agent.is_alive]
         alive = len(living)
-        price = self._last_trade_price
+        price = self.last_market_price
         total_berries = int(sum(agent.berries for agent in self.agents))
         total_wood = int(sum(agent.wood for agent in self.agents))
+        total_crates = int(sum(agent.crate_count for agent in self.agents))
+        crate_durabilities = [
+            agent.crate_durability
+            for agent in living
+            if agent.crate_count > 0
+        ]
+        crate_durability = (
+            float(np.mean(crate_durabilities))
+            if crate_durabilities
+            else 0.0
+        )
         storage_capacity = int(
             sum(agent.storage_capacity for agent in living)
         )
@@ -1328,6 +1918,11 @@ class SubsistenceWorld:
             ),
             "total_berries": total_berries,
             "total_wood": total_wood,
+            "total_crates": total_crates,
+            "crate_durability": crate_durability,
+            "crates_crafted": self._last_crates_crafted,
+            "crates_worn": self._last_crates_worn,
+            "wood_crafted": self._last_wood_crafted,
             "commons_berries": self.commons_berries,
             "commons_wood": self.commons_wood,
             "total_berries_all": total_berries + self.commons_berries,
@@ -1339,6 +1934,17 @@ class SubsistenceWorld:
                 [agent.wood for agent in self.agents]
             ),
             "barter_price": price,
+            "last_crate_price": self.last_crate_price,
+            "average_trade_price": self.average_trade_price,
+            "gossip_price": self._gossip_price,
+            "mean_price_belief": (
+                float(np.mean([agent.price_belief for agent in living]))
+                if living
+                else 0.0
+            ),
+            "market_participants": self._market_participants,
+            "market_traders": self._market_traders,
+            "failed_trades": self._failed_trades,
             "mean_berry_skill": (
                 float(np.mean([agent.berry_skill for agent in living]))
                 if living
@@ -1351,6 +1957,11 @@ class SubsistenceWorld:
             ),
             "mean_labor_berries": (
                 float(np.mean([agent.labor_berries for agent in living]))
+                if living
+                else 0.0
+            ),
+            "mean_labor_craft": (
+                float(np.mean([agent.labor_craft for agent in living]))
                 if living
                 else 0.0
             ),
@@ -1381,6 +1992,8 @@ class SubsistenceWorld:
             "wood_commons_pct": self._current_wood_density,
             "trade_berries": self._last_trade_berries,
             "trade_wood": self._last_trade_wood,
+            "crate_trades": self._last_crate_trades,
+            "trade_crates": self._last_trade_crates,
             "gifts": self._last_gifts,
             "gift_berries": self._last_gift_berries,
             "extinction_iteration": self.extinction_iteration,

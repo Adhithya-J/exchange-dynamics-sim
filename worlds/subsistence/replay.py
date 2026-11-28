@@ -46,13 +46,14 @@ AGENT_COLORS = [
 ]
 
 PHASE_ORDER = {
-    "gather": 0,
-    "gift": 1,
-    "trade": 2,
-    "eat": 3,
-    "spoil": 4,
+    "craft": 0,
+    "gather": 1,
+    "gift": 2,
+    "trade": 3,
+    "eat": 4,
+    "spoil": 5,
 }
-EVENT_TYPES = {"gather", "gift", "trade", "spoil", "death"}
+EVENT_TYPES = {"gather", "craft", "gift", "trade", "spoil", "death"}
 TRADE_FIELDS = ("berries", "wood", "price")
 
 
@@ -127,6 +128,16 @@ def build_replay(simulation: SubsistenceWorld) -> dict[str, Any]:
                         "health": int(rows[agent_id]["health"]),
                         "berries": int(rows[agent_id]["berries"]),
                         "wood": int(rows[agent_id]["wood"]),
+                        "crates": int(rows[agent_id].get("crates", 0)),
+                        "crate_durability": float(
+                            rows[agent_id].get("crate_durability", 0.0)
+                        ),
+                        "craft_progress": float(
+                            rows[agent_id].get("craft_progress", 0.0)
+                        ),
+                        "price_belief": int(
+                            rows[agent_id].get("price_belief", 5)
+                        ),
                         "storage_capacity": int(
                             rows[agent_id]["storage_capacity"]
                         ),
@@ -136,6 +147,9 @@ def build_replay(simulation: SubsistenceWorld) -> dict[str, Any]:
                         "labor_wood": float(
                             rows[agent_id].get("labor_wood", 0.0)
                         ),
+                        "labor_craft": float(
+                            rows[agent_id].get("labor_craft", 0.0)
+                        ),
                         "wood_progress": float(
                             rows[agent_id].get("wood_progress", 0.0)
                         ),
@@ -144,6 +158,12 @@ def build_replay(simulation: SubsistenceWorld) -> dict[str, Any]:
                         ),
                         "planned_wood": float(
                             rows[agent_id].get("planned_wood", 0.0)
+                        ),
+                        "planned_crates": int(
+                            rows[agent_id].get("planned_crates", 0)
+                        ),
+                        "crafted_crates": int(
+                            rows[agent_id].get("crafted_crates", 0)
                         ),
                         "gathered_berries": int(
                             rows[agent_id].get("gathered_berries", 0)
@@ -223,6 +243,19 @@ def build_replay(simulation: SubsistenceWorld) -> dict[str, Any]:
                 "berries_per_container": int(
                     simulation.storage_settings["berries_per_container"]
                 ),
+                "base_craft_minutes": float(
+                    simulation.storage_settings["base_craft_minutes"]
+                ),
+                "crate_wear_rate": float(
+                    simulation.storage_settings["crate_wear_rate"]
+                ),
+            },
+            "beliefs": {
+                "min_price": int(simulation.trade_settings["min_price"]),
+                "max_price": int(simulation.trade_settings["max_price"]),
+                "max_crate_price": int(
+                    simulation.trade_settings["max_crate_price"]
+                ),
             },
             "resources": {
                 "berries": {
@@ -294,6 +327,9 @@ def _agent_metadata(
                 "max_berries_per_day": float(agent.max_berries_per_day),
                 "max_wood_per_day": float(agent.max_wood_per_day),
                 "initial_health": int(first["health"]),
+                "price_belief": int(agent.price_belief),
+                "initial_crates": int(agent.crate_count),
+                "craft_minutes": float(simulation._craft_minutes(agent)),
                 "storage_wood_per_container": int(
                     agent.storage_wood_per_container
                 ),
@@ -314,14 +350,28 @@ def _initial_metrics(
     health = [int(row["health"]) for row in first_rows.values()]
     skills_b = [float(row["berry_skill"]) for row in first_rows.values()]
     skills_w = [float(row["wood_skill"]) for row in first_rows.values()]
+    beliefs = [int(row.get("price_belief", 5)) for row in first_rows.values()]
+    crates = [int(row.get("crates", 0)) for row in first_rows.values()]
+    durabilities = [
+        float(row.get("crate_durability", 0.0))
+        for row in first_rows.values()
+        if int(row.get("crates", 0)) > 0
+    ]
     total_berries = sum(berries)
     total_wood = sum(wood)
+    total_crates = sum(crates)
     return {
         "iteration": 0,
         "alive": len(first_rows),
         "mean_health": float(np.mean(health)) if health else 0.0,
         "total_berries": total_berries,
         "total_wood": total_wood,
+        "total_crates": total_crates,
+        "crate_durability": (
+            float(np.mean(durabilities)) if durabilities else 0.0
+        ),
+        "crates_crafted": 0,
+        "crates_worn": 0,
         "commons_berries": int(simulation.initial_commons_berries),
         "commons_wood": int(simulation.initial_commons_wood),
         "berries_commons_pct": (
@@ -336,6 +386,15 @@ def _initial_metrics(
         "gini_berries": MetricsCalculator.calculate_gini(berries) if berries else 0.0,
         "gini_wood": MetricsCalculator.calculate_gini(wood) if wood else 0.0,
         "barter_price": int(simulation.initial_price),
+        "last_crate_price": 0,
+        "average_trade_price": int(simulation.initial_price),
+        "gossip_price": int(simulation.initial_price),
+        "mean_price_belief": (
+            float(np.mean(beliefs)) if beliefs else 0.0
+        ),
+        "market_participants": 0,
+        "market_traders": 0,
+        "failed_trades": 0,
         "mean_berry_skill": float(np.mean(skills_b)) if skills_b else 0.0,
         "mean_wood_skill": float(np.mean(skills_w)) if skills_w else 0.0,
         "mean_labor_berries": 0.0,
@@ -358,6 +417,8 @@ def _initial_metrics(
         "storage_utilization": 0.0,
         "trade_berries": 0,
         "trade_wood": 0,
+        "crate_trades": 0,
+        "trade_crates": 0,
         "gifts": 0,
         "gift_berries": 0,
         "extinction_iteration": None,
@@ -385,6 +446,20 @@ def _build_events(
             }
         )
 
+    for entry in simulation.craft_log:
+        entries.append(
+            {
+                "tick": int(entry["iteration"]),
+                "phase": "craft",
+                "type": "craft",
+                "actor": entry["agent"],
+                "target": None,
+                "resource": "crate",
+                "amount": int(entry.get("crates", 1)),
+                "wood": int(entry.get("wood", 0)),
+            }
+        )
+
     for entry in simulation.gift_log:
         entries.append(
             {
@@ -399,15 +474,22 @@ def _build_events(
         )
 
     for entry in simulation.trade_log:
+        good = str(entry.get("good", "wood"))
         entries.append(
             {
                 "tick": int(entry["iteration"]),
                 "phase": "trade",
                 "type": "trade",
                 "actor": entry["berry_seller"],
-                "target": entry["wood_seller"],
+                "target": entry.get(
+                    "wood_seller", entry.get("crate_seller")
+                ),
+                "good": good,
+                "resource": "wood" if good == "wood" else "crate",
                 "berries": int(entry["berries"]),
-                "wood": int(entry["wood"]),
+                "wood": int(entry.get("wood", 0)),
+                "crates": int(entry.get("crates", 0)),
+                "quantity": int(entry.get("quantity", 0)),
                 "price": int(entry["price"]),
                 "amount": int(entry["berries"]),
             }
@@ -553,16 +635,27 @@ def validate_replay(replay: dict[str, Any]) -> None:
                     f"tick {expected_iteration} {state.get('id')} {field}",
                     minimum=0,
                 )
+            for field in ("crates", "price_belief", "planned_crates"):
+                if field in state:
+                    required_int(
+                        state[field],
+                        f"tick {expected_iteration} {state.get('id')} {field}",
+                        minimum=0,
+                    )
             for field in (
                 "labor_berries",
                 "labor_wood",
+                "labor_craft",
                 "planned_berries",
                 "planned_wood",
+                "craft_progress",
+                "crate_durability",
             ):
-                required_float(
-                    state.get(field),
-                    f"tick {expected_iteration} {state.get('id')} {field}",
-                )
+                if field in state:
+                    required_float(
+                        state[field],
+                        f"tick {expected_iteration} {state.get('id')} {field}",
+                    )
             if "wood_progress" in state:
                 required_float(
                     state["wood_progress"],
@@ -611,6 +704,10 @@ def validate_replay(replay: dict[str, Any]) -> None:
         if event.get("waste") is not None:
             required_int(
                 event["waste"], f"event {event_id} waste", minimum=0
+            )
+        if event.get("crates") is not None:
+            required_int(
+                event["crates"], f"event {event_id} crates", minimum=0
             )
         if event["type"] == "trade":
             for field in TRADE_FIELDS:

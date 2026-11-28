@@ -52,10 +52,12 @@
         color: agent.color || "#475569",
         berrySkill: Number(agent.berry_skill) || 0,
         woodSkill: Number(agent.wood_skill) || 0,
+        priceBelief: Number(agent.price_belief) || 1,
         labour: Number(agent.labour) || 1,
         timePerIteration: Number(agent.time_per_iteration) || 100,
         berryTimeCost: Number(agent.berry_time_cost) || 10,
         woodTimeCost: Number(agent.wood_time_cost) || 80,
+        craftMinutes: Number(agent.craft_minutes) || 100,
         maxBerries: Number(agent.max_berries_per_day) || 0,
         maxWood: Number(agent.max_wood_per_day) || 0,
         storageWoodPerContainer: Number(agent.storage_wood_per_container) || 8,
@@ -72,14 +74,24 @@
       meanHealth: [],
       totalBerries: [],
       totalWood: [],
+      totalCrates: [],
+      crateDurability: [],
+      cratesCrafted: [],
+      cratesWorn: [],
       commonsBerries: [],
       commonsWood: [],
       commonsBerriesPct: [],
       commonsWoodPct: [],
       price: [],
+      lastCratePrice: [],
+      meanPriceBelief: [],
+      marketParticipants: [],
+      marketTraders: [],
+      failedTrades: [],
       spoiled: [],
       tradeBerries: [],
       tradeWood: [],
+      crateTrades: [],
       ppfEfficiency: [],
       storageUtilization: [],
       specialisation: [],
@@ -118,6 +130,12 @@
       metrics.meanHealth.push(Number(rowMetrics.mean_health) || 0);
       metrics.totalBerries.push(Number(rowMetrics.total_berries) || 0);
       metrics.totalWood.push(Number(rowMetrics.total_wood) || 0);
+      metrics.totalCrates.push(Number(rowMetrics.total_crates) || 0);
+      metrics.crateDurability.push(
+        Number(rowMetrics.crate_durability) || 0
+      );
+      metrics.cratesCrafted.push(Number(rowMetrics.crates_crafted) || 0);
+      metrics.cratesWorn.push(Number(rowMetrics.crates_worn) || 0);
       metrics.commonsBerries.push(commonsBerries);
       metrics.commonsWood.push(commonsWood);
       metrics.commonsBerriesPct.push(
@@ -127,9 +145,25 @@
         Math.min(1, Math.max(0, Number(woodPct) || 0))
       );
       metrics.price.push(Number(rowMetrics.barter_price) || 0);
+      metrics.lastCratePrice.push(
+        Number(rowMetrics.last_crate_price) || 0
+      );
+      metrics.meanPriceBelief.push(
+        Number(rowMetrics.mean_price_belief) || 0
+      );
+      metrics.marketParticipants.push(
+        Number(rowMetrics.market_participants) || 0
+      );
+      metrics.marketTraders.push(
+        Number(rowMetrics.market_traders) || 0
+      );
+      metrics.failedTrades.push(
+        Number(rowMetrics.failed_trades) || 0
+      );
       metrics.spoiled.push(Number(rowMetrics.berries_spoiled) || 0);
       metrics.tradeBerries.push(Number(rowMetrics.trade_berries) || 0);
       metrics.tradeWood.push(Number(rowMetrics.trade_wood) || 0);
+      metrics.crateTrades.push(Number(rowMetrics.crate_trades) || 0);
       metrics.ppfEfficiency.push(Number(rowMetrics.ppf_efficiency) || 0);
       metrics.storageUtilization.push(
         Number(rowMetrics.storage_utilization) || 0
@@ -151,9 +185,10 @@
 
     // Build the per-agent series directly from the replay rows.
     var stateSeries = {};
-    ["health", "berries", "wood", "storage", "laborB", "laborW",
-     "maxB", "maxW", "plannedB", "plannedW", "gatheredB", "gatheredW",
-     "postTradeB", "postTradeW", "alive"].forEach(
+    ["health", "berries", "wood", "crates", "crateDurability",
+     "craftProgress", "priceBelief", "storage", "laborB", "laborW",
+     "laborC", "maxB", "maxW", "plannedB", "plannedW", "plannedCrates",
+     "gatheredB", "gatheredW", "postTradeB", "postTradeW", "alive"].forEach(
       function (key) {
         stateSeries[key] = [];
         for (var t = 0; t < N; t += 1) {
@@ -166,9 +201,17 @@
             if (key === "health") row[index] = Number(state.health) || 0;
             else if (key === "berries") row[index] = Number(state.berries) || 0;
             else if (key === "wood") row[index] = Number(state.wood) || 0;
+            else if (key === "crates") row[index] = Number(state.crates) || 0;
+            else if (key === "crateDurability") row[index] = Number(state.crate_durability) || 0;
+            else if (key === "craftProgress") row[index] = Number(state.craft_progress) || 0;
+            else if (key === "priceBelief") {
+              var belief = Number(state.price_belief);
+              row[index] = belief > 0 ? belief : agents[index].priceBelief;
+            }
             else if (key === "storage") row[index] = Number(state.storage_capacity) || 0;
             else if (key === "laborB") row[index] = Number(state.labor_berries) || 0;
             else if (key === "laborW") row[index] = Number(state.labor_wood) || 0;
+            else if (key === "laborC") row[index] = Number(state.labor_craft) || 0;
             else if (key === "maxB") {
               var stateMaxB = state.effective_berries_per_day != null
                 ? state.effective_berries_per_day
@@ -187,6 +230,7 @@
             }
             else if (key === "plannedB") row[index] = Number(state.planned_berries) || 0;
             else if (key === "plannedW") row[index] = Number(state.planned_wood) || 0;
+            else if (key === "plannedCrates") row[index] = Number(state.planned_crates) || 0;
             else if (key === "gatheredB") row[index] = Number(state.gathered_berries) || 0;
             else if (key === "gatheredW") row[index] = Number(state.gathered_wood) || 0;
             else if (key === "postTradeB") row[index] = Number(state.post_trade_berries) || 0;
@@ -211,10 +255,13 @@
         actor: actor == null ? null : actor,
         target: target == null ? null : target,
         resource: event.resource || null,
+        good: event.good || null,
         amount: Number(event.amount) || 0,
         waste: Number(event.waste) || 0,
         berries: Number(event.berries) || 0,
         wood: Number(event.wood) || 0,
+        crates: Number(event.crates) || 0,
+        quantity: Number(event.quantity) || 0,
         price: Number(event.price) || 0,
         cause: event.cause || null
       });

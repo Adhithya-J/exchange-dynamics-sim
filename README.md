@@ -3,10 +3,11 @@
 ![The subsistence village at iteration 50](docs/subsistence-world.png)
 
 *Default subsistence configuration at iteration 50. Five villagers remain, the
-berry commons is full, and the forest is at about 89%. The selected villager's
-effective wood yield has contracted from its full-commons value because harvest
-density is below 100%. The inspector shows the harvest density used by the
-frontier and search animation.*
+berry commons is full, and the forest is at about 69%. The selected villager has
+two crates holding twenty berries, a price belief of nine while the market
+clears at eight, and an effective wood frontier contracted by harvest density.
+The inspector shows the crate, craft, belief, and density state used by the PPF
+and search animation.*
 
 An experimental agent-based laboratory for exchange, survival, and inequality.
 The repository now holds **two worlds** that share a small set of simulation
@@ -46,30 +47,31 @@ drag the timeline to scrub, and click a villager to inspect them.
 
 ## The subsistence model in one page
 
-- **Everyone starts with nothing.** No money, no initial berries, no initial
-  wood. Health is full.
+- **Everyone starts with a starter kit.** Ten berries, no raw wood, and one
+  finished crate. There is no money.
 - **Health is a four-day food buffer.** A full-health villager survives four
   days without food. A day with a full ration restores one point; a day short of
-  food drains one. The default daily ration is six berries, so early shortfalls
-  force immediate barter instead of a long cushion.
+  food drains one. The default daily ration is six berries.
 - **Berries are food and spoil.** Berries not eaten and not inside storage
   spoil at the end of the iteration. Berries and wood are always whole units.
-- **Wood is capital.** Eight blocks of wood store ten berries. Wood wears out,
-  so it remains an ongoing need.
+- **Crates are capital.** Eight raw wood plus about a day of skilled carpentry
+  make one crate, which stores ten berries. Raw wood is only material, not
+  storage. Crates wear out faster when they are full.
 - **The day is finite.** Each villager has a fixed number of working minutes.
-  Picking berries is quick; chopping wood is much slower and yields much rarer,
-  more valuable wood. Unfinished chopping carries into the next day.
+  Picking berries is quick; chopping wood is much slower. Woodworkers choose
+  between berries, raw wood, and carpentry, and unfinished work carries over.
 - **Sparse commons adds search time.** Gathering and chopping costs rise as the
   berry bushes and forest thin, with a safe density floor. The production
   possibilities frontier contracts with the current commons density, and
   villagers visibly move between several sparse sites.
 - **Skills differ.** Each villager draws one shared specialisation latent `z`.
   Berry skill rises with `z` and wood skill falls with it, so strong pickers are
-  weak choppers and strong choppers are weak pickers. Together with the finite
-  day, that produces a linear production possibilities frontier.
-- **Barter has a relative price.** There is no money or unit of account. The
-  header price is only how many whole berries one block of wood buys.
-  Villagers specialise where their time is worth more at that ratio.
+  weak choppers and strong choppers are weak pickers. Woodworkers also have a
+  comparative advantage in carpentry.
+- **Prices are discovered.** Every villager carries an integer price belief in
+  berries per wood. Bilateral bargains clear at the midpoint of seller and
+  buyer reservations, and realized prices plus market gossip update beliefs with
+  a one-tick lag. There is no global price setter.
 - **The commons is shared and depletable.** Berry bushes and forest regenerate
   each iteration. Berry bushes recover quickly; wood regrows much more slowly.
 
@@ -84,7 +86,7 @@ Every experimental layer is a flag in `worlds/subsistence/config.yaml`:
 FEATURES:
   GIFTING: false       # direct in-kind gifts, off by default
   TRADE: true          # barter at a berries-per-wood ratio
-  STORAGE: true        # wood provides storage capacity
+  STORAGE: true        # finished crates provide storage capacity
   SPOILAGE: true       # unprotected berries spoil
   TRUST: false         # reserved for shared social utilities
   RECIPROCITY: false   # reserved for shared social utilities
@@ -126,10 +128,11 @@ replay client; it does not import the model. You can either open the generated
 http://localhost:8000/worlds/subsistence/viewer/?replay=/replay-subsistence.json.gz
 ```
 
-The viewer shows health rings, berry baskets, wood piles, storage crates,
-shared berry bushes and forest, villagers walking out to pick or chop, barter
-tokens, spoilage, and deaths. The side panel explains the iconography and lists
-each iteration's events.
+The viewer shows health rings, berry baskets, raw wood, perishable crates and
+their durability, shared berry bushes and forest, villagers walking out to pick,
+chop, or craft, bilateral barter tokens, price beliefs, spoilage, and deaths.
+The side panel explains the iconography and lists each iteration's gather,
+craft, trade, spoilage, and death events.
 
 To write only a replay:
 

@@ -1,14 +1,16 @@
 # The Subsistence World
 
-A goods-only world with no money. Villagers start with nothing, spend a finite
-working day gathering whole berries and whole wood from a shared commons, eat,
-store food, and optionally barter. Health is a short four-day buffer, eight
-wood blocks store ten berries, chopping is much slower than picking, and a
-shared specialisation latent makes berry and wood skills negatively correlated.
-Gathering and chopping also slow down as the commons thins, so search time
-rises and the production frontier contracts. Partial chopping carries between
-days. Little villagers walk out to the berry bushes and forest, visiting
-several sparse sites when the commons is depleted.
+A goods-only world with no money. Villagers start with ten berries and one crate,
+spend a finite working day gathering whole berries and raw wood from a shared
+commons, craft finished crates, eat, store food, and barter. Health is a short
+four-day buffer. Eight raw wood plus a day of skilled carpentry make a crate
+that stores ten berries; raw wood itself is only material, not storage.
+Crates are perishable and wear faster when full. Gathering and chopping slow
+down as the commons thins. Each villager carries an integer price belief, and
+bilateral bargaining plus market gossip discovers prices with a one-tick lag.
+Partial chopping and crafting carry between days. Little villagers walk out to
+the berry bushes and forest, visiting several sparse sites when the commons is
+depleted.
 
 ## Run it
 

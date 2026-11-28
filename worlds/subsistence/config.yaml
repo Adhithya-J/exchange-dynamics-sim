@@ -13,9 +13,9 @@ SIMULATION:
 FEATURES:
   # Direct transfers between agents. Off by default; see the GIFTING section.
   GIFTING: false
-  # Barter exchange of berries and wood at a relative price.
+  # Bilateral barter in the central market square.
   TRADE: true
-  # Wood provides storage capacity for berries.
+  # Finished crates provide storage capacity for berries.
   STORAGE: true
   # Berries held outside storage spoil at the end of the iteration.
   SPOILAGE: true
@@ -56,15 +56,21 @@ AGENTS:
   FOOD_PER_ITERATION: 6
   HEAL_PER_MEAL: 1
   STARVATION_RATE: 1
-  STARTING_BERRIES: 0
+  STARTING_BERRIES: 10
   STARTING_WOOD: 0
+  # One starter crate gives villagers enough storage to save food and wood
+  # while they work toward their first crafted crate.
+  STARTING_CRATES: 1
   # How many days of food an agent tries to keep, subject to storage.
   RESERVE_DAYS: 4
   # How many extra units an agent produces beyond its own target when it is
   # specialising for trade.
   TRADE_SURPLUS: 1
-  # Upper bound on the wood an agent deliberately keeps for storage.
+  # Upper bound on the raw wood an agent deliberately keeps for crafting and
+  # trade.
   MAX_WOOD_TARGET: 20
+  # Finished crates an agent tries to keep for its own berry reserve.
+  MAX_CRATES_TARGET: 3
 
 # Shared natural stocks. Stocks and harvests are whole units. Berry bushes
 # regrow steadily; wood regrows much more slowly. Gathering time scales with
@@ -86,22 +92,38 @@ COMMONS:
     EXTRACTION_EFFICIENCY: 1.0
 
 STORAGE:
-  # Eight blocks of wood store ten berries. Storage is proportional, so four
-  # wood stores five berries and one wood stores one berry.
+  # Eight raw wood blocks are crafted into one crate, and one crate stores ten
+  # berries. Raw wood itself is only material, not storage.
   WOOD_PER_CONTAINER: 8
   BERRIES_PER_CONTAINER: 10
-  # Each wood block has this chance of wearing out each iteration.
-  WOOD_DECAY_CHANCE: 0.03
+  # A crate takes this many minutes at wood_skill 1. A skilled woodworker
+  # builds one in about a day; a weak one takes two or three days.
+  BASE_CRAFT_MINUTES: 100.0
+  # Durability lost by each crate every iteration. A crate starts at 1.0.
+  CRATE_WEAR_RATE: 0.01
+  # Additional wear multiplier at full storage utilization. Busy crates wear
+  # faster than idle ones.
+  CRATE_USE_WEAR_FACTOR: 1.0
+  # Raw wood is durable; set a positive chance only for a control run.
+  WOOD_DECAY_CHANCE: 0.0
   # Fraction of stored berries lost each iteration. Zero means sealed storage.
   STORED_SPOIL_RATE: 0.0
 
 TRADE:
-  # Relative price: whole berries given per whole unit of wood.
+  # Fallback baseline when agents have no usable opportunity costs.
   INITIAL_PRICE: 5
-  # Fraction of the supply/demand imbalance applied to next iteration's price.
-  PRICE_ADJUSTMENT: 0.1
+  # Individual price beliefs are whole berries per wood, clamped here.
   MIN_PRICE: 1
-  MAX_PRICE: 6
+  MAX_PRICE: 20
+  # Random +/- offset applied to the village baseline at initialization.
+  BELIEF_NOISE: 1
+  # How far an observer moves toward the latest market gossip, in berries.
+  GOSSIP_STEP: 1
+  # Beliefs are allowed to discover inside this band around the initial
+  # village baseline, while remaining inside [MIN_PRICE, MAX_PRICE].
+  BELIEF_BAND: 3
+  # Safe upper bound for a whole crate price in berries.
+  MAX_CRATE_PRICE: 400
 
 GIFTING:
   PROBABILITY: 0.25

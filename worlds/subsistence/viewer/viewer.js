@@ -31,6 +31,7 @@
 
   var FEED_ICONS = {
     gather: "&#9679;",
+    craft: "&#9881;",
     gift: "&#9829;",
     trade: "&#8646;",
     spoil: "&#10005;",
@@ -192,13 +193,19 @@
         health: series.health[t][index],
         berries: series.berries[t][index],
         wood: series.wood[t][index],
+        crates: series.crates[t][index],
+        crateDurability: series.crateDurability[t][index],
+        craftProgress: series.craftProgress[t][index],
+        priceBelief: series.priceBelief[t][index],
         storage: series.storage[t][index],
         laborB: series.laborB[t][index],
         laborW: series.laborW[t][index],
+        laborC: series.laborC[t][index],
         maxB: series.maxB[t][index],
         maxW: series.maxW[t][index],
         plannedB: series.plannedB[t][index],
         plannedW: series.plannedW[t][index],
+        plannedCrates: series.plannedCrates[t][index],
         gatheredB: series.gatheredB[t][index],
         gatheredW: series.gatheredW[t][index],
         postTradeB: series.postTradeB[t][index],
@@ -214,14 +221,24 @@
         meanHealth: series.meanHealth[t],
         totalBerries: series.totalBerries[t],
         totalWood: series.totalWood[t],
+        totalCrates: series.totalCrates[t],
+        crateDurability: series.crateDurability[t],
+        cratesCrafted: series.cratesCrafted[t],
+        cratesWorn: series.cratesWorn[t],
         commonsBerries: series.commonsBerries[t],
         commonsWood: series.commonsWood[t],
         commonsBerriesPct: series.commonsBerriesPct[t],
         commonsWoodPct: series.commonsWoodPct[t],
         price: series.price[t],
+        lastCratePrice: series.lastCratePrice[t],
+        meanPriceBelief: series.meanPriceBelief[t],
+        marketParticipants: series.marketParticipants[t],
+        marketTraders: series.marketTraders[t],
+        failedTrades: series.failedTrades[t],
         spoiled: series.spoiled[t],
         tradeBerries: series.tradeBerries[t],
         tradeWood: series.tradeWood[t],
+        crateTrades: series.crateTrades[t],
         ppfEfficiency: series.ppfEfficiency[t],
         storageUtilization: series.storageUtilization[t],
         specialisation: series.specialisation[t],
@@ -1033,7 +1050,12 @@
           " wood remain in the world.";
       }
       var parts = [];
-      if (metrics.tradeBerries > 0.05) {
+      if (metrics.crateTrades > 0.05) {
+        parts.push(
+          formatNumber(metrics.crateTrades, 0) + " crates traded at " +
+          formatNumber(metrics.lastCratePrice, 0) + " berries each"
+        );
+      } else if (metrics.tradeBerries > 0.05) {
         parts.push(
           formatNumber(metrics.tradeBerries, 0) + " berries changed hands at " +
           formatNumber(metrics.price, 0) + " berries per wood"
@@ -1063,10 +1085,12 @@
           "<p class=\"muted\" style=\"margin:0 0 10px;font-size:12px\">" +
           "Click a villager to inspect their health, stores, skills, and " +
           "production possibilities. The whole village currently holds " +
-          formatNumber(metrics.totalBerries, 0) + " berries and " +
-          formatNumber(metrics.totalWood, 0) + " wood.</p>" +
+          formatNumber(metrics.totalBerries, 0) + " berries, " +
+          formatNumber(metrics.totalWood, 0) + " raw wood, and " +
+          formatNumber(metrics.totalCrates, 0) + " crates.</p>" +
           "<div class=\"detail-grid\">" +
           detail("Trade", formatNumber(metrics.tradeBerries, 0) + " berries") +
+          detail("Crate trades", formatNumber(metrics.crateTrades, 0)) +
           detail("Spoiled", formatNumber(metrics.spoiled, 0)) +
           detail("Food shortfall", formatNumber(metrics.unmetFood, 0)) +
           detail("PPF efficiency", formatPercent(metrics.ppfEfficiency)) +
@@ -1083,11 +1107,15 @@
       var storageFraction = agentState.storage > 0
         ? clamp(agentState.berries / agentState.storage, 0, 1)
         : 0;
+      var craftMinutes = agent.craftMinutes > 0 ? agent.craftMinutes : 100;
+      var craftFraction = clamp(agentState.craftProgress / craftMinutes, 0, 1);
       var opportunity = agentState.maxW > 0
         ? agentState.maxB / agentState.maxW
         : null;
       var potentialB = agentState.maxB;
       var potentialW = agentState.maxW;
+      var belief = agentState.priceBelief;
+      var craftShare = agent.labour > 0 ? agentState.laborC / agent.labour : 0;
 
       panel.innerHTML =
         "<div class=\"selected-hero\">" +
@@ -1095,25 +1123,31 @@
         "<div><div class=\"selected-name\">" + agent.label + "</div>" +
         "<div class=\"muted\" style=\"font-size:11px\">berry skill " +
         formatNumber(agent.berrySkill, 2) + " · wood skill " +
-        formatNumber(agent.woodSkill, 2) + "</div></div>" +
+        formatNumber(agent.woodSkill, 2) + " · craft " +
+        formatNumber(craftMinutes, 0) + " min</div></div>" +
         "<div class=\"selected-status" + (agentState.alive ? "" : " dead") + "\">" +
         (agentState.alive ? "alive" : "dead") + "</div></div>" +
         meter("Health", healthFraction, formatNumber(agentState.health, 0) + " / " + formatNumber(maxHealth, 0), "health") +
         meter("Berries", berryFraction, formatNumber(agentState.berries, 0), "berries") +
-        meter("Wood", woodFraction, formatNumber(agentState.wood, 0), "wood") +
+        meter("Raw wood", woodFraction, formatNumber(agentState.wood, 0), "wood") +
+        meter("Crates", clamp(agentState.crates / 3, 0, 1), formatNumber(agentState.crates, 0) + " · " + formatPercent(agentState.crateDurability), "crate") +
         meter("Storage", storageFraction, formatNumber(Math.min(agentState.berries, agentState.storage), 0) + " / " + formatNumber(agentState.storage, 0), "crate") +
+        meter("Craft", craftFraction, formatPercent(craftFraction), "craft") +
         "<div class=\"detail-grid\">" +
-        detail("Opportunity cost", opportunity == null ? "-" : formatNumber(opportunity, 2) + " berries / wood") +
+        detail("Price belief", formatNumber(belief, 0) + " berries / wood") +
         detail("Market price", formatNumber(metrics.price, 0) + " berries / wood") +
+        detail("Opportunity cost", opportunity == null ? "-" : formatNumber(opportunity, 2) + " berries / wood") +
         detail("Effective max", formatNumber(potentialB, 1) + " b · " + formatNumber(potentialW, 1) + " w") +
         detail("Harvest density", formatPercent(metrics.commonsBerriesPct) + " b · " + formatPercent(metrics.commonsWoodPct) + " w") +
         detail("Gathered", formatNumber(agentState.gatheredB, 0) + " b · " + formatNumber(agentState.gatheredW, 0) + " w") +
         "</div>" +
-        "<div class=\"labour-legend\"><span>berry labour " + formatPercent(agent.labour > 0 ? agentState.laborB / agent.labour : 0) + "</span>" +
-        "<span>wood labour " + formatPercent(agent.labour > 0 ? agentState.laborW / agent.labour : 0) + "</span></div>" +
+        "<div class=\"labour-legend\"><span>berry " + formatPercent(agent.labour > 0 ? agentState.laborB / agent.labour : 0) + "</span>" +
+        "<span>wood " + formatPercent(agent.labour > 0 ? agentState.laborW / agent.labour : 0) + "</span>" +
+        "<span>craft " + formatPercent(craftShare) + "</span></div>" +
         "<div class=\"labour-bar\">" +
         "<i class=\"berry-labour\" style=\"width:" + (agent.labour > 0 ? (agentState.laborB / agent.labour) * 100 : 0) + "%\"></i>" +
         "<i class=\"wood-labour\" style=\"width:" + (agent.labour > 0 ? (agentState.laborW / agent.labour) * 100 : 0) + "%\"></i>" +
+        "<i class=\"craft-labour\" style=\"width:" + craftShare * 100 + "%\"></i>" +
         "</div>" +
         "<button class=\"ppf-button\" id=\"inspectorPpf\">Production possibilities</button>";
       var button = document.getElementById("inspectorPpf");
@@ -1146,14 +1180,26 @@
           if (event.resource === "berries") gather[key].berries += event.amount;
           else gather[key].wood += event.amount;
         } else if (event.type === "trade") {
+          var isCrate = event.good === "crate";
           rows.push({
             order: 1,
             icon: "trade",
             title: agents[event.actor].label + " traded " +
               formatNumber(event.berries, 0) + " berries for " +
-              formatNumber(event.wood, 0) + " wood with " +
+              formatNumber(isCrate ? event.crates : event.wood, 0) +
+              (isCrate ? " crate" : " wood") + " with " +
               agents[event.target].label,
-            sub: formatNumber(event.price, 0) + " berries per wood",
+            sub: formatNumber(event.price, 0) +
+              (isCrate ? " berries per crate" : " berries per wood"),
+            select: event.actor
+          });
+        } else if (event.type === "craft") {
+          rows.push({
+            order: 1,
+            icon: "craft",
+            title: agents[event.actor].label + " crafted " +
+              formatNumber(event.amount, 0) + " crate",
+            sub: formatNumber(event.wood, 0) + " raw wood worked",
             select: event.actor
           });
         } else if (event.type === "gift") {
@@ -1393,7 +1439,7 @@
           // Price line at the current exchange ratio. In the full view it
           // passes through post-barter holdings; in the zoomed frontier view
           // it passes through the chosen production point so it stays visible.
-          var price = metricsAt(state.tick).price;
+          var price = stateAt(highlight, state.tick).priceBelief;
           if (price > 0) {
             var referenceB = plannedB;
             var referenceW = plannedW;
@@ -1470,6 +1516,7 @@
         : chosen.label + ": opportunity cost " +
           (opportunity == null ? "—" : formatNumber(opportunity, 2) + " berries per wood") +
           ", market price " + formatNumber(tickMetrics.price, 0) +
+          ", belief " + formatNumber(chosenState.priceBelief, 0) +
           ". " + ratioNote + densityNote + scaleNote;
 
       var legendHtml =

@@ -49,6 +49,7 @@ def test_berry_and_wood_stocks_obey_the_ledger():
             previous_wood
             + metrics["commons_regenerated_wood"]
             - metrics["wood_decayed"]
+            - metrics.get("wood_crafted", 0)
             - metrics["commons_waste_wood"]
         )
         assert current_wood == pytest.approx(expected_wood, abs=1e-6)

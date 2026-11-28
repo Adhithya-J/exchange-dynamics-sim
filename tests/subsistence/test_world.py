@@ -19,6 +19,10 @@ def quiet_config(**overrides) -> dict:
     """A world with no commons and no optional layers."""
 
     config = make_config(**overrides)
+    agent_overrides = overrides.get("AGENTS", {})
+    for key in ("STARTING_BERRIES", "STARTING_WOOD", "STARTING_CRATES"):
+        if key not in agent_overrides:
+            config["AGENTS"][key] = 0
     config["FEATURES"].update(
         {"GIFTING": False, "TRADE": False, "STORAGE": False, "SPOILAGE": False}
     )
@@ -31,14 +35,15 @@ def quiet_config(**overrides) -> dict:
     return config
 
 
-def test_agents_start_with_nothing_but_full_health():
+def test_agents_start_with_a_starter_crate_and_food():
     world = SubsistenceWorld(make_config())
     world.initialize_agents()
 
     assert len(world.agents) == 2
     for agent in world.agents:
-        assert agent.berries == 0.0
-        assert agent.wood == 0.0
+        assert agent.berries == 10
+        assert agent.wood == 0
+        assert agent.crate_count == 1
         assert agent.health == world.agent_settings["max_health"]
         assert agent.is_alive
 
@@ -100,31 +105,34 @@ def test_storage_protects_berries_above_capacity():
     config = make_config(
         FEATURES={"STORAGE": True, "SPOILAGE": True, "TRADE": False}
     )
-    config["STORAGE"]["WOOD_DECAY_CHANCE"] = 0.0
     world = SubsistenceWorld(config)
     agent = world.initialize_agents()[0]
+    agent.crates = [1.0]
+    agent.wood = 0
     agent.berries = 12
-    agent.wood = 8
 
     world._decay_and_spoil()
 
+    assert agent.storage_capacity == 10
     assert agent.berries == 10
     assert world.spoil_log[-1]["amount"] == 2
 
 
-def test_wood_decay_shrinks_storage_and_spoils_the_excess():
+def test_crate_wear_shrinks_storage_and_spoils_the_excess():
     config = make_config(
         FEATURES={"STORAGE": True, "SPOILAGE": True, "TRADE": False}
     )
-    config["STORAGE"]["WOOD_DECAY_CHANCE"] = 1.0
+    config["STORAGE"]["CRATE_WEAR_RATE"] = 1.0
     world = SubsistenceWorld(config)
     agent = world.initialize_agents()[0]
-    agent.wood = 4
+    agent.crates = [1.0]
+    agent.wood = 0
     agent.berries = 8
 
     world._decay_and_spoil()
 
-    assert agent.wood == 0
+    assert agent.crates == []
+    assert agent.storage_capacity == 0
     assert agent.berries == 0
 
 
@@ -279,7 +287,12 @@ def test_effective_yields_scale_with_commons_density():
 
 
 def test_berry_pickup_is_capped_and_leftover_goes_to_wood():
-    world = SubsistenceWorld(make_config(SIMULATION={"AGENTS": 1}))
+    world = SubsistenceWorld(
+        make_config(
+            SIMULATION={"AGENTS": 1},
+            FEATURES={"TRADE": False},
+        )
+    )
     world.initialize_agents()
     agent = world.agents[0]
     agent.berry_skill = 4.0
@@ -302,16 +315,203 @@ def test_berry_cap_bounds_new_pickup_not_total_holding():
     world = SubsistenceWorld(make_config(SIMULATION={"AGENTS": 1}))
     world.initialize_agents()
     agent = world.agents[0]
-    agent.wood = 8
+    agent.crates = [1.0]
+    agent.wood = 0
     agent.berries = 8
 
-    # Capacity is 10. The agent can pick its two missing target berries; the
-    # cap is on new berries, not on the total it already holds.
-    assert world._target_berries(agent) == 10
-    assert world._rational_berry_target(agent) == 10
+    # The starter crate stores 10 berries, plus the six-berry daily ration.
+    assert world._target_berries(agent) == 16
+    assert world._rational_berry_target(agent) == 16
 
     agent.berries = 20
     assert world._rational_berry_target(agent) == 20
+
+
+def test_zero_storage_agent_picks_ration_then_chops():
+    world = SubsistenceWorld(make_config(SIMULATION={"AGENTS": 1}))
+    world.initialize_agents()
+    agent = world.agents[0]
+    agent.crates = []
+    agent.berries = 0
+    agent.wood = 0
+    agent.berry_skill = 0.74
+    agent.wood_skill = 1.13
+    agent.price_belief = 6
+    world._current_berries_density = 1.0
+    world._current_wood_density = 1.0
+
+    world._allocate_labour(agent)
+
+    assert agent.planned_berries <= 6.01
+    assert agent.planned_wood > 0
+
+
+def test_price_beliefs_start_as_bounded_integers():
+    world = SubsistenceWorld(make_config())
+
+    for agent in world.initialize_agents():
+        assert isinstance(agent.price_belief, int)
+        assert 1 <= agent.price_belief <= 20
+
+
+def test_used_crates_wear_faster_than_idle_crates():
+    world = SubsistenceWorld(make_config(SIMULATION={"AGENTS": 2}))
+    busy, idle = world.initialize_agents()
+    busy.crates = [1.0]
+    busy.berries = 10
+    idle.crates = [1.0]
+    idle.berries = 0
+
+    world._decay_and_spoil()
+
+    assert busy.crate_durability < idle.crate_durability
+    assert busy.crate_durability == pytest.approx(1.0 - 0.02)
+    assert idle.crate_durability == pytest.approx(1.0 - 0.01)
+
+
+def test_crate_crafting_consumes_wood_and_carries_progress():
+    world = SubsistenceWorld(make_config(SIMULATION={"AGENTS": 1}))
+    world.initialize_agents()
+    agent = world.agents[0]
+    agent.berry_skill = 0.1
+    agent.wood_skill = 0.5
+    agent.wood = 8
+    agent.price_belief = 10
+    world._current_berries_density = 1.0
+    world._current_wood_density = 1.0
+
+    world._allocate_labour(agent)
+
+    # A 200-minute crate takes two full days for this villager.
+    assert agent.planned_crates == 0
+    assert agent.craft_progress == pytest.approx(100.0)
+
+    world._reset_iteration_state()
+    world._allocate_labour(agent)
+
+    assert agent.planned_crates == 1
+    assert agent.craft_progress == pytest.approx(0.0)
+    assert agent.wood == 0
+    assert agent.crate_count == 2
+
+
+def test_crate_barter_moves_a_finished_crate():
+    world = SubsistenceWorld(
+        make_config(SIMULATION={"AGENTS": 2, "RANDOM_SEED": 3})
+    )
+    world.initialize_agents()
+    seller, buyer = world.agents
+    seller.berry_skill = 0.3
+    seller.wood_skill = 1.4
+    seller.crates = [1.0, 1.0, 1.0]
+    seller.berries = 0
+    seller.price_belief = 10
+    buyer.berry_skill = 1.4
+    buyer.wood_skill = 0.6
+    buyer.crates = []
+    buyer.berries = 200
+    buyer.price_belief = 10
+    world._current_berries_density = 1.0
+    world._current_wood_density = 1.0
+
+    world._process_trade()
+
+    assert seller.crate_count == 2
+    assert buyer.crate_count == 1
+    assert seller.berries > 0
+    assert buyer.berries < 200
+    assert world.trade_log
+    assert world.trade_log[0]["good"] == "crate"
+    assert world.metrics_history == []
+
+
+def test_belief_updates_happen_after_the_matching_phase():
+    world = SubsistenceWorld(
+        make_config(SIMULATION={"AGENTS": 2, "RANDOM_SEED": 4})
+    )
+    world.initialize_agents()
+    seller, buyer = world.agents
+    seller.berry_skill = 0.3
+    seller.wood_skill = 1.4
+    seller.wood = 10
+    seller.berries = 0
+    seller.price_belief = 4
+    buyer.berry_skill = 1.4
+    buyer.wood_skill = 0.6
+    buyer.wood = 0
+    buyer.berries = 100
+    buyer.price_belief = 10
+    world._current_berries_density = 1.0
+    world._current_wood_density = 1.0
+    start = {agent.id: agent.price_belief for agent in world.agents}
+    observed = []
+    original_match = world._match_market
+
+    def wrapped(good, sellers, buyers):
+        for entry in sellers + buyers:
+            observed.append(entry["agent"].price_belief)
+        return original_match(good, sellers, buyers)
+
+    world._match_market = wrapped
+    world._process_trade()
+
+    assert observed
+    assert all(value in (4, 10) for value in observed)
+    assert seller.price_belief != start[seller.id]
+    assert buyer.price_belief != start[buyer.id]
+
+
+def test_gossip_and_failed_adjustments_only_touch_participants():
+    world = SubsistenceWorld(
+        make_config(SIMULATION={"AGENTS": 3, "RANDOM_SEED": 6})
+    )
+    living = world.initialize_agents()
+    world.trade_settings["belief_band"] = 20
+    trader, observer, absent = living
+    start = {
+        trader.id: 4,
+        observer.id: 4,
+        absent.id: 12,
+    }
+    for agent in living:
+        agent.price_belief = start[agent.id]
+
+    world._apply_belief_updates(
+        living,
+        start,
+        [
+            {
+                "good": "wood",
+                "seller": trader.id,
+                "buyer": observer.id,
+                "qty": 1,
+                "price": 6,
+            }
+        ],
+        {trader.id, observer.id, absent.id},
+        [],
+        [],
+    )
+
+    assert trader.price_belief == 5
+    assert observer.price_belief == 5
+    assert absent.price_belief == 11  # gossip moves one step toward 6
+    assert absent.price_belief != start[absent.id]
+
+    non_participant = start[absent.id]
+    absent.price_belief = non_participant
+    world._apply_belief_updates(
+        living,
+        {agent.id: agent.price_belief for agent in living},
+        [],
+        {trader.id, observer.id},
+        [{"agent": trader}],
+        [{"agent": observer}],
+    )
+
+    assert absent.price_belief == non_participant
+    assert trader.price_belief == 4  # failed seller lowers
+    assert observer.price_belief == 6  # failed buyer raises
 
 
 def test_trade_is_off_when_feature_is_disabled():
@@ -356,7 +556,8 @@ def test_wood_is_not_a_specialisation_without_storage():
     agent = world.agents[0]
     agent.berry_skill = 1.0
     agent.wood_skill = 10.0
-    world.trade_price = 100
+    agent.berries = 0
+    agent.price_belief = 100
 
     world._allocate_labour(agent)
 
@@ -372,7 +573,8 @@ def test_wood_is_not_a_specialisation_without_spoilage():
     agent = world.agents[0]
     agent.berry_skill = 1.0
     agent.wood_skill = 10.0
-    world.trade_price = 100
+    agent.berries = 0
+    agent.price_belief = 100
 
     world._allocate_labour(agent)
 

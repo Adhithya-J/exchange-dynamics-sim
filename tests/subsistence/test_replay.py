@@ -47,10 +47,17 @@ def test_replay_contains_typed_events():
     replay = build_replay(small_world())
     event_types = {event["type"] for event in replay["events"]}
 
-    assert {"gather", "trade"} <= event_types
+    assert "gather" in event_types
     for event in replay["events"]:
         assert event["tick"] >= 1
-        assert event["phase"] in {"gather", "gift", "trade", "eat", "spoil"}
+        assert event["phase"] in {
+            "craft",
+            "gather",
+            "gift",
+            "trade",
+            "eat",
+            "spoil",
+        }
         assert event["id"] == f"{event['tick']}:{event['seq']}"
 
 
@@ -90,6 +97,21 @@ def test_replay_records_commons_density_and_effective_yields():
         assert "effective_wood_per_day" in state
         assert state["effective_berries_per_day"] >= 0
         assert state["effective_wood_per_day"] >= 0
+
+
+def test_replay_records_beliefs_crates_and_crafting():
+    replay = build_replay(small_world())
+    tick = replay["ticks"][1]
+    state = tick["agents"][0]
+
+    assert "price_belief" in state
+    assert "crates" in state
+    assert "crate_durability" in state
+    assert "craft_progress" in state
+    assert "labor_craft" in state
+    assert "mean_price_belief" in tick["metrics"]
+    assert "total_crates" in tick["metrics"]
+    assert replay["meta"]["storage"]["base_craft_minutes"] > 0
 
 
 def test_replay_round_trip_is_deterministic(tmp_path):
@@ -142,6 +164,8 @@ def test_validate_replay_rejects_missing_agent_state():
 
 def test_tick_zero_uses_the_initial_barter_price():
     replay = build_replay(small_world())
+    initial = replay["meta"]["initial_price"]
 
-    assert replay["ticks"][0]["metrics"]["barter_price"] == 5
-    assert replay["meta"]["initial_price"] == 5
+    assert 1 <= initial <= 20
+    assert replay["ticks"][0]["metrics"]["barter_price"] == initial
+    assert replay["meta"]["initial_price"] == initial

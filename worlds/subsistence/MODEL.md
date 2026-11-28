@@ -32,17 +32,18 @@ Each agent has:
 - `time_per_iteration` — the finite working day, in minutes;
 - `berry_time_cost` and `wood_time_cost` — base minutes per whole unit;
 - `health` and `max_health`;
-- `berries` and `wood`;
+- `berries`, `wood`, and `crates`;
+- `price_belief` — whole berries per wood, used for planning and barter;
 - `wood_progress` — fractional chopping work carried toward the next block;
+- `craft_progress` — minutes invested in the next crate;
 - `storage_wood_per_container` and `storage_berries_per_container`;
-- per-iteration observations: `labor_berries`, `labor_wood`,
-  `planned_berries`, `planned_wood`, `gathered_berries`, `gathered_wood`,
-  `meals_eaten`, `unmet_food`, `post_trade_berries`, and
-  `post_trade_wood`.
+- per-iteration observations: `labor_berries`, `labor_wood`, `labor_craft`,
+  `planned_berries`, `planned_wood`, `planned_crates`, `crafted_crates`,
+  `gathered_berries`, `gathered_wood`, `meals_eaten`, `unmet_food`,
+  `post_trade_berries`, and `post_trade_wood`.
 
-Agents start with the configured starting berries and wood (default zero) and
-full health. They start with no money because money does not exist in this
-world.
+Agents start with ten berries, no raw wood, one finished crate, and full
+health. They start with no money because money does not exist in this world.
 
 Skills are drawn from one shared specialisation latent variable `z` per
 villager, so they are **negatively correlated** by construction. A high `z` is
@@ -232,32 +233,47 @@ four-day buffer is deliberate: missing the six-berry ration creates immediate
 early-game scarcity and a reason to barter instead of a ten-day cushion.
 
 Dead agents do not gather, gift, trade, or eat. Their goods remain in their
-inventory and are still counted in world totals; their wood continues to wear
+inventory and are still counted in world totals; their crates continue to wear
 out and their unprotected berries continue to spoil.
 
-## Storage, spoilage, and wood wear
+## Storage, crates, and wear
 
-When `FEATURES.STORAGE` is true, an agent's storage capacity is:
-
-```text
-capacity = (wood * BERRIES_PER_CONTAINER) // WOOD_PER_CONTAINER
-```
-
-The default is **eight wood blocks for ten berries**, so eight wood stores ten
-berries, four wood stores five, and one wood stores one. Capacity is always a
-whole number of berries.
-
-When `FEATURES.STORAGE` is false, capacity is zero.
-
-Wood wears out as whole blocks. Each block has a `WOOD_DECAY_CHANCE` per
-iteration:
+Raw wood is material, not storage. When `FEATURES.STORAGE` is true:
 
 ```text
-lost = number of blocks whose decay draw succeeds
-wood -= lost
+capacity = crate_count * BERRIES_PER_CONTAINER
 ```
 
-When `FEATURES.SPOILAGE` is true, berries above the post-wear capacity spoil:
+With the defaults, one finished crate stores ten berries. A villager starts with
+one crate and ten berries, enough to save food and material while working toward
+the next crate. If every crate wears out, storage capacity is zero and the
+villager can only carry today's food until a new crate is finished.
+
+### Skilled crate crafting
+
+Crafting one crate requires `WOOD_PER_CONTAINER` raw wood and:
+
+```text
+craft_minutes = BASE_CRAFT_MINUTES / wood_skill
+```
+
+`BASE_CRAFT_MINUTES` is 100, so a wood worker at skill 1 builds a crate in one
+day, a top chopper does it in about 70 minutes, and a weak carpenter takes two
+or three days. `craft_progress` carries partial minutes between iterations. On
+completion, the raw wood is consumed, a crate with durability 1.0 is added, and
+the remaining craft minutes carry forward.
+
+Crates are perishable. Every iteration a crate loses:
+
+```text
+wear = CRATE_WEAR_RATE * (1 + CRATE_USE_WEAR_FACTOR * utilization)
+```
+
+where utilization is stored berries divided by total capacity. A busy crate
+wears out faster than an idle one. A crate whose durability reaches zero is
+lost.
+
+When `FEATURES.SPOILAGE` is true, berries above capacity spoil:
 
 ```text
 spoiled = max(0, berries - capacity)
@@ -265,70 +281,84 @@ berries -= spoiled
 ```
 
 If `STORED_SPOIL_RATE` is positive, stored berries also lose a whole number
-chosen by stochastic rounding. The default stored spoilage rate is zero: sealed
-storage keeps berries. With `FEATURES.SPOILAGE: false`, no berries spoil and
-storage has no preservation value. With `FEATURES.STORAGE: false` and spoilage
-on, every uneaten berry spoils, so a villager can only carry today's food.
+chosen by stochastic rounding. With `FEATURES.SPOILAGE: false`, storage has no
+preservation value. With `FEATURES.STORAGE: false`, every uneaten berry spoils.
 
-Wood wear is a real sink and is charged even when storage is disabled.
+## Decentralized price discovery and barter
 
-## Barter
+Barter is optional (`FEATURES.TRADE`). There is no global price and no money.
+Each villager has an integer `price_belief` in berries per wood, initialized
+near the village baseline opportunity cost with a small random offset and kept
+inside a configurable band around that baseline.
 
-Barter is optional (`FEATURES.TRADE`). It exchanges whole berries for whole
-wood at a whole-berry-per-wood price. There is no money.
+### Planning with beliefs
 
-Each living agent computes a whole-unit target stock:
-
-```text
-berry_target = max(FOOD_PER_ITERATION,
-                   min(storage_capacity, RESERVE_DAYS * FOOD_PER_ITERATION))
-wood_target  = min(MAX_WOOD_TARGET,
-                   ceil(RESERVE_DAYS * FOOD_PER_ITERATION
-                        * WOOD_PER_CONTAINER / BERRIES_PER_CONTAINER))
-```
-
-`wood_target` is zero unless storage and spoilage are both enabled. When
-spoilage is off, the berry target is the full reserve instead of being capped
-by storage. When an agent has less than one ration of berries, its
-`wood_target` is set to zero: a hungry villager is willing to sell storage wood
-to eat.
-
-The agent computes whole surpluses and deficits:
-
-- a berry surplus plus a wood deficit makes it a **berry seller**: it offers
-  `min(berry_surplus, wood_deficit * price)` berries, in whole-price bundles;
-- a wood surplus plus a berry deficit makes it a **wood seller**: it offers
-  `min(wood_surplus, ceil(berry_deficit / price))` wood;
-- a wood-rich agent below its own wood target can still sell storage wood to
-  cover a berry deficit, especially food.
-
-The market clears at the current whole price:
+A villager plans the day using its own `price_belief` and the latest observed
+commons density. The wood-versus-berries choice uses:
 
 ```text
-berry_supply = sum of berry offers
-wood_supply  = sum of wood offers
-berry_demand = wood_supply * price
-berry_traded = min(berry_supply, berry_demand)
-wood_traded  = berry_traded / price
+berry value/minute = berry_skill * density / BERRY_TIME_COST
+wood value/minute  = wood_skill * density * price_belief / WOOD_TIME_COST
 ```
 
-Sellers are paired at the current price. Every trade moves exactly
-`berries = wood * price` from the berry seller to the wood seller and `wood`
-in the opposite direction. Both goods are conserved.
+Carpentry is a third use of the day. A wood specialist first secures a small
+food floor, then finishes or advances a crate when raw wood is available, then
+chops or gathers with the remainder. Berry specialists cover food and the crate
+reserve before using spare minutes for carpentry or chopping.
 
-The model keeps a fractional `price` internally for smoothing, but all
-offers, trades, displays, and metrics use the rounded whole `trade_price`.
-The price used for this iteration's offers and trades is the one recorded in
-the metrics; the adjusted price is used from the next iteration.
+### Reservation prices
+
+At the start of the barter phase every living villager's start-of-tick belief
+is snapshotted. Reservations are computed from that snapshot, the villager's
+effective opportunity cost, and survival pressure:
 
 ```text
-imbalance = (berry_demand - berry_supply) / max(berry_demand, berry_supply)
-price = clip(price * (1 - PRICE_ADJUSTMENT * imbalance), MIN_PRICE, MAX_PRICE)
-trade_price = clip(round(price), MIN_PRICE, MAX_PRICE)
+wood seller min    = max(blend(opportunity, belief), subsistence) + urgency
+wood buyer max     = blend(opportunity, belief) + storage urgency
+crate seller min   = blend(crate opportunity, crate belief) + urgency
+crate buyer max    = blend(crate opportunity, crate belief) + urgency
 ```
 
-The sign is deliberate: when berries are scarce, one block of wood buys fewer
-berries, so the berries-per-wood ratio falls.
+The blend is mostly belief with a smaller opportunity-cost anchor. A wood
+buyer's maximum is also capped by its affordable berry surplus and its
+sustainable daily surplus, so stored wealth cannot bid the ongoing wood price
+above what daily production can support. Crate opportunities include the eight
+raw wood and the craft minutes valued at the villager's berry rate.
+
+### Bilateral matching
+
+The market square runs two order books, crates first and then raw wood:
+
+- sellers have a private minimum acceptable price and a whole-unit quantity;
+- buyers have a private maximum willingness to pay, a quantity, and a berry
+  budget;
+- sellers and buyers are shuffled and matched greedily.
+
+If `seller_min <= buyer_max`, the whole-unit trade clears at the integer
+midpoint:
+
+```text
+trade_price = (seller_min + buyer_max) // 2
+```
+
+Every trade moves whole goods and conserves them. Wood trades move
+`berries = wood * price`; crate trades move `berries = crates * crate_price`.
+The market price recorded in the header is the realized average integer price
+for the iteration, or the last observed market price when no trade occurred.
+
+### Information lag and gossip
+
+All reservations and trades use the start-of-tick beliefs. Belief updates are
+batched until the barter phase ends, so they take effect on tick `t + 1`:
+
+- traders move one berry toward their realized trade price;
+- other villagers who actually entered the market square move one gossip step
+  toward the average trade price;
+- a fully unmatched seller lowers its belief by one; a fully unmatched buyer
+  raises it by one, within the belief band and `[MIN_PRICE, MAX_PRICE]`.
+
+Villagers who did not enter the market do not receive gossip and do not change
+their beliefs.
 
 ## Gifting
 
@@ -354,7 +384,8 @@ until they wear out or spoil, so a death never silently deletes resources.
 3. Allocate the finite day using density-adjusted costs and gather; living
    agents are processed in random order, berries before wood within an agent.
 4. Optional need-based whole-berry gifts.
-5. Optional whole-unit barter, including the price update.
+5. Optional bilateral barter: crates first, then raw wood, using start-of-tick
+   beliefs; batch all belief and gossip updates for tick `t + 1`.
 6. Record each living agent's post-trade holdings.
 7. Eat and update health; log any deaths.
 8. Apply wood wear and berry spoilage to every agent, including the dead.
@@ -372,17 +403,19 @@ Let `B = sum(agent.berries) + commons_berries` and
 | Commons regeneration | **source** | **source** | Adds whole units up to `REGENERATION`, capped by `CAPACITY`. |
 | Gathering | moves + **sink** | moves + **sink** | Usable goods move from commons to the agent; extraction waste is a sink. |
 | Gift | conserved | unchanged | The giver loses exactly what the receiver gains. |
-| Barter | conserved | conserved | Whole berries and whole wood move in opposite directions at the agreed ratio. |
+| Barter | conserved | conserved | Whole berries move against whole wood or finished crates at agreed prices. |
+| Carpentry | unchanged | **sink** | Consumes `WOOD_PER_CONTAINER` raw wood and adds one finished crate. |
 | Eating | **sink** | unchanged | Living agents consume up to `FOOD_PER_ITERATION` whole berries. |
 | Spoilage | **sink** | unchanged | Whole berries above storage capacity, plus optional stored spoilage. |
-| Wood wear | unchanged | **sink** | Whole blocks lost to wear, including on dead agents. |
+| Raw wood wear | unchanged | **sink** | Whole blocks lost to wear, including on dead agents. |
+| Crate wear | unchanged | unchanged | Crates lose durability and can disappear as a separate storage stock. |
 | Death | unchanged | unchanged | Goods remain in the dead agent's inventory. |
 
 The exact invariants are:
 
 ```text
 ΔB = regenerated_berries - eaten - spoiled - commons_waste_berries
-ΔW = regenerated_wood - wood_decayed - commons_waste_wood
+ΔW = regenerated_wood - wood_decayed - wood_crafted - commons_waste_wood
 ```
 
 `tests/subsistence/test_conservation.py` enforces these every iteration,
@@ -395,8 +428,8 @@ Flags live under `FEATURES`:
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `GIFTING` | `false` | Need-based whole-berry gifts from the shared social utility. |
-| `TRADE` | `true` | Whole-unit barter at a whole-berry-per-wood price. |
-| `STORAGE` | `true` | Wood provides storage capacity. |
+| `TRADE` | `true` | Bilateral whole-unit barter in wood and finished crates at decentralized prices. |
+| `STORAGE` | `true` | Finished crates provide storage capacity. |
 | `SPOILAGE` | `true` | Unprotected berries spoil at the end of the iteration. |
 | `TRUST` | `false` | Reserved; enabling it currently raises an error. |
 | `RECIPROCITY` | `false` | Reserved; enabling it currently raises an error. |
@@ -418,36 +451,40 @@ The flags are independent. For example:
 `meta.world = "subsistence"`.
 
 - `meta` — generator, world, iterations, seed, agent count, feature flags,
-  health settings, the finite-day time costs, the storage container ratio,
-  resource definitions, initial commons and totals, the initial price, and the
-  full config.
+  health settings, finite-day time costs, crate crafting and wear settings,
+  belief bounds, resource definitions, initial commons and totals, the initial
+  market price, and the full config.
 - `agents` — id, label, colour, berry and wood skills, the `specialisation_z`
-  latent, time budget, time costs, base maximum daily yields, initial health,
-  and the storage container ratio.
+  latent, initial price belief, time budget, time costs, craft minutes, base
+  maximum daily yields, initial health, initial crates, and the storage
+  container ratio.
 - `ticks` — one row per iteration plus iteration zero. Each tick has summary
-  metrics, including `berries_commons_pct` and `wood_commons_pct`, and one
-  state per agent: whole health, berries, wood and storage capacity; the labour
-  split; density-adjusted `effective_berries_per_day` and
-  `effective_wood_per_day`; carried wood progress; planned berries and wood;
-  actual whole gathered berries and wood; whole post-trade holdings; and alive
-  status.
-- `events` — typed `gather`, `gift`, `trade`, `spoil`, and `death` records with
-  a tick, phase, sequence number, and stable id. Trades carry whole quantities
-  and the whole price; gather events carry the whole extracted amount and
-  waste.
+  metrics, including commons density, market price, beliefs, crate counts, and
+  crafting totals, and one state per agent: whole health, berries, raw wood,
+  crates with durability, storage capacity, crafting progress, price belief,
+  the berry/wood/craft labour split, density-adjusted effective yields, carried
+  wood progress, planned goods, actual gathered goods, post-trade holdings, and
+  alive status.
+- `events` — typed `gather`, `craft`, `gift`, `trade`, `spoil`, and `death`
+  records with a tick, phase, sequence number, and stable id. Trades carry the
+  goods type, whole quantities, and whole price; craft events carry the raw
+  wood consumed.
 
 The viewer reads this replay and never imports the model.
 
 ## Metrics
 
 The world records, among others: `alive`, `mean_health`, `total_berries`,
-`total_wood`, `commons_berries`, `commons_wood`, `berries_commons_pct`,
-`wood_commons_pct`, `gini_berries`, `gini_wood`, `barter_price`,
-`berries_gathered`, `wood_gathered`, `berries_eaten`, `unmet_food`,
-`berries_spoiled`, `wood_decayed`, `commons_waste_berries`,
-`commons_waste_wood`, `storage_capacity`, `storage_used`,
-`storage_utilization`, `trade_berries`, `trade_wood`, `gifts`, `gift_berries`,
-`specialisation`, `ppf_efficiency`, and `extinction_iteration`.
+`total_wood`, `total_crates`, `crate_durability`, `crates_crafted`,
+`crates_worn`, `wood_crafted`, `commons_berries`, `commons_wood`,
+`berries_commons_pct`, `wood_commons_pct`, `gini_berries`, `gini_wood`,
+`barter_price`, `last_crate_price`, `mean_price_belief`, `market_participants`,
+`market_traders`, `failed_trades`, `berries_gathered`, `wood_gathered`,
+`berries_eaten`, `unmet_food`, `berries_spoiled`, `wood_decayed`,
+`commons_waste_berries`, `commons_waste_wood`, `storage_capacity`,
+`storage_used`, `storage_utilization`, `trade_berries`, `trade_wood`,
+`crate_trades`, `trade_crates`, `gifts`, `gift_berries`, `specialisation`,
+`ppf_efficiency`, and `extinction_iteration`.
 
 `ppf_efficiency` compares the berry value of actual gathering with the berry
 value of the planned labour at the current whole price. A value below 1 means
@@ -455,23 +492,27 @@ the commons limited the plan.
 
 ## Invariants
 
-1. Agent berries, agent wood, the commons stocks, and health never become
-   negative, and berries, wood, storage capacity, and health are whole numbers.
+1. Agent berries, raw wood, crates, the commons stocks, and health never become
+   negative, and berries, wood, crate counts, storage capacity, and health are
+   whole numbers.
 2. Health stays within `[0, MAX_HEALTH]`.
-3. Labour spent on berries and wood never exceeds the agent's finite day.
-4. `wood_progress` is fractional, stays in `[0, 1)`, and carries between
-   iterations; it is never counted as stored wood.
+3. Labour spent on berries, wood, and crafting never exceeds the agent's finite
+   day.
+4. `wood_progress` and `craft_progress` are fractional and carry between
+   iterations; craft progress is not counted as a finished crate.
 5. `berries_commons_pct` and `wood_commons_pct` stay in `[0, 1]`, and effective
    minute costs use `max(density, MIN_DENSITY)` so they remain finite.
-6. Total berries and total wood change only by the sources and sinks in the
-   ledger above.
-7. Gifts and trades conserve both goods.
-8. Dead agents do not participate in gathering, gifting, trade, or eating.
-9. The barter price stays within `[MIN_PRICE, MAX_PRICE]` and is a whole
-   number of berries per wood.
-10. Storage capacity is
-    `(wood * BERRIES_PER_CONTAINER) // WOOD_PER_CONTAINER` while storage is
+6. Total berries and total raw wood change only by the sources and sinks in the
+   ledger above; carpentry consumes raw wood and creates a crate.
+7. Gifts and trades conserve both goods; crate trades conserve crates and
+   berries.
+8. Dead agents do not participate in gathering, crafting, gifting, trade, or
+   eating.
+9. Every agent's price belief stays within `[MIN_PRICE, MAX_PRICE]` and within
+   the configured baseline band. Trade prices are whole berries per unit.
+10. Storage capacity is `crate_count * BERRIES_PER_CONTAINER` while storage is
     enabled, and zero otherwise.
+11. Crate durability stays in `(0, 1]`; crates at zero durability are removed.
 
 ## Open decisions
 
@@ -480,5 +521,6 @@ the commons limited the plan.
 - Whether stored berries should spoil slowly by default.
 - How to port reciprocity and trust into a shared utility that works for both
   goods and money.
-- Whether agents should learn their comparative advantage rather than read the
-  current price directly.
+- Whether agents should learn their comparative advantage rather than read
+  their current price belief directly.
+- How crate durability should vary by material or craft skill.
