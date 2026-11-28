@@ -29,6 +29,11 @@ in winter. Commons stocks and regeneration also scale with the number of agents
 relative to a 10-agent baseline, so 50- and 100-agent runs keep a comparable
 per-villager ecology.
 
+A 50-villager, 5,000-iteration run is recorded in
+[`../../docs/EMERGENT_FINDINGS.md`](../../docs/EMERGENT_FINDINGS.md), with a
+60-second video of one full year and the measured cold-start, winter, crate, and
+division-of-labour findings.
+
 ## Run it
 
 ```bash

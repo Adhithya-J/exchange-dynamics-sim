@@ -139,6 +139,40 @@ The money world keeps its own flags (`GIFTING.ENABLED`, `MARKET.ENABLED`,
 `SOCIAL.RECIPROCITY_ENABLED`, `TRUST.ENABLED`, `SHOCKS.ENABLED`) in
 `worlds/money/config.yaml`. Gifting is off there by default too.
 
+## What emerged
+
+A 50-villager, 5,000-iteration run with the default flags is recorded as a
+60-second video of one full year, with the details in
+[`docs/EMERGENT_FINDINGS.md`](docs/EMERGENT_FINDINGS.md).
+
+[![The village in spring](docs/subsistence-year-poster.png)](docs/subsistence-year.webm)
+
+- **The cold start filters, not winter.** All 20 villagers with berry skill
+  below 0.60 die, 19 of them in the first spring, and the village then
+  stabilises at 26 survivors through iteration 5,000. Only 3 deaths happen in
+  winter.
+- **Winter is a granary, not a massacre.** Zero berry regrowth is survivable
+  because the commons carries stock through; wood prices rise from about 9.5 to
+  11.2 berries.
+- **The crate market saturates.** The village holds 51 crates across 26
+  survivors at iteration 4057 and trades none that year, so carpentry is a
+  replacement trade rather than a growth trade.
+- **Thin wood demand bounds the division of labour.** The marginal chopper
+  cannot sell enough wood to buy a day's ration, which is why deep specialists
+  go first and why credit or gifts are the natural next experiment.
+- **Fractional chopping is deterministic.** Work on the next block carries
+  between days and never banks a windfall; blocked plans appear as
+  `wood_blocked`.
+
+To record the video again:
+
+```bash
+python -m worlds.subsistence --agents 50 --iterations 5000 \
+  --replay replay-50.json.gz
+node worlds/subsistence/viewer/capture.mjs --replay replay-50.json.gz \
+  --out docs/subsistence-year.webm --from 1 --to 181 --seconds 60
+```
+
 ## The production possibilities chart
 
 Press **P** or the **PPF** button to expand the chart. It shows the selected
@@ -170,6 +204,18 @@ their durability, shared berry bushes and forest, villagers walking out to pick,
 chop, or craft, bilateral barter tokens, price beliefs, credit flows, spoilage,
 and deaths. The side panel explains the iconography and lists each iteration's
 gather, craft, gift, trade, credit, shock, spoilage, and death events.
+
+To record the village as a video, use the Playwright capture script:
+
+```bash
+node worlds/subsistence/viewer/capture.mjs \
+  --replay replay-subsistence.json.gz \
+  --out docs/subsistence-year.webm --from 1 --to 181 --seconds 60
+```
+
+It serves the viewer and replay locally, pauses playback, and walks the
+timeline at a fixed rate while recording. `--width` and `--height` set the
+frame size; `--no-trim` keeps the raw Playwright recording.
 
 The village is drawn as huts scattered in rings around the central market, with
 berry bushes on one side, worked forest on the other, and a pale wild forest
