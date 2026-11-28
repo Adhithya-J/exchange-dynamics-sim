@@ -1,0 +1,220 @@
+# Goods-only subsistence world.
+#
+# Agents start with nothing, gather whole berries and wood from a shared
+# commons, eat, store food, and optionally barter. There is no money and no
+# unit of account: the trade price is only a whole-berry-per-wood ratio.
+
+SIMULATION:
+  AGENTS: 10
+  ITERATIONS: 1000
+  RANDOM_SEED: 42
+
+# Feature switches. A world composes only the layers that are enabled here.
+FEATURES:
+  # Direct transfers between agents. Off by default; see the GIFTING section.
+  GIFTING: false
+  # Bilateral barter in the central market square.
+  TRADE: true
+  # Deferred-payment loans of wood or berries. Off by default.
+  CREDIT: false
+  # Finished crates provide storage capacity for berries.
+  STORAGE: true
+  # Berries held outside storage spoil at the end of the iteration.
+  SPOILAGE: true
+  # Public credit reputation. Auto-enabled by CREDIT and RECIPROCITY.
+  TRUST: false
+  # Soft, zero-interest gift obligations. Auto-enables GIFTING and TRUST.
+  RECIPROCITY: false
+  # Temporary commons regeneration shocks.
+  SHOCKS: false
+
+AGENTS:
+  # Skills come from one shared specialisation latent z, drawn uniformly from
+  # [-SKILL_Z_RANGE, SKILL_Z_RANGE]. A high z is a berry specialist; a low z
+  # is a wood specialist. The two skills are therefore negatively correlated.
+  #
+  #   berry_skill = clip(BERRY_INTERCEPT + BERRY_SLOPE * z, BERRY_SKILL_RANGE)
+  #   wood_skill  = clip(WOOD_INTERCEPT  + WOOD_SLOPE  * z, WOOD_SKILL_RANGE)
+  #
+  # With the defaults this gives roughly 3-15 berries/day and 0.4-1.2
+  # wood/day. The wood spread is deliberately lower so top choppers do not
+  # strip the forest immediately.
+  SKILL_Z_RANGE: 2.0
+  BERRY_INTERCEPT: 0.85
+  BERRY_SLOPE: 0.35
+  WOOD_INTERCEPT: 1.05
+  WOOD_SLOPE: -0.25
+  BERRY_SKILL_RANGE: [0.30, 1.50]
+  WOOD_SKILL_RANGE: [0.45, 1.45]
+  # One iteration is a finite working day.
+  TIME_PER_ITERATION: 100.0
+  # Minutes of work per whole berry at skill 1.
+  BERRY_TIME_COST: 10.0
+  # Minutes of work per whole wood at skill 1. Chopping is much slower.
+  WOOD_TIME_COST: 120.0
+  # Health is a short whole-day food buffer. Full health survives only a few
+  # missed days, so early ration shortfalls create real scarcity.
+  MAX_HEALTH: 4
+  STARTING_HEALTH: 4
+  # Berries needed for a full day's food.
+  FOOD_PER_ITERATION: 6
+  HEAL_PER_MEAL: 1
+  STARVATION_RATE: 1
+  STARTING_BERRIES: 10
+  STARTING_WOOD: 0
+  # One starter crate gives villagers enough storage to save food and wood
+  # while they work toward their first crafted crate.
+  STARTING_CRATES: 1
+  # How many days of food an agent tries to keep after eating, subject to
+  # storage capacity. Two days is a small reserve: two crates hold it without
+  # being filled to the brim.
+  RESERVE_DAYS: 2
+  # Refill storage only after the reserve falls below this fraction of the
+  # target. Between refills the villager spends whole days on wood or carpentry
+  # instead of topping up a few berries every single day.
+  REFILL_FRACTION: 0.5
+  # Random per-villager variation in preferred reserve days, as a fraction.
+  # This stops every villager from holding exactly the same stock.
+  RESERVE_JITTER: 0.15
+  # How many extra units an agent produces beyond its own target when it is
+  # specialising for trade.
+  TRADE_SURPLUS: 1
+  # Raw wood kept back as a replacement reserve, in crates' worth of material.
+  # A villager with two crates still chops toward one spare crate's wood.
+  WOOD_RESERVE_CRATES: 1
+  # Upper bound on the raw wood an agent deliberately keeps for crafting and
+  # trade.
+  MAX_WOOD_TARGET: 20
+  # Finished crates an agent tries to keep for its own berry reserve.
+  MAX_CRATES_TARGET: 2
+  # Taste noise on the per-minute value of berries versus wood. Each day the
+  # villager draws a log-normal shock, so choices vary slightly around the
+  # rational comparison.
+  CHOICE_NOISE: 0.25
+  # Chance per day of an epsilon-greedy experiment: swap the preferred
+  # berry/wood activity or defer a non-urgent craft.
+  EXPLORATION_RATE: 0.08
+
+# Shared natural stocks. Stocks and harvests are whole units. Berry bushes
+# regrow steadily; wood regrows much more slowly. Gathering time scales with
+# the current density of each stock: sparse commons cost more travel/search
+# minutes per unit.
+COMMONS:
+  # Floor on density so effective costs never divide by zero. At the floor,
+  # search costs ten times the full-commons base cost.
+  MIN_DENSITY: 0.10
+  BERRIES:
+    INITIAL: 2000
+    CAPACITY: 3000
+    REGENERATION: 120.0
+    EXTRACTION_EFFICIENCY: 1.0
+  WOOD:
+    INITIAL: 80
+    CAPACITY: 120
+    REGENERATION: 1.0
+    EXTRACTION_EFFICIENCY: 1.0
+
+STORAGE:
+  # Eight raw wood blocks are crafted into one crate, and one crate stores ten
+  # berries. Raw wood itself is only material, not storage.
+  WOOD_PER_CONTAINER: 8
+  BERRIES_PER_CONTAINER: 10
+  # A crate takes this many minutes at wood_skill 1. A skilled woodworker
+  # builds one in about a day; a weak one takes two or three days.
+  BASE_CRAFT_MINUTES: 100.0
+  # Durability lost by each crate every iteration. A crate starts at 1.0.
+  CRATE_WEAR_RATE: 0.01
+  # Additional wear multiplier at full storage utilization. Busy crates wear
+  # faster than idle ones.
+  CRATE_USE_WEAR_FACTOR: 1.0
+  # Raw wood is durable; set a positive chance only for a control run.
+  WOOD_DECAY_CHANCE: 0.0
+  # Fraction of stored berries lost each iteration. Zero means sealed storage.
+  STORED_SPOIL_RATE: 0.0
+
+# Deferred-payment credit. Loans move whole goods now; the borrower promises
+# to return the same good (plus interest in market mode) by a due date.
+# MODE "reciprocal" is a zero-interest, trust/collateral-gated loan.
+# MODE "market" prices default risk into a goods-denominated interest rate.
+CREDIT:
+  MODE: reciprocal
+  # How many iterations a loan runs before repayment is due.
+  TERM_DAYS: 20
+  # Extra iterations allowed before a missed payment becomes a default.
+  GRACE_DAYS: 2
+  # Maximum principal in whole units for each loan good.
+  MAX_WOOD_PRINCIPAL: 8
+  MAX_BERRY_PRINCIPAL: 6
+  MAX_CRATE_PRINCIPAL: 1
+  # Lenders keep this much of their own stock before lending.
+  LENDER_WOOD_BUFFER: 2
+  LENDER_BERRY_BUFFER: 2
+  # Always keep at least this many crates before lending crate capacity.
+  LENDER_CRATE_RESERVE: 1
+  # Reciprocal loans require this trust level unless a crate is pledged.
+  MIN_TRUST: 0.40
+  # Market loans require at least this much trust; risk is priced above it.
+  MIN_MARKET_TRUST: 0.30
+  # Concurrent loan limits per side.
+  MAX_LOANS_PER_BORROWER: 2
+  MAX_LOANS_PER_LENDER: 3
+  # A borrower may owe at most this fraction of expected production over the
+  # loan term, so a loan is not obviously unrepayable.
+  REPAYMENT_CAPACITY_FRACTION: 0.80
+  # Market-mode interest: base spread, risk premium, and bounds.
+  BASE_INTEREST: 0.05
+  RISK_PREMIUM: 0.75
+  MIN_INTEREST: 0.02
+  MAX_INTEREST: 0.75
+  # Pledged crates reduce the risk premium by at most this fraction.
+  COLLATERAL_DISCOUNT: 0.50
+
+TRADE:
+  # Fallback baseline when agents have no usable opportunity costs.
+  INITIAL_PRICE: 5
+  # Individual price beliefs are whole berries per wood, clamped here.
+  MIN_PRICE: 1
+  MAX_PRICE: 20
+  # Random +/- offset applied to the village baseline at initialization.
+  BELIEF_NOISE: 1
+  # How far an observer moves toward the latest market gossip, in berries.
+  GOSSIP_STEP: 1
+  # Beliefs are allowed to discover inside this band around the initial
+  # village baseline, while remaining inside [MIN_PRICE, MAX_PRICE].
+  BELIEF_BAND: 3
+  # Safe upper bound for a whole crate price in berries.
+  MAX_CRATE_PRICE: 400
+
+GIFTING:
+  PROBABILITY: 0.25
+  # Whole berries per gift.
+  AMOUNT_RANGE: [1, 3]
+  MIN_RESERVE: 2
+
+# Public credit reputation. Enabled automatically by CREDIT and RECIPROCITY.
+TRUST:
+  DEFAULT: 0.50
+  GAIN: 0.08
+  LOSS: 0.25
+  # Fraction of the gap back to DEFAULT removed each iteration. Zero keeps
+  # reputation sticky.
+  DECAY: 0.0
+
+# Reciprocal gifts. A gift still moves berries immediately, but it also
+# creates a soft zero-interest obligation. The receiver repays it when it can
+# afford to, so this is the low-commitment end of the credit spectrum.
+RECIPROCITY:
+  # Whole berries above today's meal that a debtor may use to repay a gift.
+  REPAY_THRESHOLD: 2
+  # Ignore gifts smaller than this when creating an obligation.
+  MIN_GIFT: 1
+  # Cap outstanding soft-gift berries per receiver.
+  MAX_OUTSTANDING: 6
+
+# Temporary commons shocks. A shock reduces regeneration for a few iterations.
+SHOCKS:
+  PROBABILITY: 0.04
+  # Inclusive whole-day duration range.
+  DURATION_RANGE: [3, 8]
+  BERRY_REGEN_FACTOR: 0.40
+  WOOD_REGEN_FACTOR: 0.60

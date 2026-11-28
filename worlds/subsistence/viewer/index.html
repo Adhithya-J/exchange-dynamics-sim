@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Subsistence - Exchange Dynamics</title>
+  <link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="masthead">
+      <div class="brand-name">Subsistence</div>
+      <div class="brand-subtitle">Berries, wood, and the production frontier</div>
+    </div>
+    <div class="story" id="story">A village with nothing but its skills.</div>
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-label">Iteration</div>
+        <div class="stat-value"><span id="statIteration">0</span></div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Alive</div>
+        <div class="stat-value" id="statAlive">0</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Mean health</div>
+        <div class="stat-value" id="statHealth">0.0</div>
+      </div>
+      <div class="stat" title="Relative barter price: how many berries one unit of wood buys">
+        <div class="stat-label">Barter price</div>
+        <div class="stat-value" id="statPrice">0.00</div>
+        <div class="stat-note">berries / wood</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Commons</div>
+        <div class="stat-value" id="statCommons">0%</div>
+        <div class="stock-meter"><i id="commonsBar"></i></div>
+        <div class="stat-note" id="statCommonsNote">berries / wood</div>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button class="icon-btn open-btn" id="openReplayBtn" aria-label="Open a replay file" title="Open a replay file">Open replay</button>
+      <button class="icon-btn" id="ppfBtn" aria-label="Open the production possibilities chart" title="Production possibilities (P)">PPF</button>
+      <button class="icon-btn" id="helpBtn" aria-label="How to read this view" title="How to read this view">?</button>
+    </div>
+    <input type="file" id="replayFile" accept=".json,.gz,application/json" hidden>
+  </header>
+
+  <main class="layout">
+    <section class="world-wrap" id="worldWrap">
+      <canvas id="world" tabindex="0" aria-label="A village of huts around a barter square, ringed by berry bushes and forest"></canvas>
+      <div class="world-note" id="worldNote">Click a villager to inspect them</div>
+      <div class="tooltip" id="tooltip"></div>
+    </section>
+
+    <aside class="side">
+      <section class="panel">
+        <details class="legend-details">
+          <summary class="panel-title">The village <span class="panel-note">legend</span></summary>
+          <div class="legend-body">
+            <div class="legend-row"><span class="ico health"></span><span><b>Health ring.</b> Full health is only a four-day buffer. A day short of food drains it; a full ration restores it.</span></div>
+            <div class="legend-row"><span class="ico berries"></span><span><b>Berry basket.</b> Food. Berries not eaten and not inside storage spoil at the end of the iteration.</span></div>
+            <div class="legend-row"><span class="ico wood"></span><span><b>Raw wood.</b> Material for carpentry, not storage. Eight blocks make one crate.</span></div>
+            <div class="legend-row"><span class="ico crate"></span><span><b>Crate.</b> Eight raw wood plus about a day of skilled carpentry. One crate stores ten berries and wears out faster when full.</span></div>
+            <div class="legend-row"><span class="ico worker"></span><span><b>Villagers.</b> Little figures walk out to a bush or tree and work the commons. A full day is finite, and chopping wood is much slower than picking berries. Sparse commons means more walking between stops.</span></div>
+            <div class="legend-row"><span class="ico commons"></span><span><b>Commons.</b> Berry bushes on the left and forest on the right are shared, depletable stocks. As they thin, each unit takes longer to find; wood regrows much more slowly.</span></div>
+            <div class="legend-row"><span class="ico trade"></span><span><b>Barter.</b> Berries and wood cross in the central square at the current relative price.</span></div>
+            <div class="legend-row"><span class="ico trade"></span><span><b>Credit.</b> A loan moves wood, berries, or a crate now and returns the same good later. Reciprocal loans charge no interest; market loans price default risk.</span></div>
+          </div>
+        </details>
+      </section>
+
+      <section class="panel" id="selectedPanel"></section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-title">This iteration</div>
+          <div class="panel-note" id="feedTick">iter 0</div>
+        </div>
+        <div class="feed" id="feed"></div>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="timeline">
+    <div class="transport">
+      <button class="transport-btn" id="rewindBtn" aria-label="Back to start" title="Back to start">
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2v8M10 2 4 6l6 4V2Z" fill="currentColor"/></svg>
+      </button>
+      <button class="transport-btn" id="prevBtn" aria-label="Previous iteration" title="Previous iteration (left arrow)">
+        <svg width="10" height="10" viewBox="0 0 12 12" aria-hidden="true"><path d="M9 2 3 6l6 4V2Z" fill="currentColor"/></svg>
+      </button>
+      <button class="transport-btn play" id="playBtn" aria-label="Play animation" title="Play or pause (space)">
+        <svg id="playIcon" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 1.5v9L10.5 6 3 1.5Z" fill="currentColor"/></svg>
+      </button>
+      <button class="transport-btn" id="nextBtn" aria-label="Next iteration" title="Next iteration (right arrow)">
+        <svg width="10" height="10" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 2l6 4-6 4V2Z" fill="currentColor"/></svg>
+      </button>
+      <button class="transport-btn speed-btn" id="speedBtn" aria-label="Playback speed" title="Change playback speed">4x</button>
+      <div class="readout"><span id="readout">0</span> <span class="muted" id="readoutTotal">/ 0</span></div>
+      <div class="transport-spacer"></div>
+      <div class="hint">space to play - arrows to step - P for the PPF chart</div>
+    </div>
+    <input class="scrub" id="scrub" type="range" min="0" max="0" step="1" value="0" aria-label="Iteration timeline">
+  </footer>
+</div>
+
+<div class="modal-backdrop" id="ppfModal" role="dialog" aria-modal="true" aria-labelledby="ppfTitle">
+  <div class="ppf-card">
+    <div class="ppf-head">
+      <div>
+        <div class="ppf-kicker">Production possibilities</div>
+        <h2 id="ppfTitle">Villager</h2>
+        <p class="ppf-sub" id="ppfSub">The frontier is the most a villager can gather with one labour budget.</p>
+      </div>
+      <div class="ppf-actions">
+        <label class="ppf-check"><input type="checkbox" id="ppfZoom"> Zoom to frontier</label>
+        <label class="ppf-check"><input type="checkbox" id="ppfAll"> Show all villagers</label>
+        <button class="ppf-close" id="ppfClose">Close</button>
+      </div>
+    </div>
+    <svg id="ppfChart" viewBox="0 0 900 560" role="img" aria-label="Production possibilities frontier chart"></svg>
+    <div class="ppf-legend" id="ppfLegend"></div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+  <div class="help-card">
+    <div class="help-kicker">A visual replay of a recorded run</div>
+    <h2 id="helpTitle">How to read Subsistence</h2>
+    <p>This page replays the simulation. It does not change the rules or the numbers. Every villager is an agent from the recorded run.</p>
+    <ol>
+      <li><b>Health is a food buffer.</b> Full health survives only four days without food. A day with a full ration restores one point; a day short of food drains it. Missing the six-berry ration creates immediate scarcity.</li>
+      <li><b>Berries are food.</b> A villager eats every iteration. Berries outside a storage crate spoil at the end of the iteration.</li>
+      <li><b>Crates are capital.</b> Eight raw wood plus about one day of skilled carpentry make a crate, which stores ten berries. Raw wood is material, not storage. Crates are perishable and wear faster when full. Villagers keep a small food reserve and one spare crate's worth of raw wood instead of filling every crate.</li>
+      <li><b>Prices are discovered.</b> Every villager has an integer price belief in berries per wood. Bilateral bargains clear at the integer midpoint of seller and buyer reservations; gossip updates beliefs with a one-tick lag. There is no global price. Choices also carry a small daily taste shock, so villagers occasionally try the other activity.</li>
+      <li><b>Credit is optional.</b> A loan moves wood, berries, or crate capacity now for a promise of the same good later. Reciprocal credit charges no interest and relies on trust or collateral. Market credit prices the borrower's default risk into a goods-denominated interest rate; crate-capacity loans are secured by the lent crate and stay interest-free. A missed payment first uses a grace period, then seizes pledged crates and the borrower's stock.</li>
+      <li><b>Gifts can be reciprocal.</b> A plain gift is one-way. With reciprocity enabled it also creates a soft zero-interest obligation that the receiver repays when it has berries above its meal. That is the low-commitment end of the credit spectrum.</li>
+      <li><b>Shocks are optional.</b> A drought temporarily reduces berry and wood regeneration, so the same labour yields less until it passes.</li>
+      <li><b>Sparse commons costs time.</b> Gathering and chopping minutes rise as bushes and trees thin. Villagers walk between several sparse sites, and the production possibilities frontier contracts with the harvest density shown in the inspector.</li>
+      <li><b>Skills differ.</b> Berry skill and wood skill set each villager's production possibilities frontier. A steep frontier means a villager gives up a lot of berries to chop one wood.</li>
+      <li><b>Barter is relative.</b> There is no money. The header shows the realized market price; the inspector shows each villager's belief and the PPF uses that belief for its price line.</li>
+      <li><b>The commons is shared.</b> Berry bushes and forest thin when everyone gathers and recover as they regenerate. A depleted commons limits everyone.</li>
+      <li><b>Explore.</b> Press <b>space</b> to play or pause, use the arrows to step, drag the timeline to scrub, click a villager, and press <b>P</b> or the <b>PPF</b> button to expand the production possibilities chart.</li>
+    </ol>
+    <p class="fine">Iteration order: optional shock roll, repay due credit and soft gifts, regenerate the commons, allocate the day across berries, wood, and carpentry, optional gifts, bilateral barter, originate new credit, eat, then crate wear and berry spoilage. Berries, wood, and crates are always whole units.</p>
+    <button class="help-close" id="helpClose">Got it</button>
+  </div>
+</div>
+
+<p class="sr-only" id="liveStatus" aria-live="polite">Simulation replay loaded.</p>
+
+<script id="inline-replay">/*__INLINE_REPLAY__*/</script>
+<script src="replay-loader.js"></script>
+<script src="viewer.js"></script>
+</body>
+</html>

@@ -9,7 +9,9 @@ from main import CONFIG, ResourceSimulation
 
 
 def make_config() -> dict:
-    return deepcopy(CONFIG)
+    config = deepcopy(CONFIG)
+    config["GIFTING"]["ENABLED"] = True
+    return config
 
 
 def trust_config(agents: int = 2, initial_resources: float = 100.0) -> dict:
@@ -41,6 +43,14 @@ def trust_config(agents: int = 2, initial_resources: float = 100.0) -> dict:
             "DELAY": 0,
             "BIAS": 0.0,
             "PUBLIC_WEIGHT": 0.5,
+        }
+    )
+    config["SOCIAL"].update(
+        {
+            "RECIPROCITY_ENABLED": True,
+            "REPAY_PROBABILITY": 1.0,
+            "REPAY_DELAY": 0,
+            "REPAY_FRACTION": 1.0,
         }
     )
     return config
@@ -83,11 +93,11 @@ class TestTrustUpdates:
         }
         assert all(agent.beliefs == {} for agent in simulation.agents)
 
-    def test_transfer_raises_private_belief_and_public_reputation(self):
+    def test_repayment_raises_private_belief_and_public_reputation(self):
         simulation = ResourceSimulation(trust_config())
         simulation.initialize_agents()
 
-        simulation.run_iteration()
+        simulation.run(iterations=2)
 
         metrics = simulation.metrics_history[-1]
         assert metrics["trust_observations"] >= 1
@@ -106,7 +116,7 @@ class TestTrustUpdates:
         simulation = ResourceSimulation(config)
         simulation.initialize_agents()
 
-        simulation.run_iteration()
+        simulation.run(iterations=2)
 
         for agent in simulation.agents:
             for other_id, belief in agent.beliefs.items():
@@ -118,7 +128,7 @@ class TestTrustUpdates:
         simulation = ResourceSimulation(config)
         simulation.initialize_agents()
 
-        simulation.run_iteration()
+        simulation.run(iterations=2)
 
         assert all(value < 0.5 for value in simulation.reputation.values())
 
@@ -131,7 +141,7 @@ class TestTrustUpdates:
         simulation.run(iterations=1)
         assert all(value == 0.5 for value in simulation.reputation.values())
 
-        simulation.run(iterations=2)
+        simulation.run(iterations=3)
         assert all(value > 0.5 for value in simulation.reputation.values())
 
     def test_decay_returns_values_to_the_prior(self):

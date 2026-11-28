@@ -1,5 +1,12 @@
 # Society Is Built on Trust
 
+> **Scope note.** This document describes the trust and reciprocity research
+> layer. In the current repository it is exercised by the money world in
+> `worlds/money/`. The goods-only subsistence world keeps these mechanisms out
+> of its core; gifting already lives in `utils/social.py`, and reciprocity and
+> trust are intended to become shared social utilities that both worlds can
+> compose.
+
 ## Core idea
 
 People navigate limited resources, uncertainty, and dependence on others. Trust

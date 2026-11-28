@@ -37,6 +37,17 @@ def market_config(agents: int = 2, initial_resources: float = 100.0) -> dict:
             "CONSUMPTION_RANGE": (0.0, 0.0),
         }
     )
+    # Keep the market tests focused on trade; commons extraction has its own
+    # tests below.
+    config["COMMONS"].update(
+        {
+            "INITIAL_GOODS": 0.0,
+            "CAPACITY": 0.0,
+            "REGENERATION": 0.0,
+            "EXTRACTION_LIMIT": 0.0,
+            "FUND_REDISTRIBUTION": 0.0,
+        }
+    )
     return config
 
 
@@ -118,7 +129,30 @@ class TestMarketCycle:
         assert metrics["goods_produced"] == 0.0
         assert metrics["goods_traded"] == 0.0
         assert metrics["unmet_demand"] == 3.0
-        assert math.isclose(money_total(simulation), 300.0)
+        assert metrics["living_cost_due"] == 6.0
+        assert metrics["living_cost_paid"] == 6.0
+        assert metrics["commons_fund"] == 6.0
+        assert math.isclose(metrics["total_money"], 300.0)
+        assert math.isclose(money_total(simulation), 294.0)
+
+    def test_unmet_demand_charges_the_subsistence_penalty(self):
+        config = market_config(agents=1)
+        config["MARKET"]["CONSUMPTION_RANGE"] = (1.0, 1.0)
+        config["MARKET"]["PRODUCTION_RANGE"] = (0.0, 0.0)
+        config["MARKET"]["UNMET_DEMAND_PENALTY"] = 2.0
+        simulation = ResourceSimulation(config)
+        simulation.initialize_agents()
+        agent = simulation.agents[0]
+
+        simulation.run_iteration()
+
+        metrics = simulation.metrics_history[-1]
+        assert metrics["unmet_demand"] == 1.0
+        assert metrics["living_cost_due"] == 2.0
+        assert metrics["living_cost_paid"] == 2.0
+        assert metrics["commons_fund"] == 2.0
+        assert metrics["total_money"] == 100.0
+        assert agent.resources == 98.0
 
     def test_buyers_never_spend_below_the_resource_floor(self):
         config = market_config()
@@ -162,12 +196,183 @@ class TestMarketCycle:
 
         simulation.run(iterations=10)
 
-        assert math.isclose(money_total(simulation), 600.0)
+        previous_money = 600.0
         previous_goods = 0.0
         for metrics in simulation.metrics_history:
+            assert math.isclose(metrics["total_money"], previous_money)
             expected = previous_goods + metrics["goods_produced"] - metrics["goods_consumed"]
             assert math.isclose(metrics["goods_total"], expected)
             previous_goods = metrics["goods_total"]
+
+    def test_buyers_keep_back_the_fixed_living_cost(self):
+        config = market_config()
+        config["AGENTS"]["LIVING_COST"] = 3.0
+        simulation = ResourceSimulation(config)
+        simulation.initialize_agents()
+        buyer, seller = simulation.agents
+        buyer.resources = 10.0
+        buyer.consumption_need = 10.0
+        seller.production_rate = 10.0
+        seller.consumption_need = 0.0
+
+        simulation._run_market_cycle()
+
+        assert buyer.resources == 3.0
+        assert seller.resources == 107.0
+
+    def test_seller_income_respects_the_receiving_ceiling(self):
+        config = market_config()
+        config["AGENTS"]["MAX_RESOURCES_AFTER_RECEIVING"] = 10.0
+        simulation = ResourceSimulation(config)
+        simulation.initialize_agents()
+        buyer, seller = simulation.agents
+        buyer.resources = 10.0
+        buyer.consumption_need = 10.0
+        seller.resources = 9.0
+        seller.production_rate = 10.0
+        seller.consumption_need = 0.0
+
+        simulation.run_iteration()
+
+        metrics = simulation.metrics_history[-1]
+        assert metrics["goods_traded"] == 1.0
+        assert seller.resources == 10.0
+        assert metrics["commons_fund"] == 9.0
+
+    def test_buyers_refuse_goods_priced_above_their_value(self):
+        config = market_config()
+        config["MARKET"]["PRICE"] = 3.0
+        config["MARKET"]["UNMET_DEMAND_PENALTY"] = 2.0
+        simulation = ResourceSimulation(config)
+        simulation.initialize_agents()
+        buyer, seller = simulation.agents
+        buyer.consumption_need = 1.0
+        seller.production_rate = 5.0
+
+        simulation.run_iteration()
+
+        metrics = simulation.metrics_history[-1]
+        assert metrics["goods_traded"] == 0.0
+        assert metrics["unmet_demand"] == 1.0
+
+    def test_sellers_hold_goods_below_their_reservation_price(self):
+        config = market_config()
+        config["MARKET"]["PRICE"] = 1.0
+        config["MARKET"]["SELLER_RESERVATION_PRICE"] = 2.0
+        simulation = ResourceSimulation(config)
+        simulation.initialize_agents()
+        buyer, seller = simulation.agents
+        buyer.consumption_need = 1.0
+        seller.production_rate = 5.0
+
+        simulation.run_iteration()
+
+        metrics = simulation.metrics_history[-1]
+        assert metrics["goods_traded"] == 0.0
+        assert metrics["unmet_demand"] == 1.0
+
+    def test_price_rises_when_demand_exceeds_supply(self):
+        config = market_config(agents=2)
+        config["MARKET"]["CONSUMPTION_RANGE"] = (1.0, 1.0)
+        config["MARKET"]["PRODUCTION_RANGE"] = (0.0, 0.0)
+        simulation = ResourceSimulation(config)
+        simulation.initialize_agents()
+
+        simulation.run_iteration()
+
+        assert simulation.metrics_history[-1]["price"] == 1.0
+        assert simulation.price > 1.0
+
+
+class TestCommonsExtraction:
+    def commons_config(self, agents: int = 2) -> dict:
+        config = market_config(agents)
+        config["COMMONS"].update(
+            {
+                "INITIAL_GOODS": 10.0,
+                "CAPACITY": 10.0,
+                "REGENERATION": 0.0,
+                "EXTRACTION_EFFICIENCY": 0.5,
+                "EXTRACTION_LIMIT": 5.0,
+                "EXTRACTION_COST": 1.0,
+            }
+        )
+        return config
+
+    def test_high_market_price_makes_agents_extract_first(self):
+        config = self.commons_config(agents=1)
+        config["MARKET"]["PRICE"] = 2.0
+        config["MARKET"]["UNMET_DEMAND_PENALTY"] = 3.0
+        simulation = ResourceSimulation(config)
+        simulation.initialize_agents()
+        buyer = simulation.agents[0]
+        buyer.consumption_need = 4.0
+
+        simulation.run_iteration()
+
+        metrics = simulation.metrics_history[-1]
+        assert metrics["goods_traded"] == 0.0
+        assert metrics["commons_extracted"] == 4.0
+        assert metrics["commons_depleted"] == 8.0
+        assert metrics["commons_waste"] == 4.0
+        assert metrics["commons_goods"] == 2.0
+        assert metrics["unmet_demand"] == 0.0
+
+    def test_low_market_price_makes_agents_buy_first(self):
+        config = self.commons_config()
+        config["MARKET"]["PRICE"] = 1.0
+        simulation = ResourceSimulation(config)
+        simulation.initialize_agents()
+        buyer, seller = simulation.agents
+        buyer.consumption_need = 4.0
+        seller.production_rate = 4.0
+        seller.consumption_need = 0.0
+
+        simulation.run_iteration()
+
+        metrics = simulation.metrics_history[-1]
+        assert metrics["goods_traded"] == 4.0
+        assert metrics["commons_extracted"] == 0.0
+        assert metrics["commons_goods"] == 10.0
+
+    def test_extraction_is_limited_and_loses_goods(self):
+        config = self.commons_config(agents=1)
+        config["COMMONS"]["EXTRACTION_LIMIT"] = 3.0
+        config["MARKET"]["PRICE"] = 2.0
+        config["MARKET"]["UNMET_DEMAND_PENALTY"] = 3.0
+        simulation = ResourceSimulation(config)
+        simulation.initialize_agents()
+        buyer = simulation.agents[0]
+        buyer.consumption_need = 10.0
+
+        simulation.run_iteration()
+
+        metrics = simulation.metrics_history[-1]
+        assert metrics["commons_extracted"] == 3.0
+        assert metrics["commons_depleted"] == 6.0
+        assert metrics["commons_waste"] == 3.0
+        assert metrics["commons_goods"] == 4.0
+        assert metrics["unmet_demand"] == 7.0
+
+    def test_commons_regenerates_before_extraction(self):
+        config = self.commons_config(agents=1)
+        config["COMMONS"].update(
+            {
+                "INITIAL_GOODS": 5.0,
+                "CAPACITY": 10.0,
+                "REGENERATION": 2.0,
+                "EXTRACTION_LIMIT": 0.0,
+            }
+        )
+        config["MARKET"]["CONSUMPTION_RANGE"] = (0.0, 0.0)
+        simulation = ResourceSimulation(config)
+        simulation.initialize_agents()
+
+        simulation.run_iteration()
+
+        metrics = simulation.metrics_history[-1]
+        assert metrics["commons_regenerated"] == 2.0
+        assert metrics["commons_goods"] == 7.0
 
 
 class TestMarketValidation:

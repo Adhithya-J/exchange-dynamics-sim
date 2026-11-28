@@ -1,185 +1,259 @@
 # Exchange Dynamics Simulation
 
-![The Commons world view after 1,000 iterations](docs/commons-world.png)
+![The subsistence village at iteration 50](docs/subsistence-world.png)
 
-*Default configuration, 1,000 iterations. Every villager has a hut and a money
-sack; the commons shrinks as resources are consumed. Open `simulation.html` to
-replay the whole run.*
+*Default subsistence configuration at iteration 50. Five villagers remain, the
+berry commons is full, and the forest is at about 69%. The selected villager has
+two crates with four stored berries, nine raw wood kept as a replacement
+reserve, a price belief of four while the market clears at three, and an
+effective wood frontier contracted by harvest density. The inspector shows the
+small post-meal reserve, the spare wood, the belief, and the density state used
+by the PPF and search animation.*
 
-An experimental agent-based simulation of resource sharing and inequality.
-Agents have different generosity and acceptance tendencies. During each
-iteration, living agents may transfer a variable amount of resources to another
-living agent, remember previous givers, and pay a fixed cost of living.
-An agent that reaches the configured resource floor is dead and no longer
-participates in transfers.
+An experimental agent-based laboratory for exchange, survival, and inequality.
+The repository now holds **two worlds** that share a small set of simulation
+utilities:
 
-## Status
+| World | Directory | What it models |
+| --- | --- | --- |
+| **Subsistence** | `worlds/subsistence/` | Goods only. Villagers start with ten berries and one crate, gather perishable berries and durable wood from a shared commons, eat, store food in perishable crates, barter, and optionally lend wood, berries, or crate capacity. No money. |
+| **Money** | `worlds/money/` | The original model: money transfers, gifts, a goods market, reciprocity, trust, and environmental shocks. |
 
-This is a small research-style simulation project. It is intended to make the
-rules and measurements easy to inspect, not to model a real economy or make
-economic predictions.
-
-Supported Python versions: 3.11 through 3.14.
-
-## Model
-
-Each agent has:
-
-- a money balance (`resources`);
-- a resource floor below which the agent is dead;
-- a generosity score, which controls the chance of giving;
-- an acceptance score, which controls the chance of receiving;
-- short-term memory of agents that previously transferred resources, plus
-  optional private trust beliefs;
-- an optional goods inventory; and
-- a fixed risk tolerance.
-
-The optional layers add a goods market, trust and reputation, reciprocity, and
-environmental shocks. `MODEL.md` documents the combined rules and conservation
-ledger.
-
-Affordability is derived from the agent's resource balance. Agents below the
-configured resource range become less likely to give, while acceptance is
-weighted in the opposite direction. Transfer amounts are sampled from the
-configured range and capped by the giving floor and receiving ceiling. A
-transfer is made only when both agents are alive. After transfers, every
-living agent pays the configured cost of living; reaching the resource floor
-does not create a resource top-up.
-
-The simulation records mean, median, standard deviation, total resources, and
-the Gini coefficient after each iteration. Successful gifts, repayments, and
-market trades also go into `transfer_log` and `trade_log`, which the visualizer
-replays. The source of truth is a list of `Agent` objects; Pandas is used only
-to expose the current state for analysis.
-
-## Market (optional)
-
-`config.yaml` has a `MARKET` section that is disabled by default. When
-`MARKET.ENABLED` is true, living agents also produce and consume one good:
-
-- each agent produces `PRODUCTION_RANGE` goods per iteration;
-- each agent needs `CONSUMPTION_RANGE` goods per iteration;
-- agents consume their own goods first and buy shortfalls from other agents'
-  surplus at the fixed `PRICE`;
-- unsold goods stay in inventory, and unmet demand is recorded.
-
-Transfers and market trades only move money between agents. Production creates
-goods, consumption destroys them, and the living cost remains an explicit money
-sink. `MODEL.md` documents the full ledger, and `tests/test_conservation.py`
-plus `tests/test_market.py` enforce it.
-
-## Altruism and reciprocity (optional)
-
-Direct transfers are the altruism layer; market trades are kept separate. Set
-`SOCIAL.RECIPROCITY_ENABLED: true` to schedule a possible repayment after each
-gift. `REPAY_PROBABILITY`, `REPAY_DELAY`, and `REPAY_FRACTION` control the
-attempt. `repayment_log` records who repaid whom and how quickly, while metrics
-report `altruism_volume`, `reciprocity_rate`, `outstanding_debt`, and
-`mean_repayment_delay`. `tests/test_social.py` covers the rules.
-
-## Environmental shocks (optional)
-
-Set `SHOCKS.ENABLED: true` and list events in `SHOCKS.SCHEDULE` to apply
-`scarcity` (reduced production) or `information` (noisy reputation) shocks for
-a fixed `duration`. Living agents adapt their risk tolerance when demand is
-unmet. Metrics include `shock_active`, `production_modifier`,
-`reputation_noise`, `mean_risk_tolerance`, and `alive`; `recovery_time()`
-reports how long unmet demand took to return to its pre-shock level.
-`tests/test_shocks.py` covers the rules.
-
-## Trust and reputation (optional)
-
-Set `TRUST.ENABLED: true` to add private beliefs and public reputation. Every
-agent starts at `INITIAL_BELIEF`. After a transfer, the receiver updates its
-belief about the giver and a shared public reputation observation, with
-configurable `LEARNING_RATE`, `DECAY`, `NOISE`, `DELAY`, `BIAS`, and
-`PUBLIC_WEIGHT`. The simulation reports `mean_trust`, `mean_reputation`,
-`reputation_error`, and `reputation_brier`.
-
-Set `TRUST.DECISION_WEIGHT` above 0 to use those beliefs in giving and
-accepting decisions. Expected payoff is `belief * RETURN_MULTIPLIER - 1`, turned
-into a probability with each agent's fixed `RISK_TOLERANCE`, then blended with
-the legacy score. Trusted agents are also selected as receivers more often.
-`decision_log` records each attempt; `tests/test_trust.py` and
-`tests/test_decisions.py` cover the update and decision rules.
-
-## Experiments
-
-`experiments.py` runs each seed and parameter combination, then writes raw runs
-and a summary with 95% confidence intervals:
-
-```bash
-python experiments.py --iterations 500 --seeds 1 2 3 \
-  --sweep SIMULATION.AGENTS=5,10 \
-  --sweep MARKET.ENABLED=true \
-  --output results/runs.csv
-```
-
-Sweep values are parsed as JSON when possible, so booleans, numbers, and lists
-work (`SHOCKS.SCHEDULE='[{"iteration": 100, "type": "scarcity", "magnitude": 0.5}]'`).
-The command writes `results/runs.csv`, `results/runs_summary.csv`, and
-`results/runs_summary.json`. Use `--config` to start from a custom YAML file and
-`--metrics` to choose which final metrics to aggregate.
+The subsistence world is the new primary world and has its own experiment
+runner. The money world is kept working for the earlier research questions and
+for comparison.
 
 ## Quick start
 
 ```bash
 python -m venv .venv
-# Windows
-.venv\Scripts\activate
+# Windows: .venv\Scripts\activate
 # macOS/Linux: source .venv/bin/activate
-
 python -m pip install -r requirements.txt
+
+# Run the subsistence world and write a replay plus a standalone viewer.
+python -m worlds.subsistence --iterations 500 \
+  --replay replay-subsistence.json.gz \
+  --html simulation-subsistence.html
+
+# The original money world.
 python main.py --iterations 500
-python visualize.py --iterations 500
+
 python -m pytest -q
 ```
 
-Both `main.py` and `visualize.py` support `--config <path>` to load a custom YAML
-configuration file and `--iterations <n>` to override the run length.
+Open `simulation-subsistence.html` in a browser. It is self-contained and
+starts playing immediately. Press **space** to pause, use the arrows to step,
+drag the timeline to scrub, and click a villager to inspect them.
 
-`visualize.py` creates a self-contained `simulation.html` village view that
-replays the recorded run. Open it in a browser; the replay starts automatically
-(press **space** to pause). Every agent has a hut around the green. All
-villagers are the same size; the sack beside each one grows and shrinks with
-their coin balance, so wealth is visible without changing the body size. A gold
-coin is drawn whenever money changes hands: gifts and repayments happen at the
-receiver's hut, while market trades happen in the separate market square. The
-commons pond shows the village's remaining total resources, so it visibly
-shrinks as living costs consume them. Click a hut's owner or a feed row to
-inspect a villager, and drag the timeline to scrub. When everyone dies, the
-timeline trims at extinction.
+## The subsistence model in one page
 
-The world is a presentation layer over the recorded events, not a change to
-who can interact: it replays the existing model and leaves conservation
-untouched. The view works with the optional layers: enable `MARKET`, `TRUST`,
-`SOCIAL`, and `SHOCKS` in the configuration and their effects appear in the
-village, inspector, and event feed. Pass `--plotly` to `visualize.py` to write
-the original Plotly line chart instead.
+- **Everyone starts with a starter kit.** Ten berries, no raw wood, and one
+  finished crate. There is no money.
+- **Health is a four-day food buffer.** A full-health villager survives four
+  days without food. A day with a full ration restores one point; a day short of
+  food drains one. The default daily ration is six berries.
+- **Berries are food and spoil.** Berries not eaten and not inside storage
+  spoil at the end of the iteration. Berries and wood are always whole units.
+- **Food is kept as a small reserve, not a full larder.** A villager aims for
+  about two days of post-meal berries, capped by crate space, and refills only
+  when the reserve runs low. The rest of the day goes to wood or carpentry, and
+  a villager with crates keeps one spare crate's worth of raw wood for
+  replacements.
+- **Crates are capital.** Eight raw wood plus about a day of skilled carpentry
+  make one crate, which stores ten berries. Raw wood is only material, not
+  storage. Crates wear out faster when they are full.
+- **The day is finite.** Each villager has a fixed number of working minutes.
+  Picking berries is quick; chopping wood is much slower. Woodworkers choose
+  between berries, raw wood, and carpentry, and unfinished work carries over.
+- **Sparse commons adds search time.** Gathering and chopping costs rise as the
+  berry bushes and forest thin, with a safe density floor. The production
+  possibilities frontier contracts with the current commons density, and
+  villagers visibly move between several sparse sites.
+- **Skills differ.** Each villager draws one shared specialisation latent `z`.
+  Berry skill rises with `z` and wood skill falls with it, so strong pickers are
+  weak choppers and strong choppers are weak pickers. Woodworkers also have a
+  comparative advantage in carpentry.
+- **Prices are discovered.** Every villager carries an integer price belief in
+  berries per wood. Bilateral bargains clear at the midpoint of seller and
+  buyer reservations, and realized prices plus market gossip update beliefs with
+  a one-tick lag. There is no global price setter.
+- **Choices are sampled.** Each day a villager draws a small taste shock on the
+  berry-versus-wood comparison and occasionally explores the other activity, so
+  behaviour varies around the rational benchmark instead of repeating exactly.
+- **Credit is optional.** A loan moves wood, berries, or crate capacity now and
+  returns the same good later. Reciprocal mode is zero-interest and gated by
+  trust or collateral; market mode prices default risk into a real goods
+  interest rate. Loans, repayments, and defaults run through the same goods
+  ledger as gifts and trade.
+- **Gifts and reciprocity share one obligation book.** A plain gift is one-way.
+  With reciprocity on it also creates a soft zero-interest obligation that the
+  receiver repays when it has surplus berries. That is the low-commitment end of
+  the credit spectrum.
+- **Shocks are optional.** A drought temporarily cuts berry and wood
+  regeneration, so the same labour yields less until it passes.
+- **The commons is shared and depletable.** Berry bushes and forest regenerate
+  each iteration. Berry bushes recover quickly; wood regrows much more slowly.
 
-The random seed and model parameters are defined in `config.yaml` and loaded
-through `utils.load_config`. For interactive use, construct
-`ResourceSimulation` with a copied and edited configuration, call `run()`, and
-inspect `metrics_history` or the returned DataFrame.
+The detailed rules, formulas, iteration order, and conservation ledger are in
+[`worlds/subsistence/MODEL.md`](worlds/subsistence/MODEL.md).
+
+## Feature flags
+
+Every experimental layer is a flag in `worlds/subsistence/config.yaml`:
+
+```yaml
+FEATURES:
+  GIFTING: false       # direct in-kind gifts, off by default
+  TRADE: true          # barter at a berries-per-wood ratio
+  CREDIT: false        # reciprocal or risk-priced loans
+  STORAGE: true        # finished crates provide storage capacity
+  SPOILAGE: true       # unprotected berries spoil
+  TRUST: false         # public credit reputation
+  RECIPROCITY: false   # gifts become soft obligations
+  SHOCKS: false        # temporary commons droughts
+```
+
+Set a flag to `false` to isolate a mechanism. For example, turning `SPOILAGE`
+off removes the reason to store berries; turning `TRADE` off creates a
+self-sufficiency experiment; turning `GIFTING` on adds need-based berry gifts
+from a shared utility. The harvesting, health, and commons rules stay the same.
+
+The money world keeps its own flags (`GIFTING.ENABLED`, `MARKET.ENABLED`,
+`SOCIAL.RECIPROCITY_ENABLED`, `TRUST.ENABLED`, `SHOCKS.ENABLED`) in
+`worlds/money/config.yaml`. Gifting is off there by default too.
+
+## The production possibilities chart
+
+Press **P** or the **PPF** button to expand the chart. It shows the selected
+villager's density-adjusted frontier, their planned labour point, what they
+actually gathered, and their holdings after barter. The dashed line is the
+current exchange ratio. **Zoom to frontier** scales the axes to the effective
+frontier so the trade-off is readable; **Show all villagers** overlays every
+living villager's frontier. In the normal view the axes stay at full-commons
+limits, so a contraction from sparse bushes or trees is visible.
+
+![The expanded production possibilities chart](docs/subsistence-ppf.png)
+
+The chart updates with the timeline and the selected villager, so it can be
+used to compare a berry specialist with a wood specialist at the same
+iteration.
+
+## Visual replay
+
+The subsistence viewer is in `worlds/subsistence/viewer/`. It is a standalone
+replay client; it does not import the model. You can either open the generated
+`simulation-subsistence.html` or serve the repository root and open:
+
+```text
+http://localhost:8000/worlds/subsistence/viewer/?replay=/replay-subsistence.json.gz
+```
+
+The viewer shows health rings, berry baskets, raw wood, perishable crates and
+their durability, shared berry bushes and forest, villagers walking out to pick,
+chop, or craft, bilateral barter tokens, price beliefs, credit flows, spoilage,
+and deaths. The side panel explains the iconography and lists each iteration's
+gather, craft, gift, trade, credit, shock, spoilage, and death events.
+
+## Credit modes
+
+Credit is opt-in. The two modes use the same loan book and goods ledger:
+
+```yaml
+FEATURES:
+  CREDIT: true
+CREDIT:
+  MODE: reciprocal   # zero-interest, trust or crate collateral
+```
+
+```yaml
+FEATURES:
+  CREDIT: true
+CREDIT:
+  MODE: market       # default risk priced into a real goods interest rate
+```
+
+A loan can move wood, berries, or a whole crate. Crate lending is direct
+capacity lending: the borrower gets storage now and returns a crate later. The
+lent crate also serves as collateral, so crate-capacity loans carry no goods
+interest in either mode. Defaults seize pledged crates and then the borrower's
+stock of the loan good; the rest is a claim loss, not destroyed goods.
+
+![Credit and trust in the subsistence viewer](docs/subsistence-credit.png)
+
+*A market-credit run. The selected wood specialist has defaulted on a wood
+loan, owes five wood, six berries, and one crate-capacity, and has lent similar
+amounts. Trust is 75%. The feed shows the default, gifts, and a new risk-priced
+wood loan.*
+
+To write only a replay:
+
+```bash
+python -m worlds.subsistence --iterations 1000 --replay replay-subsistence.json.gz
+```
+
+The replay is version 2 and carries the world type, feature flags, agent
+skills, per-tick health and goods, pre/post-trade production points, and typed
+`gather`, `gift`, `trade`, `spoil`, and `death` events. `worlds/subsistence/replay.py`
+validates it on write and load.
+
+## Experiments
+
+The subsistence runner sweeps seeds and any dotted configuration key, including
+feature flags:
+
+```bash
+python -m worlds.subsistence.experiments --iterations 300 --seeds 1 2 3 \
+  --sweep FEATURES.GIFTING=true,false \
+  --sweep FEATURES.STORAGE=true,false \
+  --sweep STORAGE.WOOD_DECAY_CHANCE=0,0.02,0.05 \
+  --sweep FEATURES.CREDIT=true \
+  --sweep CREDIT.MODE=reciprocal,market \
+  --output results/subsistence.csv
+```
+
+It writes raw runs plus a summary with 95% confidence intervals. Useful metrics
+include `alive`, `mean_health`, `berries_spoiled`, `trade_berries`,
+`barter_price`, `ppf_efficiency`, `specialisation`, `gini_berries`,
+`gini_wood`, and `unmet_food`.
+
+The original money-world experiment runner is still available as
+`python experiments.py`.
 
 ## Project structure
 
-- `config.yaml` - default simulation parameters.
-- `main.py` - agents, simulation lifecycle, affordability, market, and metrics.
-- `utils/` - shared helpers, including YAML configuration loading.
-- `tests/` - unit and behavior tests for the model.
-- `visualize.py` - animated world view plus the legacy Plotly chart.
-- `templates/world.html` - self-contained HTML/CSS/Canvas replay renderer.
-- `experiments.py` - seed and parameter sweep runner with confidence intervals.
-- `TRUST_SOCIETY_SCOPE.md` - research scope and roadmap.
-- `TODO.md` - implementation tasks derived from the roadmap.
-- `MODEL.md` - units, conservation ledger, and market rules.
-- `requirements.txt` - runtime and test dependencies.
+```text
+utils/                    shared tooling: config, metrics, replay I/O,
+                          experiment sweeps, and social helpers
+worlds/
+  money/                  original money world, config, replay, and docs
+  subsistence/            goods-only world, config, replay, viewer, and docs
+    features/             composable trade, gift, trust, reciprocity, credit,
+                          and shock layers
+viewer/                   original money-world viewer
+docs/                     README screenshots
+tests/                    tests for both worlds and the shared utilities
+main.py, replay.py, ...   compatibility entry points for the money world
+MODEL.md                  index of the two model documents
+```
+
+The root `main.py`, `replay.py`, `experiments.py`, and `visualize.py` are thin
+compatibility shims for the money world. New code should import from
+`worlds.money` or `worlds.subsistence` directly.
+
+## Model documents
+
+- [`worlds/subsistence/MODEL.md`](worlds/subsistence/MODEL.md) — berries, wood,
+  health, storage, spoilage, barter, credit, trust, reciprocity, shocks, PPF,
+  and the conservation ledger.
+- [`worlds/money/MODEL.md`](worlds/money/MODEL.md) — money, gifts, reciprocity,
+  trust, the market, and shocks.
+- [`MODEL.md`](MODEL.md) — a short index of both.
 
 ## Limitations
 
-The model has no wages, rent, births, or spatial network. The market uses a
-single good at a fixed price, shocks follow a fixed schedule, and trust updates
-are simple heuristics rather than estimated beliefs. Its results depend on the
-chosen rules and random seed; treat it as an educational simulation and a base
-for further experiments.
+The subsistence world has two goods, a shared commons, and simple,
+explainable labour, trade, and credit heuristics rather than a full optimisation
+model. Credit and social layers are opt-in and off by default; their results
+depend on the chosen rules and random seed, so treat each run as an experiment,
+not a prediction.

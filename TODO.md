@@ -4,10 +4,30 @@ Task list derived from the roadmap in
 [`TRUST_SOCIETY_SCOPE.md`](TRUST_SOCIETY_SCOPE.md#implementation-order), expanded
 with the current state of the code.
 
-Current model: agents hold money (`resources`) and make direct transfers.
-Optional layers add a goods market, trust beliefs and noisy reputation,
-altruism/reciprocity, and environmental shocks with adaptation. A sweep runner
-reports confidence intervals across seeds and parameters.
+Current model: two worlds share `utils/`. The original money world
+(`worlds/money/`) has agents holding money (`resources`) and making direct
+transfers; optional layers add a goods market, trust beliefs and noisy
+reputation, altruism/reciprocity, and environmental shocks with adaptation. The
+subsistence world (`worlds/subsistence/`) is goods-only: berries, wood, health,
+storage, spoilage, barter, and a production possibilities frontier. A sweep
+runner reports confidence intervals across seeds and parameters for both.
+
+## 0. Split shared tooling from worlds
+
+- [x] Move configuration, metrics, replay I/O, experiment helpers, and social
+      helpers into `utils/`.
+- [x] Move the money model, config, replay, and docs into `worlds/money/`.
+- [x] Add the goods-only model, config, replay, viewer, and docs in
+      `worlds/subsistence/`.
+- [x] Keep root `main.py`, `replay.py`, `experiments.py`, and `visualize.py`
+      as compatibility shims for the money world.
+- [x] Add feature flags in `worlds/subsistence/config.yaml` for gifting, trade,
+      storage, spoilage, trust, reciprocity, and shocks.
+- [x] Turn gifting off by default in the subsistence world.
+- [x] Add a subsistence flag/seed sweep runner.
+
+**Done when:** both worlds run, share the utilities, and have their own tests
+and documentation.
 
 ## 1. Define money, goods, utility, and conservation rules
 
@@ -94,8 +114,33 @@ parameters.
 
 ## Cross-cutting
 
+- [x] Emit a versioned, renderer-neutral replay log with typed events and
+      explicit deaths (`replay.py`).
+- [x] Split the renderer into a standalone `viewer/` that loads replay logs
+      instead of importing the simulation.
+- [x] Add a Playwright capture script for deterministic frame/video export.
 - [x] Keep the README model/limitations sections in sync with each change.
 - [x] Extend `visualize.py` to chart new metrics (demand, reputation, shocks).
 - [x] Add invariant/property tests for resource and goods conservation.
 - [x] Add a CI workflow under `.github/` to run `pytest` on supported Python
       versions (3.11-3.14).
+
+## 8. Subsistence world
+
+- [x] Two goods: perishable berries and durable wood.
+- [x] Health as a ten-meal buffer with one-for-one recovery.
+- [x] Shared berry and wood commons with separate regeneration.
+- [x] Heterogeneous berry and wood skills with a labour budget and PPF.
+- [x] Wood storage capacity with slow decay.
+- [x] End-of-iteration spoilage above storage capacity.
+- [x] Central barter price with rationed clearing and no money.
+- [x] Optional need-based gifts from a shared social utility.
+- [x] Expandable PPF chart with frontier, planned, actual, post-trade, and
+      price-line views.
+- [ ] Port reciprocity and trust into shared social utilities.
+- [ ] Add a second use for wood beyond storage, if experiments justify it.
+- [ ] Add spatial commons access or ownership rules.
+
+**Done when:** the subsistence world supports survival, specialisation, and
+trade experiments entirely without money, and the viewer makes those mechanics
+legible.

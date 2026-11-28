@@ -14,7 +14,9 @@ from main import (
 
 
 def make_config() -> dict:
-    return deepcopy(CONFIG)
+    config = deepcopy(CONFIG)
+    config["GIFTING"]["ENABLED"] = True
+    return config
 
 
 class TestMetricsCalculator:
@@ -177,7 +179,7 @@ class TestResourceSimulation:
 
         assert max(agent.resources for agent in simulation.agents) <= 2.0
 
-    def test_living_cost_reduces_resources_after_transfer(self):
+    def test_living_cost_is_recycled_after_transfer(self):
         config = make_config()
         config["SIMULATION"].update({"AGENTS": 2, "INITIAL_RESOURCES": 10})
         config["AGENTS"].update(
@@ -188,11 +190,16 @@ class TestResourceSimulation:
                 "LIVING_COST": 0.1,
             }
         )
+        config["COMMONS"]["FUND_REDISTRIBUTION"] = 1.0
 
         simulation = ResourceSimulation(config)
         simulation.run(iterations=1)
 
-        assert math.isclose(simulation.metrics_history[-1]["total"], 19.8)
+        metrics = simulation.metrics_history[-1]
+        assert math.isclose(metrics["total"], 20.0)
+        assert math.isclose(metrics["living_cost_paid"], 0.2)
+        assert math.isclose(metrics["dividend_paid"], 0.2)
+        assert math.isclose(metrics["commons_fund"], 0.0)
 
     def test_agents_at_resource_floor_are_dead_and_inactive(self):
         config = make_config()
@@ -297,6 +304,35 @@ class TestResourceSimulation:
 
         assert c2_count > c1_count * 3
 
+    def test_memory_preference_is_disabled_with_reciprocity_by_default(self):
+        counts = {}
+        for use_memory_with_reciprocity in (False, True):
+            config = make_config()
+            config["SIMULATION"].update(
+                {"AGENTS": 3, "INITIAL_RESOURCES": 100.0}
+            )
+            config["AGENTS"].update(
+                {"LIVING_COST": 0.0, "MIN_RESOURCES_AFTER_GIVING": 0.0}
+            )
+            config["MEMORY"]["PREFERENCE_FRACTION"] = 1.0
+            config["MEMORY"]["USE_WITH_RECIPROCITY"] = (
+                use_memory_with_reciprocity
+            )
+            config["SOCIAL"]["RECIPROCITY_ENABLED"] = True
+            config["TRUST"]["ENABLED"] = False
+            simulation = ResourceSimulation(config)
+            simulation.initialize_agents()
+            sender, remembered, other = simulation.agents
+            sender.memory.append(remembered.id)
+
+            chosen = [simulation._find_receiver(sender) for _ in range(400)]
+            counts[use_memory_with_reciprocity] = sum(
+                1 for agent in chosen if agent.id == remembered.id
+            )
+
+        assert 140 < counts[False] < 260
+        assert counts[True] > 380
+
     def test_transfer_amount_bounds_fallback_to_fixed_amount(self):
         config = make_config()
         del config["SIMULATION"]["TRANSFER_AMOUNT_RANGE"]
@@ -328,3 +364,28 @@ class TestResourceSimulation:
 
         with pytest.raises(ValueError, match="positive values"):
             simulation._transfer_amount_bounds()
+
+
+def test_gifting_is_off_by_default_in_the_money_world():
+    config = deepcopy(CONFIG)
+    config["SIMULATION"].update({"AGENTS": 3, "RANDOM_SEED": 1})
+    config["AGENTS"].update({"GENEROSITY": (1.0, 1.0), "ACCEPTANCE": (1.0, 1.0)})
+    simulation = ResourceSimulation(config)
+
+    simulation.run(iterations=10)
+
+    assert simulation.total_gifts == 0
+    assert simulation.transfer_log == []
+
+
+def test_gifting_can_be_enabled_in_the_money_world():
+    config = deepcopy(CONFIG)
+    config["GIFTING"]["ENABLED"] = True
+    config["SIMULATION"].update({"AGENTS": 3, "RANDOM_SEED": 1})
+    config["AGENTS"].update({"GENEROSITY": (1.0, 1.0), "ACCEPTANCE": (1.0, 1.0)})
+    simulation = ResourceSimulation(config)
+
+    simulation.run(iterations=10)
+
+    assert simulation.total_gifts > 0
+    assert any(entry["type"] == "gift" for entry in simulation.transfer_log)

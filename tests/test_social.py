@@ -9,7 +9,9 @@ from main import CONFIG, ResourceSimulation
 
 
 def make_config() -> dict:
-    return deepcopy(CONFIG)
+    config = deepcopy(CONFIG)
+    config["GIFTING"]["ENABLED"] = True
+    return config
 
 
 def social_config() -> dict:
@@ -105,9 +107,47 @@ class TestReciprocity:
         result = simulation._process_repayments(3)
 
         assert result["repayments"] == 0
-        assert result["outstanding_debt"] == 0.0
+        assert result["defaults"] == 1
+        assert result["outstanding_debt"] == 10.5
+        assert result["defaulted_debt"] == 10.5
         assert receiver.resources == 110.0
         assert giver.resources == 90.0
+        assert len(simulation._repayment_queue) == 1
+
+    def test_defaulted_debt_is_retried_and_can_be_settled(self):
+        config = social_config()
+        config["SOCIAL"]["REPAY_PROBABILITY"] = 0.0
+        simulation = ResourceSimulation(config)
+        simulation.initialize_agents()
+        giver, receiver = simulation.agents
+        simulation._current_iteration = 1
+        simulation._execute_transfer(giver, receiver, 10.0)
+
+        simulation._process_repayments(3)
+        receiver.repayment_probability = 1.0
+        result = simulation._process_repayments(4)
+
+        assert result["repayments"] == 1
+        assert result["repayment_volume"] == 10.5
+        assert result["outstanding_debt"] == 0.0
+        assert simulation.total_defaults == 1
+
+    def test_default_excludes_the_debtor_from_future_gifts(self):
+        config = social_config()
+        config["SOCIAL"]["REPAY_PROBABILITY"] = 0.0
+        simulation = ResourceSimulation(config)
+        simulation.initialize_agents()
+        giver, receiver = simulation.agents
+        simulation._current_iteration = 1
+        simulation._execute_transfer(giver, receiver, 10.0)
+        simulation._process_repayments(3)
+
+        assert simulation._find_receiver(giver) is None
+
+        receiver.repayment_probability = 1.0
+        simulation._process_repayments(4)
+
+        assert simulation._find_receiver(giver).id == receiver.id
 
     def test_partial_repayment_uses_the_configured_fraction(self):
         config = social_config()
@@ -121,6 +161,7 @@ class TestReciprocity:
         result = simulation._process_repayments(3)
 
         assert result["repayment_volume"] == 5.0
+        assert result["outstanding_debt"] == 5.25
         assert giver.resources == 95.0
         assert receiver.resources == 105.0
         assert math.isclose(money_total(simulation), 200.0)
@@ -136,9 +177,27 @@ class TestReciprocity:
         result = simulation._process_repayments(3)
 
         assert result["repayment_volume"] == 1.0
+        assert result["outstanding_debt"] == 0.0
+        assert result["written_off_debt"] == 9.0
         assert receiver.resources == 0.0
         assert giver.resources == 91.0
         assert math.isclose(money_total(simulation), 91.0)
+
+    def test_reciprocity_rate_measures_value_not_events(self):
+        config = social_config()
+        config["SOCIAL"]["REPAY_FRACTION"] = 0.5
+        simulation = ResourceSimulation(config)
+        simulation.initialize_agents()
+        giver, receiver = simulation.agents
+        simulation._current_iteration = 1
+        simulation._execute_transfer(giver, receiver, 10.0)
+
+        result = simulation._process_repayments(3)
+
+        assert result["repayments"] == 1
+        assert result["repayment_volume"] == 5.0
+        assert result["reciprocity_rate"] == 0.5
+        assert result["repayment_event_rate"] == 1.0
 
     def test_reciprocity_metrics_track_a_run(self):
         config = social_config()
@@ -192,16 +251,14 @@ class TestSocialValidation:
         config = social_config()
         config["SOCIAL"][setting] = value
         simulation = ResourceSimulation(config)
-        simulation.initialize_agents()
 
         with pytest.raises(ValueError, match=message):
-            simulation.run_iteration()
+            simulation.initialize_agents()
 
     def test_non_numeric_setting_is_rejected(self):
         config = social_config()
         config["SOCIAL"]["REPAY_DELAY"] = "soon"
         simulation = ResourceSimulation(config)
-        simulation.initialize_agents()
 
         with pytest.raises(ValueError, match="must be numeric"):
-            simulation.run_iteration()
+            simulation.initialize_agents()

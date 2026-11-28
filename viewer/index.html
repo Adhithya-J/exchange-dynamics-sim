@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Commons - Exchange Dynamics</title>
+  <link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="masthead">
+      <div class="brand-name">The Commons</div>
+      <div class="brand-subtitle">A village field ledger</div>
+    </div>
+    <div class="story" id="story">A fresh village.</div>
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-label">Iteration</div>
+        <div class="stat-value"><span id="statIteration">0</span></div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Alive</div>
+        <div class="stat-value" id="statAlive">0</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Commons</div>
+        <div class="stat-value" id="statStock">100%</div>
+        <div class="stock-meter"><i id="stockBar"></i></div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Coins</div>
+        <div class="stat-value" id="statCoins">0</div>
+      </div>
+      <div class="stat" title="Gini coefficient: 0 means equal, 1 means one villager holds everything">
+        <div class="stat-label">Gini</div>
+        <div class="stat-value" id="statGini">0.000</div>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button class="icon-btn open-btn" id="openReplayBtn" aria-label="Open a replay file" title="Open a replay file">Open replay</button>
+      <button class="icon-btn" id="helpBtn" aria-label="How to read this view" title="How to read this view">?</button>
+    </div>
+    <input type="file" id="replayFile" accept=".json,.gz,application/json" hidden>
+  </header>
+
+  <main class="layout">
+    <section class="world-wrap" id="worldWrap">
+      <canvas id="world" tabindex="0" aria-label="A village of huts around a central market square, ringed by meadow, berry bushes, and ponds"></canvas>
+      <div class="world-note" id="worldNote">Click a villager to inspect them</div>
+      <div class="shock-banner" id="shockBanner"></div>
+      <div class="tooltip" id="tooltip"></div>
+    </section>
+
+    <aside class="side">
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-title">What you are looking at</div>
+        </div>
+        <div class="legend-row"><span class="ico hut"></span><span><b>Hut.</b> One per villager, set around the central square. The roof color matches its owner.</span></div>
+        <div class="legend-row"><span class="ico commons"></span><span><b>Commons.</b> The grassy outer ring of berry bushes and ponds is a real renewable goods stock. It thins when villagers extract from it and recovers as it regenerates.</span></div>
+        <div class="legend-row"><span class="ico market"></span><span><b>Market.</b> The central square where buyers and sellers meet.</span></div>
+        <div class="legend-row"><span class="ico coffer"></span><span><b>Coin box.</b> A fixed box beside each hut fills with coins as its owner's balance grows, and empties as they spend or give.</span></div>
+        <div class="legend-row"><span class="ico coin"></span><span><b>Gold coin.</b> Money moving from one villager to another.</span></div>
+        <div class="legend-row" id="deathLegend"><span class="ico death"></span><span><b>Tombstone.</b> At the resource floor, the villager and hut are replaced by a stone marker.</span></div>
+      </section>
+
+      <section class="panel" id="selectedPanel"></section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-title">This iteration</div>
+          <div class="panel-note" id="feedTick">iter 0</div>
+        </div>
+        <div class="feed" id="feed"></div>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="timeline">
+    <div class="transport">
+      <button class="transport-btn" id="rewindBtn" aria-label="Back to start" title="Back to start">
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2v8M10 2 4 6l6 4V2Z" fill="currentColor"/></svg>
+      </button>
+      <button class="transport-btn" id="prevBtn" aria-label="Previous iteration" title="Previous iteration (left arrow)">
+        <svg width="10" height="10" viewBox="0 0 12 12" aria-hidden="true"><path d="M9 2 3 6l6 4V2Z" fill="currentColor"/></svg>
+      </button>
+      <button class="transport-btn play" id="playBtn" aria-label="Play animation" title="Play or pause (space)">
+        <svg id="playIcon" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 1.5v9L10.5 6 3 1.5Z" fill="currentColor"/></svg>
+      </button>
+      <button class="transport-btn" id="nextBtn" aria-label="Next iteration" title="Next iteration (right arrow)">
+        <svg width="10" height="10" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 2l6 4-6 4V2Z" fill="currentColor"/></svg>
+      </button>
+      <button class="transport-btn speed-btn" id="speedBtn" aria-label="Playback speed" title="Change playback speed">4x</button>
+      <div class="readout"><span id="readout">0</span> <span class="muted" id="readoutTotal">/ 0</span></div>
+      <div class="transport-spacer"></div>
+      <div class="hint">space to play - arrows to step - click a villager</div>
+    </div>
+    <input class="scrub" id="scrub" type="range" min="0" max="0" step="1" value="0" aria-label="Iteration timeline">
+  </footer>
+</div>
+
+<div class="modal-backdrop" id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+  <div class="help-card">
+    <div class="help-kicker">A visual replay of a recorded run</div>
+    <h2 id="helpTitle">How to read The Commons</h2>
+    <p>This page replays the simulation. It does not change the rules or the numbers. Each villager is an agent from the recorded run.</p>
+    <ol>
+      <li><b>Huts and villagers.</b> Every villager has a hut on the ring around the central square. The roof color matches the villager. All villagers are the same size.</li>
+      <li><b>Coin boxes are money.</b> A fixed box beside each hut fills with gold coins as its owner holds more, and empties as they give, spend, or pay the living cost. The box is the money indicator, not the body.</li>
+      <li><b>The commons.</b> The grassy outer ring of berry bushes and ponds is the village's real natural goods stock. As the percentage falls, the bushes dry and thin out and the ponds recede; regeneration brings them back. The percentage in the header and on the meadow is what is left.</li>
+      <li><b>Exchanges.</b> A gold coin is money changing hands. Gifts and repayments happen at the receiver's hut. Market trades happen in the central square, where coins and goods cross.</li>
+      <li><b>Death.</b> A villager at the resource floor is replaced by a tombstone; their hut disappears and they stop taking part.</li>
+      <li><b>Explore.</b> Press <b>space</b> to play or pause, use the arrows to step, drag the timeline to scrub, and click a villager or a feed row to inspect them.</li>
+    </ol>
+    <p class="fine">Each iteration: gifts and repayments, then production, trade, and commons extraction if the market is enabled, then consumption, then the living cost paid into the commons fund.</p>
+    <button class="help-close" id="helpClose">Got it</button>
+  </div>
+</div>
+
+<p class="sr-only" id="liveStatus" aria-live="polite">Simulation replay loaded.</p>
+
+
+<script id="inline-replay">/*__INLINE_REPLAY__*/</script>
+<script src="replay-loader.js"></script>
+<script src="viewer.js"></script>
+</body>
+</html>

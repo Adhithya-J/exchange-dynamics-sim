@@ -1,8 +1,9 @@
 SIMULATION:
   # Agents in the run; more agents create more variety.
   AGENTS: 10
-  # Transfer-and-cost steps; more steps show longer-term change.
-  ITERATIONS: 5000
+  # Transfer-and-cost steps. The default stays below the finite-money
+  # extinction point for the checked-in seed, so final metrics stay meaningful.
+  ITERATIONS: 1000
   # Starting resources per agent; higher means more initial wealth.
   INITIAL_RESOURCES: 1000.0
   # Resource floor after costs; higher protects more wealth.
@@ -41,12 +42,44 @@ AFFORDABILITY:
 MARKET:
   # Turn production, trade, and consumption on.
   ENABLED: false
-  # Fixed money price per good.
+  # Starting money price per good. The price then adjusts each iteration.
   PRICE: 1.0
+  # Fraction of the supply/demand imbalance applied to next iteration's price.
+  # 0 keeps the fixed price; values above 0 add simple price discovery.
+  PRICE_ADJUSTMENT: 0.1
+  # Bounds for the adjusting price.
+  MIN_PRICE: 0.1
+  MAX_PRICE: 10.0
   # Goods produced per living agent per iteration.
   PRODUCTION_RANGE: [0.0, 2.0]
   # Goods needed per living agent per iteration.
   CONSUMPTION_RANGE: [1.0, 1.0]
+  # Money charged per unit of unmet demand at the living-cost step. This is the
+  # value of a good: buyers only purchase when the price is at or below it.
+  UNMET_DEMAND_PENALTY: 2.0
+  # Sellers hold goods rather than sell below this price. 0 sells at any price.
+  SELLER_RESERVATION_PRICE: 0.0
+
+# Natural-resource commons and the village fund. Money is not destroyed:
+# subsistence payments move to the fund, which pays a dividend back to living
+# agents. Goods can also be extracted from the commons, less efficiently than
+# buying them.
+COMMONS:
+  # Initial and maximum raw goods in the commons.
+  INITIAL_GOODS: 500.0
+  CAPACITY: 500.0
+  # Raw goods regenerated per iteration.
+  REGENERATION: 5.0
+  # Usable goods per raw unit extracted. Below 1 means waste/degradation.
+  EXTRACTION_EFFICIENCY: 0.5
+  # Maximum usable goods one agent can extract per iteration.
+  EXTRACTION_LIMIT: 5.0
+  # Money-equivalent effort cost of one extracted good. Buy while the market
+  # price is at or below this; extract first when the price is higher.
+  EXTRACTION_COST: 1.0
+  # Share of the collected fund returned to living agents each iteration.
+  # 0.0 keeps the money in the commons; 1.0 rebates all subsistence money.
+  FUND_REDISTRIBUTION: 0.0
 
 # Environmental shocks and simple adaptation. Off by default.
 SHOCKS:
@@ -57,16 +90,30 @@ SHOCKS:
   # Risk-tolerance change per iteration when demand is unmet.
   ADAPTATION_RATE: 0.05
 
+# Direct transfers between agents. Off by default so a run can isolate the
+# market, trust, and shock layers. Turn it on to restore the original gift
+# model.
+GIFTING:
+  ENABLED: false
+
 # Altruistic gifts and optional reciprocity. Repayments are separate from trade.
 SOCIAL:
   # Let recipients repay gifts after a delay.
   RECIPROCITY_ENABLED: false
-  # Chance a due gift is repaid.
-  REPAY_PROBABILITY: 0.5
+  # Hidden per-agent chance that a due gift is repaid. Drawing a range makes
+  # repayment behaviour heterogeneous, so reputation can actually predict it.
+  REPAY_PROBABILITY_RANGE: [0.2, 0.8]
   # Iterations between a gift and its attempted repayment.
   REPAY_DELAY: 3
-  # Fraction of the gift returned.
+  # Fraction of the gift returned per attempt.
   REPAY_FRACTION: 1.0
+  # Iterations before an unpaid remainder is retried.
+  REPAY_RETRY_DELAY: 1
+  # Fraction added to the unpaid remainder after each missed attempt. This is a
+  # late fee, so defaulting has a real cost and debt does not vanish.
+  DEFAULT_PENALTY_RATE: 0.05
+  # Stop giving to an agent who defaulted on you until the debt is settled.
+  EXCLUDE_DEFAULTERS: true
 
 # Private trust beliefs and noisy public reputation. Off by default.
 TRUST:
@@ -86,10 +133,11 @@ TRUST:
   BIAS: 0.0
   # Weight of public reputation when blending into private belief.
   PUBLIC_WEIGHT: 0.3
-  # Blend trust-based decisions with legacy scores (0 legacy, 1 beliefs).
+  # Blend trust-based receiver selection with legacy scores (0 legacy, 1 trust).
   DECISION_WEIGHT: 0.0
-  # Expected return multiple for a gift in the belief model.
-  RETURN_MULTIPLIER: 2.0
+  # Logistic temperature for trust decisions. Lower values make the same
+  # expected payoff translate into a sharper choice.
+  DECISION_TEMPERATURE: 0.1
 
 # Controls how much past exchanges affect recipient selection.
 MEMORY:
@@ -97,3 +145,6 @@ MEMORY:
   SIZE: 10
   # Memory preference [0, 1]; 0 ignores memory and 1 relies on it.
   PREFERENCE_FRACTION: 0.5
+  # When explicit reciprocity is enabled, memory would reward the same gift a
+  # second time. Keep this false unless you deliberately want both channels.
+  USE_WITH_RECIPROCITY: false
