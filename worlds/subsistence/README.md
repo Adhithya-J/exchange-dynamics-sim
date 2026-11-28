@@ -6,17 +6,21 @@ commons, craft finished crates, eat, store food, and barter. Health is a short
 four-day buffer. Eight raw wood plus a day of skilled carpentry make a crate
 that stores ten berries; raw wood itself is only material, not storage.
 Crates are perishable and wear faster when full. Gathering and chopping slow
-down as the commons thins. Each villager carries an integer price belief, and
+down as the commons thins. Each villager carries a fractional price belief, and
 bilateral bargaining plus market gossip discovers prices with a one-tick lag.
+Prices float freely; the goods exchanged stay whole, so rounding the berry leg is
+an explicit indivisibility cost.
 Villagers keep a small post-meal food reserve and refill it in batches rather
 than topping up every day; spare time goes to wood, and owned crates come with a
 spare crate's worth of raw wood. Daily choices carry a small taste shock and
 occasional exploration. Optional layers add credit in two modes, reciprocal
 gifts, public trust, and commons shocks. Credit can move wood, berries, or crate
 capacity; reciprocal loans are zero-interest and gated by trust or collateral,
-while market loans price default risk into a goods interest rate. Partial
-chopping and crafting carry between days. Little villagers walk out to the berry
-bushes and forest, visiting several sparse sites when the commons is depleted.
+while market loans price default risk and crate durability into a goods interest
+rate. Food is the first loan priority, berry debt keeps today's meal, and formal
+loans settle before soft gifts. Partial chopping and crafting carry between days.
+Little villagers walk out to the berry bushes and forest, visiting several sparse
+sites when the commons is depleted.
 
 ## Run it
 
@@ -70,6 +74,10 @@ python -m worlds.subsistence.experiments --iterations 300 --seeds 1 2 3 \
   --sweep CREDIT.MODE=reciprocal,market \
   --output results/subsistence.csv
 ```
+
+The experiment summary sums per-tick flow metrics over the run and leaves stock
+metrics at the final tick. Confidence intervals use a Student-t critical value,
+and a single-seed group is reported with an undefined interval.
 
 ## Files
 

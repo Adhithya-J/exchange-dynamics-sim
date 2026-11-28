@@ -250,15 +250,11 @@ class TestSocialValidation:
     def test_invalid_settings_are_rejected(self, setting, value, message):
         config = social_config()
         config["SOCIAL"][setting] = value
-        simulation = ResourceSimulation(config)
-
         with pytest.raises(ValueError, match=message):
-            simulation.initialize_agents()
+            ResourceSimulation(config)
 
     def test_non_numeric_setting_is_rejected(self):
         config = social_config()
         config["SOCIAL"]["REPAY_DELAY"] = "soon"
-        simulation = ResourceSimulation(config)
-
         with pytest.raises(ValueError, match="must be numeric"):
-            simulation.initialize_agents()
+            ResourceSimulation(config)

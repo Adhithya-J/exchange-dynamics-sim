@@ -176,16 +176,20 @@ When `SOCIAL.RECIPROCITY_ENABLED` is true, each gift is recorded as a debt from
 the receiver to the giver. After `REPAY_DELAY` iterations the debtor attempts a
 repayment with its own hidden `repayment_probability`, returning
 `REPAY_FRACTION` of the outstanding debt while staying at or above
-`RESOURCE_FLOOR`. `repayment_probability` is drawn once at initialization from
-`SOCIAL.REPAY_PROBABILITY_RANGE`; the legacy scalar `REPAY_PROBABILITY` is still
-accepted for old configurations and sets every agent to the same value.
-Repayments are ordinary money transfers, so they conserve total money.
+`RESOURCE_FLOOR`. `REPAY_FRACTION` is constrained to `[0, 1]`; a value above one
+would repay more than the debt. `repayment_probability` is drawn once at
+initialization from `SOCIAL.REPAY_PROBABILITY_RANGE`; the legacy scalar
+`REPAY_PROBABILITY` is still accepted for old configurations and sets every agent
+to the same value. Repayments are ordinary money transfers, so they conserve
+total money.
 
 Unpaid debt does not vanish. A missed or partial attempt is a default: the
 remainder is multiplied by `1 + DEFAULT_PENALTY_RATE`, retried after
 `REPAY_RETRY_DELAY` iterations, and counted in `defaults` and
 `total_defaults`. If either party dies, the unrecoverable
-remainder is written off and recorded in `written_off_debt`. While a debtor has
+remainder is written off and recorded in `written_off_debt`. A creditor's death
+is not observed as a borrower default and does not lower the borrower's
+reputation. While a debtor has
 an unpaid default with a creditor, `EXCLUDE_DEFAULTERS` prevents that creditor
 from choosing the debtor as a new recipient until the debt is settled.
 
@@ -256,9 +260,9 @@ every choice more random. If reciprocity is disabled, expected return is zero,
 so trust cannot make giving look profitable.
 
 Giving and acceptance use the legacy affordability
-scores. Accepting a gift is weakly dominant because repayment is optional, but
-default now has a real cost (late fees, lower reputation, and loss of future
-credit), so accepting and defaulting is no longer free.
+scores. Acceptance is not treated as free when reciprocity is enabled: existing
+debt reduces the acceptance probability, because accepting creates a repayment
+obligation with late fees, lower reputation, and loss of future credit.
 
 `RISK_TOLERANCE` is drawn once per agent from `AGENTS.RISK_TOLERANCE` and stays
 fixed (except for the optional shock adaptation described below). Each attempted
@@ -281,13 +285,16 @@ Scarcity changes the goods source and information changes observations only;
 neither directly creates or destroys money or goods. `shock_log` records every
 activation.
 
-At the end of each iteration, living agents adapt: unmet demand raises
-`risk_tolerance` by `ADAPTATION_RATE` (capped at 1), while met demand lowers it
-by half that rate (floored at 0). Metrics report `shock_active`, `shock_count`,
-`production_modifier`, `reputation_noise`, `mean_risk_tolerance`,
-`iterations_since_shock`, and `alive`. `recovery_time()` returns the number of
-iterations from the last shock until unmet demand returns to its pre-shock
-level, or `None` if it never does.
+While an active **scarcity** shock is running and the market is enabled, living
+agents adapt at the end of each iteration: unmet demand raises `risk_tolerance`
+by `ADAPTATION_RATE` (capped at 1), while met demand lowers it by half that rate
+(floored at 0). An empty schedule, an information-only shock, or a disabled
+market no longer changes risk tolerance. Metrics report `shock_active`,
+`shock_count`, `production_modifier`, `reputation_noise`,
+`mean_risk_tolerance` over living agents, `iterations_since_shock`, and `alive`.
+`recovery_time()` returns the number of iterations from the last **scarcity**
+shock until unmet demand returns to its pre-shock level; it returns `None` for
+information shocks because they do not move demand.
 
 ## Invariants
 
@@ -298,6 +305,9 @@ level, or `None` if it never does.
 3. Subsistence payments are capped by `resources - floor`; the amount moved is
    `living_cost_paid`, and the nominal charge is `living_cost_due`.
 4. No agent's money, the commons stock, or the commons fund becomes negative.
+   `LIVING_COST`, `RESOURCE_FLOOR`, `INITIAL_RESOURCES`, giving/receiving
+   floors, ranges, `MEMORY.SIZE`, and `AGENTS` are validated at construction, so
+   a negative cost cannot create a negative fund.
 5. Dead agents do not participate in any step.
 6. Trust beliefs and public reputation always stay within [0, 1].
 7. The trust layer never changes money or goods totals.

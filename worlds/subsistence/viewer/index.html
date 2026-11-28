@@ -13,7 +13,7 @@
       <div class="brand-name">Subsistence</div>
       <div class="brand-subtitle">Berries, wood, and the production frontier</div>
     </div>
-    <div class="story" id="story">A village with nothing but its skills.</div>
+    <div class="story" id="story">A village with a starter kit of berries, one crate, and its skills.</div>
     <div class="stats">
       <div class="stat">
         <div class="stat-label">Iteration</div>
@@ -66,7 +66,7 @@
             <div class="legend-row"><span class="ico worker"></span><span><b>Villagers.</b> Little figures walk out to a bush or tree and work the commons. A full day is finite, and chopping wood is much slower than picking berries. Sparse commons means more walking between stops.</span></div>
             <div class="legend-row"><span class="ico commons"></span><span><b>Commons.</b> Berry bushes on the left and forest on the right are shared, depletable stocks. As they thin, each unit takes longer to find; wood regrows much more slowly.</span></div>
             <div class="legend-row"><span class="ico trade"></span><span><b>Barter.</b> Berries and wood cross in the central square at the current relative price.</span></div>
-            <div class="legend-row"><span class="ico trade"></span><span><b>Credit.</b> A loan moves wood, berries, or a crate now and returns the same good later. Reciprocal loans charge no interest; market loans price default risk.</span></div>
+            <div class="legend-row"><span class="ico trade"></span><span><b>Credit.</b> A loan moves wood, berries, or a crate now and returns the same good later. Reciprocal loans charge no interest; market loans price default risk and crate wear.</span></div>
           </div>
         </details>
       </section>
@@ -134,8 +134,8 @@
       <li><b>Health is a food buffer.</b> Full health survives only four days without food. A day with a full ration restores one point; a day short of food drains it. Missing the six-berry ration creates immediate scarcity.</li>
       <li><b>Berries are food.</b> A villager eats every iteration. Berries outside a storage crate spoil at the end of the iteration.</li>
       <li><b>Crates are capital.</b> Eight raw wood plus about one day of skilled carpentry make a crate, which stores ten berries. Raw wood is material, not storage. Crates are perishable and wear faster when full. Villagers keep a small food reserve and one spare crate's worth of raw wood instead of filling every crate.</li>
-      <li><b>Prices are discovered.</b> Every villager has an integer price belief in berries per wood. Bilateral bargains clear at the integer midpoint of seller and buyer reservations; gossip updates beliefs with a one-tick lag. There is no global price. Choices also carry a small daily taste shock, so villagers occasionally try the other activity.</li>
-      <li><b>Credit is optional.</b> A loan moves wood, berries, or crate capacity now for a promise of the same good later. Reciprocal credit charges no interest and relies on trust or collateral. Market credit prices the borrower's default risk into a goods-denominated interest rate; crate-capacity loans are secured by the lent crate and stay interest-free. A missed payment first uses a grace period, then seizes pledged crates and the borrower's stock.</li>
+      <li><b>Prices are discovered.</b> Every villager has a fractional price belief in berries per wood. Bilateral bargains clear at the fractional midpoint of seller and buyer reservations; gossip updates beliefs with a one-tick lag. There is no global price and no price clamp. Goods stay whole, so the berry leg is rounded and the residual is an indivisibility cost. Choices also carry a small daily taste shock, so villagers occasionally try the other activity.</li>
+      <li><b>Credit is optional.</b> A loan moves wood, berries, or crate capacity now for a promise of the same good later. Food is the first loan priority, berry debt keeps today's meal, and formal loans settle before soft gifts. Reciprocal credit charges no interest and relies on trust or collateral. Market credit prices default risk and crate durability into a goods-denominated interest rate. A missed payment first uses a grace period, then seizes pledged crates and the borrower's stock.</li>
       <li><b>Gifts can be reciprocal.</b> A plain gift is one-way. With reciprocity enabled it also creates a soft zero-interest obligation that the receiver repays when it has berries above its meal. That is the low-commitment end of the credit spectrum.</li>
       <li><b>Shocks are optional.</b> A drought temporarily reduces berry and wood regeneration, so the same labour yields less until it passes.</li>
       <li><b>Sparse commons costs time.</b> Gathering and chopping minutes rise as bushes and trees thin. Villagers walk between several sparse sites, and the production possibilities frontier contracts with the harvest density shown in the inspector.</li>

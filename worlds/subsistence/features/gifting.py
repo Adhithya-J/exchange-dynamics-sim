@@ -50,6 +50,26 @@ class GiftingLayer(FeatureLayer):
         self.world.gifting_settings = settings
         self.world.gifting_layer = self
 
+    def reset(self) -> None:
+        self.last_gifts = []
+
+    def _reciprocity_capacity(self, receiver: Any) -> int:
+        """Remaining soft-obligation room for a receiver.
+
+        Gifts are capped before they move, so a receiver at
+        ``MAX_OUTSTANDING`` cannot receive a free transfer that creates no
+        obligation.
+        """
+
+        if not self.world.features.get("RECIPROCITY"):
+            return 2**31 - 1
+        configured = self.world.config.get("RECIPROCITY") or {}
+        max_outstanding = int(configured.get("MAX_OUTSTANDING", 6))
+        outstanding = self.world.obligations.outstanding(
+            receiver.id, "berries", kind="gift"
+        )
+        return max(0, max_outstanding - outstanding)
+
     def after_gather(self) -> None:
         self.last_gifts = process_berry_gifts(
             self.world.agents,
@@ -58,6 +78,7 @@ class GiftingLayer(FeatureLayer):
             transfer=lambda giver, receiver, amount: self.world.ledger.move(
                 giver, receiver, "berries", amount, "gift"
             ),
+            receiver_capacity=self._reciprocity_capacity,
         )
         for gift in self.last_gifts:
             self.world.gift_log.append(

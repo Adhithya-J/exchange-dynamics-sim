@@ -16,17 +16,18 @@ conservation tests in `tests/subsistence/test_conservation.py` in sync.
 | Obligation | `ObligationBook` | A whole-good claim with a creditor, debtor, and optional due date. |
 | Berry commons | `SubsistenceWorld.commons_berries` | Shared, regenerating whole-berry stock. |
 | Wood commons | `SubsistenceWorld.commons_wood` | Shared, regenerating whole-wood stock. |
-| Price | `Agent.price_belief`, `last_market_price` | Whole berries per whole unit of wood. |
+| Price | `Agent.price_belief`, `last_market_price` | Fractional berries per whole unit of wood. |
 
 Berries and wood are **always whole units**. A day produces whole berries and
 whole blocks of wood; there are no fractional resource stocks, trades,
-spoilage, gifts, or loan principals. Time, labour, the production frontier, and
-interest rates are continuous because they are prices or plans rather than
-goods.
+spoilage, gifts, or loan principals. Prices, price beliefs, time, labour, the
+production frontier, and interest rates are continuous because they are prices
+or plans rather than goods. A trade's berry leg is rounded to a whole number,
+so a fractional price leaves a small indivisibility residual.
 
-The price is not money: it is only a whole-berry-per-wood exchange ratio. There
-is no stored unit of account and no medium of exchange. A loan is a claim on
-future goods, not money.
+The price is not money: it is only a fractional berries-per-wood exchange
+ratio. There is no stored unit of account and no medium of exchange. A loan is a
+claim on future goods, not money.
 
 ## Feature layers
 
@@ -68,7 +69,7 @@ Each agent has:
 - `berry_time_cost` and `wood_time_cost` — base minutes per whole unit;
 - `health` and `max_health`;
 - `berries`, `wood`, and `crates`;
-- `price_belief` — whole berries per wood, used for planning and barter;
+- `price_belief` — fractional berries per wood, used for planning and barter;
 - `reserve_days_preference` — this villager's stable taste for a food reserve;
 - `trust`, `defaults`, `repayments`, `loans_taken`, and `loans_given` —
   credit reputation and history;
@@ -300,9 +301,10 @@ subject to capacity:
 reserve_target = min(capacity, RESERVE_DAYS * FOOD_PER_ITERATION)
 ```
 
-With two days and a six-berry ration the target is twelve berries. One crate
-therefore holds a full reserve, while two crates hold twelve of their twenty
-slots: the second crate is useful without being filled to the brim. A small
+With two days and a six-berry ration the desired reserve is twelve berries. One
+crate can hold only ten, so the effective target is ten; two crates hold twelve
+of their twenty slots, and the second crate is useful without being filled to
+the brim. A small
 per-villager `RESERVE_JITTER` varies the target, so stocks differ across the
 population.
 
@@ -354,9 +356,11 @@ preservation value. With `FEATURES.STORAGE: false`, every uneaten berry spoils.
 ## Decentralized price discovery and barter
 
 Barter is optional (`FEATURES.TRADE`). There is no global price and no money.
-Each villager has an integer `price_belief` in berries per wood, initialized
-near the village baseline opportunity cost with a small random offset and kept
-inside a configurable band around that baseline.
+Each villager has a fractional `price_belief` in berries per wood, initialized
+near the village baseline opportunity cost with a small random offset. There is
+no MIN_PRICE, MAX_PRICE, belief band, or crate-price ceiling: the market is
+allowed to discover any positive exchange ratio. Only positivity is enforced so
+that a ratio remains meaningful.
 
 ### Planning with beliefs
 
@@ -369,9 +373,11 @@ wood value/minute  = wood_skill * density * price_belief / WOOD_TIME_COST
 ```
 
 Each day the villager draws a log-normal taste shock on each value and, with
-probability `EXPLORATION_RATE`, swaps the two activities. This is deliberate
-sampling rather than a deterministic argmax: choices vary slightly around the
-rational comparison, and a villager occasionally tries the other activity.
+probability `EXPLORATION_RATE`, swaps the two activities when both activities
+have positive value. This is deliberate sampling rather than a deterministic
+argmax: choices vary slightly around the rational comparison, and a villager
+occasionally tries the other activity. An activity with zero value is not
+explored, because that would make an agent do worthless work.
 
 Carpentry is a third use of the day. A wood specialist first covers its meal if
 it can, then finishes or advances a crate when raw wood is available, then
@@ -386,18 +392,21 @@ is snapshotted. Reservations are computed from that snapshot, the villager's
 effective opportunity cost, and survival pressure:
 
 ```text
-wood seller min    = max(blend(opportunity, belief), subsistence) + urgency
+wood seller min    = blend(opportunity, belief) or subsistence floor
 wood buyer max     = blend(opportunity, belief) + storage urgency
-crate seller min   = blend(crate opportunity, crate belief) + urgency
+crate seller min   = blend(crate opportunity, crate belief) * durability
 crate buyer max    = blend(crate opportunity, crate belief) + urgency
 ```
 
 The blend is mostly belief with a smaller opportunity-cost anchor. A wood
 buyer may spend saved berries down to today's meal, so savings can smooth a thin
-market instead of limiting bids to the day's production surplus. A seller whose
-health is low and who is short of food accepts almost any price, because eating
-today matters more than the quoted ratio. Crate opportunities include the eight
-raw wood and the craft minutes valued at the villager's berry rate.
+market instead of limiting bids to the day's production surplus. A seller who is
+short of food *lowers* its ask; a near-starving seller accepts almost any
+positive price, because eating today matters more than the quoted ratio. When a
+seller has enough food, the subsistence floor is the berry cost of a day's meal
+from one day's wood output. Crate opportunities include the eight raw wood and
+the craft minutes valued at the villager's berry rate, scaled by the durability
+of the crates actually offered.
 
 ### Bilateral matching
 
@@ -407,33 +416,44 @@ The market square runs two order books, crates first and then raw wood:
 - buyers have a private maximum willingness to pay, a quantity, and a berry
   budget;
 - the cheapest asks are matched against the highest bids first, with a random
-  tie-break, so a desperate seller reaches the buyers who can actually pay.
+  tie-break, so a desperate seller reaches the buyers who can actually pay;
+- an agent cannot trade with itself and cannot be both a buyer and seller of the
+  same good in one iteration.
 
-If `seller_min <= buyer_max`, the whole-unit trade clears at the integer
-midpoint:
+If `seller_min <= buyer_max`, the trade clears at the fractional midpoint:
 
 ```text
-trade_price = (seller_min + buyer_max) // 2
+trade_price = (seller_min + buyer_max) / 2
 ```
 
-Every trade moves whole goods and conserves them. Wood trades move
-`berries = wood * price`; crate trades move `berries = crates * crate_price`.
-The market price recorded in the header is the realized average integer price
-for the iteration, or the last observed market price when no trade occurred.
+Prices are fractional. Every trade moves whole goods and conserves them. For a
+wood trade the agreed price is berries per wood; for a crate trade it is berries
+per crate. The berry leg is rounded to the nearest whole berry (at least one)
+and the whole quantity is reduced by one unit if rounding would breach the
+buyer's budget. That residual is an explicit indivisibility cost, not a price
+clamp.
+
+Wood and crate prices are kept separate. A crate price bundles wood, craft
+time, and storage, so it does not update the wood price belief or the headline
+berries-per-wood price. The market price in the header is the realized average
+wood price for the iteration, or the last observed wood price when no wood trade
+occurred.
 
 ### Information lag and gossip
 
 All reservations and trades use the start-of-tick beliefs. Belief updates are
 batched until the barter phase ends, so they take effect on tick `t + 1`:
 
-- traders move one berry toward their realized trade price;
+- wood traders move one berry toward their realized wood trade price;
 - other villagers who actually entered the market square move one gossip step
-  toward the average trade price;
-- a fully unmatched seller lowers its belief by one; a fully unmatched buyer
-  raises it by one, within the belief band and `[MIN_PRICE, MAX_PRICE]`.
+  toward the average wood trade price;
+- a fully unmatched wood seller lowers its belief by one unless the ask is
+  already at its subsistence floor; a fully unmatched wood buyer raises it by one
+  unless the bid is already capped by its berry budget.
 
-Villagers who did not enter the market do not receive gossip and do not change
-their beliefs.
+Beliefs are fractional and have no band or upper bound; only positivity is
+enforced. Villagers who did not enter the market do not receive gossip and do
+not change their beliefs.
 
 ## Gifting and reciprocity
 
@@ -447,8 +467,11 @@ With `FEATURES.RECIPROCITY: true`, each gift also creates a **soft obligation**
 in the shared `ObligationBook`: zero interest, no hard due date, and the same
 whole-berry amount. The receiver repays when it has berries above its daily meal
 plus `RECIPROCITY.REPAY_THRESHOLD`, up to `MAX_OUTSTANDING` outstanding berries.
-A soft gift that is never repaid is written off when either side dies; it is not
-a default against a hard deadline.
+Gifts that would push a receiver past `MAX_OUTSTANDING` are capped before they
+move, so the cap never turns a reciprocal gift into a free transfer. A soft gift
+that is never serviced after `RECIPROCITY.DEFAULT_AFTER_DAYS` is written off,
+lowers the debtor's trust, and frees the cap. If either side dies the claim is
+written off without penalising the borrower.
 
 This is deliberately the low-commitment end of the credit spectrum. A plain gift
 is a one-way transfer; a reciprocal gift is a transfer plus a soft claim; a
@@ -462,29 +485,39 @@ capacity** now and require the same good later.
 
 ### Borrowers and lenders
 
-A borrower has demand when it lacks a crate, lacks the wood for the next crate,
-or is short of food. A lender supplies wood above `LENDER_WOOD_BUFFER`, berries
-above its meal plus `LENDER_BERRY_BUFFER`, or crate capacity above
-`LENDER_CRATE_RESERVE` crates. A borrower may owe at most
-`REPAYMENT_CAPACITY_FRACTION` of its expected production over `TERM_DAYS`, and
-each side has a concurrent-loan limit.
+A borrower has demand when it is short of food, lacks a crate, or lacks the wood
+for the next crate. Food is the first claim: a starving villager borrows today's
+meal before crate material or wood. A lender supplies wood above
+`LENDER_WOOD_BUFFER`, berries above its meal plus `LENDER_BERRY_BUFFER`, or
+crate capacity above `LENDER_CRATE_RESERVE` and above any crates already pledged
+as collateral. Pledged crates are excluded from both the crate market and new
+lending, so a borrower cannot sell or lend the security for an existing loan. A
+borrower may owe at most `REPAYMENT_CAPACITY_FRACTION` of its
+expected net production over `TERM_DAYS`, and each side has a concurrent-loan
+limit. For berries, expected production includes wood sold for berries and is net
+of the borrower's own food need. For crates, capacity requires both the wood and
+the craft time to make a crate.
 
 Crate lending is direct capacity lending: the lender transfers one crate, the
 borrower uses the storage, and repayment is one crate. The lent crate is also
 the collateral, so a default can return it to the lender if it still exists.
-Because the loan is secured by the lent crate, crate-capacity loans carry no
-goods interest in either mode; market interest prices wood and berry loans.
+Crate durability is tracked: a new crate covers a loan fully, a worn crate covers
+only its remaining durability, and market mode prices the residual risk. In
+reciprocal mode crate loans remain zero-interest.
 
 ### Reciprocal mode
 
 `MODE: reciprocal` is zero interest: the borrower owes exactly the principal.
 A loan is allowed when the borrower's `trust` is at least `MIN_TRUST`, or when
-it pledges a crate. A low-health borrower without collateral is refused. This is
-the formal, dated version of the trust-and-reciprocity channel.
+it pledges a crate. A low-health borrower *without* collateral is refused; a
+low-health borrower *with* collateral is not. This is the formal, dated version
+of the trust-and-reciprocity channel.
 
 ### Market mode
 
-`MODE: market` prices default risk. A borrower's repayment probability is:
+`MODE: market` prices default risk. A borrower below `MIN_MARKET_TRUST` must
+pledge a crate; a secured low-trust borrower is allowed. A borrower's repayment
+probability is:
 
 ```text
 p = clip(0.25
@@ -502,29 +535,40 @@ rate = clamp(BASE_INTEREST + RISK_PREMIUM * (1 - p) / p,
 ```
 
 and a pledged crate reduces it by up to `COLLATERAL_DISCOUNT` times the
-collateral coverage. Repayment is:
+durability-adjusted collateral coverage. A fully covering crate makes the loan
+risk-free (zero quoted interest); a worn crate covers only its remaining
+durability. Repayment is:
 
 ```text
 repayment = max(principal, ceil(principal * (1 + rate)))
 ```
 
-The realized interest is `repayment / principal - 1`, shown in the replay. There
-is no money: this is a **real** goods interest rate.
+The realized interest is `repayment / principal - 1`, shown in the replay.
+Because repayment moves whole goods, a small positive quoted rate can round up
+to one extra whole unit; that is the accepted indivisibility cost, not a second
+price clamp. There is no money: this is a **real** goods interest rate.
 
 ### Repayment, grace, and default
 
-At the start of each tick, due formal loans are settled. A borrower with enough
-of the loan good repays and gains trust. A borrower that is short gets
-`GRACE_DAYS` extra days. After that, or on death, the obligation defaults:
+At the start of each tick, due formal loans are settled **before** soft gift
+obligations. A berry debtor keeps `FOOD_PER_ITERATION` berries before servicing
+a formal loan, so debt cannot consume today's meal. A borrower repays what it can
+above that reserve; any remainder enters grace or default. A borrower that is
+short gets `GRACE_DAYS` extra days. After that, or on death, the obligation
+defaults:
 
-1. pledged crates are seized;
-2. the remaining principal is taken from the borrower's stock of the loan good;
+1. pledged crates are seized, highest-durability first;
+2. the remaining principal is taken from the borrower's stock of the loan good,
+   again leaving a living berry debtor's daily meal untouched;
 3. the rest is a loss for the lender.
 
 A default lowers the borrower's trust by `TRUST.LOSS`; a repayment raises it by
-`TRUST.GAIN`. If the creditor dies first, the claim is written off. Goods are
-never destroyed by default: they either move to the creditor or stay with the
-debtor.
+`TRUST.GAIN`, scaled by the fraction of principal repaid. If the creditor dies
+first, the claim is written off without penalising the borrower. Goods are never
+destroyed by default: they either move to the creditor or stay with the debtor.
+If a seized crate is worth more than the remaining claim, the excess is recorded
+as `collateral_excess`; it is an explicit whole-crate indivisibility, not hidden
+as zero loss.
 
 ## Shocks
 
@@ -533,6 +577,8 @@ starts one with probability `SHOCKS.PROBABILITY`, lasting a whole number of days
 from `DURATION_RANGE`. While active, berry and wood regeneration are multiplied
 by `BERRY_REGEN_FACTOR` and `WOOD_REGEN_FACTOR`. Shocks are logged and shown in
 the replay; the conservation ledger uses the actual regenerated amount.
+Re-initializing a world clears any active drought, so a fresh run never starts
+mid-shock.
 
 ## Death
 
@@ -546,7 +592,8 @@ until they wear out or spoil, so a death never silently deletes resources.
 2. Optional shock roll; set berry and wood regeneration factors.
 3. Regenerate the commons as whole units, then record
    `berries_commons_pct` and `wood_commons_pct` for the harvest.
-4. Settle due formal loans and repay soft gift obligations when possible.
+4. Settle due formal loans first (preserving a living berry debtor's daily
+   meal), then repay soft gift obligations when possible.
 5. Allocate the finite day using density-adjusted costs and gather; living
    agents are processed in random order, berries before wood within an agent.
 6. Optional need-based whole-berry gifts; with reciprocity, the gift also
@@ -634,12 +681,12 @@ example:
 
 - `meta` — generator, world, iterations, seed, agent count, effective feature
   flags, health settings, finite-day time costs, crate crafting and wear
-  settings, belief bounds, credit/trust/reciprocity/shock settings, resource
-  definitions, initial commons and totals, the initial market price, and the
-  full config.
+  settings, fractional-pricing marker, credit/trust/reciprocity/shock settings,
+  resource definitions, initial commons and totals, the initial market price,
+  and the full config.
 - `agents` — id, label, colour, berry and wood skills, the `specialisation_z`
-  latent, initial price belief, time budget, time costs, craft minutes, base
-  maximum daily yields, initial health, initial crates, and the storage
+  latent, **initial** price belief, time budget, time costs, craft minutes, base
+  maximum daily yields, **initial** health and crate count, and the storage
   container ratio.
 - `ticks` — one row per iteration plus iteration zero. Each tick has summary
   metrics, including commons density, market price, beliefs, crate counts,
@@ -650,10 +697,11 @@ example:
   effective yields, carried wood progress, planned goods, actual gathered goods,
   post-trade holdings, and alive status.
 - `events` — typed `gather`, `craft`, `gift`, `trade`, `loan`, `repay`,
-  `default`, `late`, `shock`, `spoil`, and `death` records with a tick, phase,
-  sequence number, and stable id. Trades carry the goods type, whole quantities,
-  and whole price; credit events carry principal, repayment, interest, due date,
-  collateral, and recovery; shock events carry duration and regeneration
+  `default`, `write_off`, `late`, `shock`, `spoil`, and `death` records with a
+  tick, phase, sequence number, and stable id. Trades carry the goods type, whole
+  quantities, fractional price, and whole berry payment; credit events carry
+  principal, repayment, interest, due date, durability-adjusted collateral,
+  recovery, and collateral excess; shock events carry duration and regeneration
   factors.
 
 The viewer reads this replay and never imports the model.
@@ -674,13 +722,25 @@ The world records, among others: `alive`, `mean_health`, `total_berries`,
 `loan_principal_crates`, `mean_interest_rate`, `loans_repaid`,
 `repayment_wood`, `repayment_berries`, `repayment_crates`, `loans_defaulted`,
 `default_loss_wood`, `default_loss_berries`, `default_loss_crates`,
-`loans_late`, `collateral_seized`, `loans_active`, `credit_outstanding_wood`,
-`credit_outstanding_berries`, `credit_outstanding_crates`, `gift_obligations`,
-`gift_obligation_berries`, `gift_repayments`, `shock_active`, `shocks`,
-`specialisation`, `ppf_efficiency`, and `extinction_iteration`.
+`loans_late`, `collateral_seized`, `collateral_excess_value`, `loans_active`,
+`credit_outstanding_wood`, `credit_outstanding_berries`,
+`credit_outstanding_crates`, `written_off_wood`, `written_off_berries`,
+`written_off_crates`, `gift_obligations`, `gift_obligation_berries`,
+`gift_repayments`, `gift_defaults`, `gift_default_berries`, `shock_active`,
+`shocks`, `specialisation`,
+`ppf_efficiency`, and `extinction_iteration`.
+
+Metrics are per iteration. The experiment runner aggregates flow metrics
+(`loans_originated`, `trade_berries`, `gifts`, `berries_spoiled`, and so on) over
+the run and leaves stock metrics at the final value; reporting only the last
+tick would make most credit and trade experiments look empty.
+
+`specialisation` is a normalised Herfindahl index over berry, wood, and craft
+labour: 0 means the day is split evenly across all three, 1 means one activity
+uses the whole day.
 
 `ppf_efficiency` compares the berry value of actual gathering with the berry
-value of the planned labour at the current whole price. A value below 1 means
+value of the planned labour at the current fractional price. A value below 1 means
 the commons limited the plan.
 
 ## Invariants
@@ -703,24 +763,32 @@ the commons limited the plan.
 8. Dead agents do not participate in gathering, crafting, gifting, trade,
    credit origination, or eating. Their estate can still be seized for a
    defaulted loan.
-9. Every agent's price belief stays within `[MIN_PRICE, MAX_PRICE]` and within
-   the configured baseline band. Trade prices are whole berries per unit.
+9. Every agent's price belief and every trade price is positive and fractional;
+   there is no upper bound, band, or price clamp. Goods quantities and the berry
+   leg of each trade are whole.
 10. Storage capacity is `crate_count * BERRIES_PER_CONTAINER` while storage is
     enabled, and zero otherwise.
 11. Crate durability stays in `(0, 1]`; crates at zero durability are removed.
+    Crate prices, collateral values, and credit coverage scale with durability.
 12. Trust stays in `[0, 1]`. Formal loan principals and repayments are whole
     units, repayments are at least the principal, and reciprocal-mode
     repayments equal the principal.
 13. Soft gift obligations are zero-interest and have no hard due date; formal
-    loans have a due iteration and a finite grace period.
+    loans have a due iteration and a finite grace period. A soft obligation older
+    than `RECIPROCITY.DEFAULT_AFTER_DAYS` becomes a trust-penalising write-off
+    rather than an indefinite free claim.
+14. A living berry debtor keeps `FOOD_PER_ITERATION` berries before formal loan
+    service or default seizure. A borrower may repay partially above that reserve.
+15. A creditor's death is a write-off, never a borrower default.
+16. `SIMULATION.AGENTS` must be at least one.
 
 ## Open decisions
 
 - Whether the shared commons should have spatial access or ownership rules.
 - Whether wood should have a second use, such as tools or shelter.
 - Whether stored berries should spoil slowly by default.
-- Whether credit should also support partial repayment schedules or debt
-  rescheduling beyond the single grace window.
 - Whether agents should learn their comparative advantage rather than read
   their current price belief directly.
 - How crate durability should vary by material or craft skill.
+- Whether over-collateral seizure should return change instead of recording a
+  `collateral_excess` whole-crate transfer.

@@ -7,6 +7,7 @@ ledger makes the feature layers small and keeps conservation auditable.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Iterable
 
@@ -28,10 +29,12 @@ class Obligation:
     kind: str = "loan"
     interest_rate: float = 0.0
     collateral_crates: int = 0
+    collateral_durability: float = 0.0
+    collateral_excess: float = 0.0
     grace_used: int = 0
     status: str = "active"
-    recovered: int = 0
-    loss: int = 0
+    recovered: float = 0.0
+    loss: float = 0.0
     reason: str = ""
 
     @property
@@ -58,6 +61,8 @@ class GoodsLedger:
         good: str,
         quantity: int,
         reason: str,
+        *,
+        crate_preference: str = "low",
     ) -> int:
         if source is None or target is None or quantity <= 0:
             return 0
@@ -65,8 +70,17 @@ class GoodsLedger:
             raise ValueError(f"Unknown good {good!r}")
         if good == "crates":
             moved = min(int(quantity), len(source.crates))
-            for _ in range(moved):
-                target.crates.append(source.crates.pop())
+            if moved <= 0:
+                return 0
+            if crate_preference not in {"low", "high"}:
+                raise ValueError("crate_preference must be 'low' or 'high'")
+            indices = sorted(
+                range(len(source.crates)),
+                key=lambda index: source.crates[index],
+                reverse=crate_preference == "high",
+            )[:moved]
+            for index in sorted(indices, reverse=True):
+                target.crates.append(source.crates.pop(index))
             return moved
         available = int(getattr(source, good))
         moved = min(int(quantity), available)
@@ -115,6 +129,7 @@ class ObligationBook:
         kind: str = "loan",
         interest_rate: float = 0.0,
         collateral_crates: int = 0,
+        collateral_durability: float = 0.0,
     ) -> Obligation:
         obligation = Obligation(
             id=self._next_id,
@@ -128,6 +143,7 @@ class ObligationBook:
             kind=kind,
             interest_rate=float(interest_rate),
             collateral_crates=int(collateral_crates),
+            collateral_durability=float(collateral_durability),
         )
         self._next_id += 1
         self.obligations.append(obligation)
@@ -206,16 +222,31 @@ class ObligationBook:
             debtor_alive = debtor.is_alive
             if obligation.due_iteration > iteration and debtor_alive:
                 continue
-            if not debtor_alive:
-                self._default(obligation, iteration, "death")
-            elif not creditor.is_alive:
+            if not creditor.is_alive:
+                # A dead creditor cannot collect. This is a write-off, not a
+                # borrower default, and it must not penalise the borrower.
                 self._write_off(obligation, iteration, "creditor_death")
-            elif self._can_pay(debtor, obligation.good, obligation.amount_due):
-                self._repay(obligation, iteration)
+            elif not debtor_alive:
+                self._default(obligation, iteration, "death")
             else:
-                self._missed_payment(obligation, iteration)
+                available = self._available_for_repayment(
+                    debtor, obligation.good
+                )
+                if available >= obligation.amount_due:
+                    self._repay(obligation, iteration)
+                elif available > 0:
+                    self._repay(obligation, iteration, amount=available)
+                    if obligation.active and obligation.amount_due > 0:
+                        self._missed_payment(obligation, iteration)
+                else:
+                    self._missed_payment(obligation, iteration)
 
-    def settle_soft_gifts(self, iteration: int, threshold: int) -> None:
+    def settle_soft_gifts(
+        self,
+        iteration: int,
+        threshold: int,
+        default_after_days: int = 0,
+    ) -> None:
         """Repay gift obligations when the debtor has a comfortable surplus."""
 
         food = int(self.world.agent_settings["food_per_iteration"])
@@ -233,6 +264,25 @@ class ObligationBook:
             if not debtor.is_alive or not creditor.is_alive:
                 self._write_off(obligation, iteration, "death")
                 continue
+            age = iteration - int(obligation.created_iteration)
+            if default_after_days > 0 and age > default_after_days:
+                # A soft claim that is never serviced is not free. Write it
+                # off, lower the debtor's public trust, and let it be replaced
+                # only through a fresh, trust-priced relationship.
+                obligation.loss = int(obligation.amount_due)
+                obligation.amount_due = 0
+                obligation.status = "defaulted"
+                obligation.reason = "soft_default"
+                self._penalize_trust(debtor)
+                self._record(
+                    "default",
+                    obligation,
+                    iteration=iteration,
+                    amount=0,
+                    loss=obligation.loss,
+                    reason="soft_default",
+                )
+                continue
             available = int(debtor.berries) - food - int(threshold)
             if available <= 0:
                 continue
@@ -244,7 +294,11 @@ class ObligationBook:
                 continue
             obligation.amount_due -= moved
             obligation.recovered += moved
-            self._award_trust(debtor, gain=moved / max(1, obligation.principal))
+            trust = getattr(self.world, "trust_settings", {})
+            gain = float(trust.get("gain", 0.0)) * min(
+                1.0, moved / max(1, obligation.principal)
+            )
+            self._award_trust(debtor, gain=gain)
             self._record(
                 "repayment",
                 obligation,
@@ -256,28 +310,58 @@ class ObligationBook:
                 obligation.status = "repaid"
                 obligation.amount_due = 0
 
-    def _can_pay(self, debtor: Any, good: str, amount: int) -> bool:
-        return self.ledger.amount(debtor, good) >= int(amount)
+    def _available_for_repayment(self, debtor: Any, good: str) -> int:
+        """Goods that can be repaid without taking today's meal.
 
-    def _repay(self, obligation: Obligation, iteration: int) -> None:
+        Berry debt is subordinate to survival: a debtor keeps
+        ``FOOD_PER_ITERATION`` berries before servicing a formal loan. Wood and
+        crates have no equivalent daily subsistence claim.
+        """
+
+        available = self.ledger.amount(debtor, good)
+        if good == "berries":
+            food = int(self.world.agent_settings["food_per_iteration"])
+            available = max(0, available - food)
+        return available
+
+    def _can_pay(self, debtor: Any, good: str, amount: int) -> bool:
+        return self._available_for_repayment(debtor, good) >= int(amount)
+
+    def _repay(
+        self,
+        obligation: Obligation,
+        iteration: int,
+        amount: int | None = None,
+    ) -> None:
         debtor = self.world._agent_index[obligation.debtor]
         creditor = self.world._agent_index[obligation.creditor]
+        requested = (
+            int(obligation.amount_due) if amount is None else int(amount)
+        )
+        requested = min(requested, int(obligation.amount_due))
+        if requested <= 0:
+            self._missed_payment(obligation, iteration)
+            return
         moved = self.ledger.move(
             debtor,
             creditor,
             obligation.good,
-            obligation.amount_due,
+            requested,
             "loan_repayment",
         )
         if moved <= 0:
-            self._default(obligation, iteration, "unable")
+            self._missed_payment(obligation, iteration)
             return
         obligation.recovered += moved
         obligation.amount_due -= moved
         if obligation.amount_due <= 0:
             obligation.status = "repaid"
             obligation.amount_due = 0
-        self._award_trust(debtor)
+        trust = getattr(self.world, "trust_settings", {})
+        gain = float(trust.get("gain", 0.0)) * min(
+            1.0, moved / max(1, obligation.principal)
+        )
+        self._award_trust(debtor, gain=gain)
         self._record(
             "repayment",
             obligation,
@@ -301,36 +385,61 @@ class ObligationBook:
         debtor = self.world._agent_index[obligation.debtor]
         creditor = self.world._agent_index[obligation.creditor]
         remaining = int(obligation.amount_due)
-        recovered = 0
+        recovered = 0.0
         collateral_seized = 0
+        collateral_value = 0.0
 
         if obligation.collateral_crates > 0:
+            available = sorted(debtor.crates, reverse=True)[
+                : obligation.collateral_crates
+            ]
+            durability = (
+                float(sum(available) / len(available))
+                if available
+                else obligation.collateral_durability
+            )
             collateral_seized = self.ledger.move(
                 debtor,
                 creditor,
                 "crates",
                 obligation.collateral_crates,
                 "collateral",
+                crate_preference="high",
             )
             if collateral_seized:
-                crate_value = self._crate_value(obligation.good)
-                recovered += collateral_seized * crate_value
-                remaining = max(0, remaining - collateral_seized * crate_value)
+                crate_value = self._crate_value(
+                    obligation.good, debtor, durability
+                )
+                collateral_value = collateral_seized * crate_value
+                recovered += collateral_value
+                remaining = max(0, remaining - collateral_value)
 
         if remaining > 0:
+            # remaining is in loan-good units but may be fractional after a
+            # fractional crate valuation. Goods move in whole units, so seize
+            # whole units up to the remaining claim. Berry debt never takes
+            # today's meal from a living debtor.
+            seize_available = self._available_for_repayment(
+                debtor, obligation.good
+            )
+            request = min(
+                int(math.ceil(remaining - 1e-9)), seize_available
+            )
             moved = self.ledger.move(
                 debtor,
                 creditor,
                 obligation.good,
-                remaining,
+                request,
                 "default_seizure",
             )
             recovered += moved
             remaining -= moved
 
-        recovered = min(int(obligation.amount_due), recovered)
         obligation.recovered += recovered
-        obligation.loss = max(0, int(obligation.amount_due) - recovered)
+        obligation.loss = max(0.0, float(obligation.amount_due) - recovered)
+        obligation.collateral_excess = max(
+            0.0, collateral_value - float(obligation.amount_due)
+        )
         obligation.amount_due = 0
         obligation.status = "defaulted"
         obligation.reason = reason
@@ -340,21 +449,21 @@ class ObligationBook:
             "default",
             obligation,
             iteration=iteration,
-            amount=recovered,
+            amount=int(round(recovered)),
             collateral_seized=collateral_seized,
-            loss=obligation.loss,
+            loss=int(round(obligation.loss)),
             reason=reason,
         )
 
     def _write_off(
         self, obligation: Obligation, iteration: int, reason: str
     ) -> None:
-        obligation.loss = int(obligation.amount_due)
+        obligation.loss = int(round(float(obligation.amount_due)))
         obligation.amount_due = 0
         obligation.status = "written_off"
         obligation.reason = reason
         self._record(
-            "default",
+            "write_off",
             obligation,
             iteration=iteration,
             amount=0,
@@ -362,15 +471,17 @@ class ObligationBook:
             reason=reason,
         )
 
-    def _crate_value(self, good: str) -> int:
-        storage = self.world.storage_settings
+    def _crate_value(
+        self, good: str, agent: Any | None = None, durability: float = 1.0
+    ) -> float:
+        world = self.world
         if good == "crates":
-            return 1
+            return max(0.0, min(1.0, float(durability)))
         if good == "wood":
-            return int(storage["wood_per_container"])
+            return world.crate_wood_value(agent, durability=durability)
         if good == "berries":
-            return int(storage["berries_per_container"])
-        return 1
+            return world.crate_berry_value(agent, durability=durability)
+        return 1.0
 
     def _award_trust(self, agent: Any, gain: float | None = None) -> None:
         if not self.world.features.get("TRUST"):
@@ -412,8 +523,12 @@ class ObligationBook:
             "due_iteration": obligation.due_iteration,
             "interest_rate": float(obligation.interest_rate),
             "collateral_crates": int(obligation.collateral_crates),
+            "collateral_durability": float(
+                obligation.collateral_durability
+            ),
             "collateral_seized": int(collateral_seized),
-            "recovered": int(obligation.recovered),
+            "collateral_excess": float(obligation.collateral_excess),
+            "recovered": float(obligation.recovered),
             "loss": int(loss),
             "partial": bool(partial),
             "reason": reason,
@@ -426,6 +541,8 @@ class ObligationBook:
                 self.world.repayment_log.append(record)
             elif event == "default":
                 self.world.default_log.append(record)
+            elif event == "write_off":
+                self.world.write_off_log.append(record)
 
 
 def active_obligations(

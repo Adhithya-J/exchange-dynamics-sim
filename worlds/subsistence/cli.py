@@ -48,8 +48,11 @@ def main(argv: list[str] | None = None) -> None:
         print(f"Viewer written to {path}")
 
     print(final_state.head())
-    print("\nFinal statistics:")
-    print(simulation.metrics_history[-1])
+    if simulation.metrics_history:
+        print("\nFinal statistics:")
+        print(simulation.metrics_history[-1])
+    else:
+        print("\nNo iterations run; no final statistics.")
 
 
 if __name__ == "__main__":
