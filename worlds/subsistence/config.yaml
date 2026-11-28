@@ -67,8 +67,13 @@ AGENTS:
   MAX_WOOD_TARGET: 20
 
 # Shared natural stocks. Stocks and harvests are whole units. Berry bushes
-# regrow steadily; wood regrows much more slowly.
+# regrow steadily; wood regrows much more slowly. Gathering time scales with
+# the current density of each stock: sparse commons cost more travel/search
+# minutes per unit.
 COMMONS:
+  # Floor on density so effective costs never divide by zero. At the floor,
+  # search costs ten times the full-commons base cost.
+  MIN_DENSITY: 0.10
   BERRIES:
     INITIAL: 2000
     CAPACITY: 3000

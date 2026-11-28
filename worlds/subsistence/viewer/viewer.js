@@ -195,6 +195,8 @@
         storage: series.storage[t][index],
         laborB: series.laborB[t][index],
         laborW: series.laborW[t][index],
+        maxB: series.maxB[t][index],
+        maxW: series.maxW[t][index],
         plannedB: series.plannedB[t][index],
         plannedW: series.plannedW[t][index],
         gatheredB: series.gatheredB[t][index],
@@ -214,6 +216,8 @@
         totalWood: series.totalWood[t],
         commonsBerries: series.commonsBerries[t],
         commonsWood: series.commonsWood[t],
+        commonsBerriesPct: series.commonsBerriesPct[t],
+        commonsWoodPct: series.commonsWoodPct[t],
         price: series.price[t],
         spoiled: series.spoiled[t],
         tradeBerries: series.tradeBerries[t],
@@ -633,49 +637,102 @@
     }
 
     // ------------------------------------------------------------- workers
-    function siteForAgent(index, agentState) {
+    function commonsDensity(kind, metrics) {
+      var value = kind === "berries"
+        ? metrics.commonsBerriesPct
+        : metrics.commonsWoodPct;
+      if (value == null) {
+        var initial = kind === "berries"
+          ? meta.initialCommons.berries
+          : meta.initialCommons.wood;
+        var stock = kind === "berries"
+          ? metrics.commonsBerries
+          : metrics.commonsWood;
+        value = initial > 0 ? stock / initial : 0;
+      }
+      var numeric = Number(value);
+      if (!Number.isFinite(numeric)) numeric = 1;
+      return clamp(numeric, 0, 1);
+    }
+
+    function routeForAgent(index, kind, density) {
+      var sites = kind === "berries" ? berrySites : treeSites;
+      var scarcity = 1 - clamp(density, 0, 1);
+      // Full commons: one stop. Mild depletion already adds a second stop;
+      // very thin commons sends the worker around up to six sites.
+      var visits = 1 + Math.round(scarcity * 6);
+      visits = Math.min(sites.length, Math.max(1, visits));
+      var start = index % sites.length;
+      var step = index % 2 === 0 ? 1 : sites.length - 1;
+      var route = [];
+      for (var v = 0; v < visits; v += 1) {
+        route.push(sites[(start + v * step) % sites.length]);
+      }
+      return route;
+    }
+
+    function assignmentForAgent(index, agentState, metrics) {
       if (agentState.laborB <= 0.001 && agentState.laborW <= 0.001) {
         return null;
       }
-      if (agentState.laborB >= agentState.laborW) {
-        return {
-          kind: "berries",
-          site: berrySites[index % berrySites.length]
-        };
-      }
+      var kind = agentState.laborB >= agentState.laborW ? "berries" : "wood";
+      var density = commonsDensity(kind, metrics);
       return {
-        kind: "wood",
-        site: treeSites[index % treeSites.length]
+        kind: kind,
+        density: density,
+        route: routeForAgent(index, kind, density)
       };
     }
 
     function drawWorkers(now) {
-      var cycle = 1800;
+      var metrics = metricsAt(state.tick);
       homes.forEach(function (home, index) {
         var agentState = stateAt(index, state.tick);
         if (!agentState.alive) return;
-        var assignment = siteForAgent(index, agentState);
+        var assignment = assignmentForAgent(index, agentState, metrics);
         if (!assignment) return;
-        var site = assignment.site;
+        var route = assignment.route;
+        var scarcity = 1 - assignment.density;
+        // Sparse commons also makes the whole search cycle take longer.
+        var cycle = 1800 + scarcity * 1200;
         var phase = ((now - state.startedAt) / cycle + index * 0.137) % 1;
         var x;
         var y;
         var working = false;
         if (phase < 0.26) {
           var walkOut = easeInOut(phase / 0.26);
-          x = lerp(home.x, site.x, walkOut);
-          y = lerp(home.y, site.y, walkOut) - Math.sin(walkOut * Math.PI) * 14;
+          x = lerp(home.x, route[0].x, walkOut);
+          y = lerp(home.y, route[0].y, walkOut) - Math.sin(walkOut * Math.PI) * 14;
         } else if (phase < 0.74) {
-          var work = (phase - 0.26) / 0.48;
-          x = site.x + Math.cos(work * Math.PI * 4) * 2.4;
-          y = site.y + 9 + Math.sin(work * Math.PI * 8) * 0.8;
-          working = true;
+          var search = (phase - 0.26) / 0.48;
+          var segmentSize = 1 / route.length;
+          var segment = Math.min(
+            route.length - 1,
+            Math.floor(search / segmentSize)
+          );
+          var local = (search - segment * segmentSize) / segmentSize;
+          var current = route[segment];
+          var next = route[segment + 1];
+          if (next && local >= 0.58) {
+            // Walk to the next sparse bush/tree: visible search time.
+            var travel = easeInOut((local - 0.58) / 0.42);
+            x = lerp(current.x, next.x, travel);
+            y = lerp(current.y, next.y, travel) - Math.sin(travel * Math.PI) * 8;
+          } else {
+            var workLocal = next ? local / 0.58 : local;
+            x = current.x + Math.cos(workLocal * Math.PI * 4) * 2.4;
+            y = current.y + 9 + Math.sin(workLocal * Math.PI * 8) * 0.8;
+            working = true;
+          }
         } else {
           var walkBack = easeInOut((phase - 0.74) / 0.26);
-          x = lerp(site.x, home.x, walkBack);
-          y = lerp(site.y, home.y, walkBack) - Math.sin(walkBack * Math.PI) * 14;
+          var last = route[route.length - 1];
+          x = lerp(last.x, home.x, walkBack);
+          y = lerp(last.y, home.y, walkBack) - Math.sin(walkBack * Math.PI) * 14;
         }
-        drawWorker(x, y, agents[index].color, assignment.kind, working, index, now);
+        drawWorker(
+          x, y, agents[index].color, assignment.kind, working, index, now
+        );
       });
     }
 
@@ -1026,11 +1083,11 @@
       var storageFraction = agentState.storage > 0
         ? clamp(agentState.berries / agentState.storage, 0, 1)
         : 0;
-      var opportunity = agent.maxWood > 0
-        ? agent.maxBerries / agent.maxWood
+      var opportunity = agentState.maxW > 0
+        ? agentState.maxB / agentState.maxW
         : null;
-      var potentialB = agent.maxBerries;
-      var potentialW = agent.maxWood;
+      var potentialB = agentState.maxB;
+      var potentialW = agentState.maxW;
 
       panel.innerHTML =
         "<div class=\"selected-hero\">" +
@@ -1048,7 +1105,8 @@
         "<div class=\"detail-grid\">" +
         detail("Opportunity cost", opportunity == null ? "-" : formatNumber(opportunity, 2) + " berries / wood") +
         detail("Market price", formatNumber(metrics.price, 0) + " berries / wood") +
-        detail("Max per day", formatNumber(potentialB, 1) + " b · " + formatNumber(potentialW, 1) + " w") +
+        detail("Effective max", formatNumber(potentialB, 1) + " b · " + formatNumber(potentialW, 1) + " w") +
+        detail("Harvest density", formatPercent(metrics.commonsBerriesPct) + " b · " + formatPercent(metrics.commonsWoodPct) + " w") +
         detail("Gathered", formatNumber(agentState.gatheredB, 0) + " b · " + formatNumber(agentState.gatheredW, 0) + " w") +
         "</div>" +
         "<div class=\"labour-legend\"><span>berry labour " + formatPercent(agent.labour > 0 ? agentState.laborB / agent.labour : 0) + "</span>" +
@@ -1235,26 +1293,23 @@
 
       var maxB = 1;
       var maxW = 1;
-      var includeTrade = !state.ppfZoom;
       indices.forEach(function (index) {
         var agent = agents[index];
         var agentState = stateAt(index, state.tick);
+        var axisB = state.ppfZoom ? agentState.maxB : agent.maxBerries;
+        var axisW = state.ppfZoom ? agentState.maxW : agent.maxWood;
         maxB = Math.max(
           maxB,
-          agent.maxBerries,
+          axisB,
           agentState.gatheredB,
           agentState.plannedB
         );
         maxW = Math.max(
           maxW,
-          agent.maxWood,
+          axisW,
           agentState.gatheredW,
           agentState.plannedW
         );
-        if (includeTrade) {
-          maxB = Math.max(maxB, agentState.postTradeB, agentState.berries);
-          maxW = Math.max(maxW, agentState.postTradeW, agentState.wood);
-        }
       });
       maxB *= 1.16;
       maxW *= 1.16;
@@ -1320,8 +1375,8 @@
         var agentState = stateAt(index, state.tick);
         var isSelected = index === highlight;
         var opacity = isSelected ? 1 : 0.24;
-        var potentialB = agent.maxBerries;
-        var potentialW = agent.maxWood;
+        var potentialB = agentState.maxB;
+        var potentialW = agentState.maxW;
         var plannedB = agentState.plannedB;
         var plannedW = agentState.plannedW;
 
@@ -1340,8 +1395,8 @@
           // it passes through the chosen production point so it stays visible.
           var price = metricsAt(state.tick).price;
           if (price > 0) {
-            var referenceB = includeTrade ? agentState.postTradeB : plannedB;
-            var referenceW = includeTrade ? agentState.postTradeW : plannedW;
+            var referenceB = plannedB;
+            var referenceW = plannedW;
             var interceptB = referenceB + price * referenceW;
             var wMin = Math.max(0, (interceptB - maxB) / price);
             var wMax = Math.min(maxW, interceptB / price);
@@ -1394,24 +1449,28 @@
       });
 
       var chosen = agents[highlight];
-      var opportunity = chosen.maxWood > 0
-        ? chosen.maxBerries / chosen.maxWood
+      var chosenState = stateAt(highlight, state.tick);
+      var opportunity = chosenState.maxW > 0
+        ? chosenState.maxB / chosenState.maxW
         : null;
+      var tickMetrics = metricsAt(state.tick);
       title.textContent = state.ppfAll
         ? "All villagers"
         : chosen.label;
-      var zoomNote = state.ppfZoom
-        ? " Axes are scaled to the frontier; post-barter holdings may fall outside the plot."
-        : "";
-      var ratioNote = state.ppfZoom
-        ? "The dashed line is the exchange ratio through the chosen production point."
-        : "The dashed line is the exchange ratio through their post-barter holdings.";
+      var scaleNote = state.ppfZoom
+        ? " Axes are scaled to the effective frontier; holdings may fall outside the plot."
+        : " Axes show full-commons limits, so the current frontier contracts inside them; holdings may fall outside the plot.";
+      var ratioNote =
+        "The dashed line is the exchange ratio through the planned production point.";
+      var densityNote =
+        " Harvest density: bushes " + formatPercent(tickMetrics.commonsBerriesPct) +
+        ", forest " + formatPercent(tickMetrics.commonsWoodPct) + ".";
       sub.textContent = state.ppfAll
-        ? "Each line is one villager's frontier. Filled dots are actual gathering; diamonds are holdings after barter." + zoomNote
+        ? "Each line is one villager's density-adjusted frontier. Filled dots are actual gathering; diamonds are holdings after barter." + densityNote + scaleNote
         : chosen.label + ": opportunity cost " +
           (opportunity == null ? "—" : formatNumber(opportunity, 2) + " berries per wood") +
-          ", market price " + formatNumber(metricsAt(state.tick).price, 0) +
-          ". " + ratioNote + zoomNote;
+          ", market price " + formatNumber(tickMetrics.price, 0) +
+          ". " + ratioNote + densityNote + scaleNote;
 
       var legendHtml =
         "<span><i></i>frontier</span>" +

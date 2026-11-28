@@ -74,6 +74,8 @@
       totalWood: [],
       commonsBerries: [],
       commonsWood: [],
+      commonsBerriesPct: [],
+      commonsWoodPct: [],
       price: [],
       spoiled: [],
       tradeBerries: [],
@@ -93,16 +95,37 @@
     var deaths = [];
     var extinctionIteration = null;
     var lastAliveIteration = 0;
+    var initialCommons = replay.meta.initial_commons || { berries: 0, wood: 0 };
 
     for (var t = 0; t < N; t += 1) {
       var tick = ticks[t];
       var rowMetrics = tick.metrics || {};
+      var commonsBerries = Number(rowMetrics.commons_berries) || 0;
+      var commonsWood = Number(rowMetrics.commons_wood) || 0;
+      var berriesPct = rowMetrics.berries_commons_pct;
+      var woodPct = rowMetrics.wood_commons_pct;
+      if (berriesPct == null) {
+        berriesPct = initialCommons.berries > 0
+          ? commonsBerries / initialCommons.berries
+          : 0;
+      }
+      if (woodPct == null) {
+        woodPct = initialCommons.wood > 0
+          ? commonsWood / initialCommons.wood
+          : 0;
+      }
       metrics.aliveCount.push(Number(rowMetrics.alive) || 0);
       metrics.meanHealth.push(Number(rowMetrics.mean_health) || 0);
       metrics.totalBerries.push(Number(rowMetrics.total_berries) || 0);
       metrics.totalWood.push(Number(rowMetrics.total_wood) || 0);
-      metrics.commonsBerries.push(Number(rowMetrics.commons_berries) || 0);
-      metrics.commonsWood.push(Number(rowMetrics.commons_wood) || 0);
+      metrics.commonsBerries.push(commonsBerries);
+      metrics.commonsWood.push(commonsWood);
+      metrics.commonsBerriesPct.push(
+        Math.min(1, Math.max(0, Number(berriesPct) || 0))
+      );
+      metrics.commonsWoodPct.push(
+        Math.min(1, Math.max(0, Number(woodPct) || 0))
+      );
       metrics.price.push(Number(rowMetrics.barter_price) || 0);
       metrics.spoiled.push(Number(rowMetrics.berries_spoiled) || 0);
       metrics.tradeBerries.push(Number(rowMetrics.trade_berries) || 0);
@@ -129,7 +152,7 @@
     // Build the per-agent series directly from the replay rows.
     var stateSeries = {};
     ["health", "berries", "wood", "storage", "laborB", "laborW",
-     "plannedB", "plannedW", "gatheredB", "gatheredW",
+     "maxB", "maxW", "plannedB", "plannedW", "gatheredB", "gatheredW",
      "postTradeB", "postTradeW", "alive"].forEach(
       function (key) {
         stateSeries[key] = [];
@@ -146,6 +169,22 @@
             else if (key === "storage") row[index] = Number(state.storage_capacity) || 0;
             else if (key === "laborB") row[index] = Number(state.labor_berries) || 0;
             else if (key === "laborW") row[index] = Number(state.labor_wood) || 0;
+            else if (key === "maxB") {
+              var stateMaxB = state.effective_berries_per_day != null
+                ? state.effective_berries_per_day
+                : state.max_berries_per_day;
+              row[index] = stateMaxB != null
+                ? Number(stateMaxB) || 0
+                : agents[index].maxBerries;
+            }
+            else if (key === "maxW") {
+              var stateMaxW = state.effective_wood_per_day != null
+                ? state.effective_wood_per_day
+                : state.max_wood_per_day;
+              row[index] = stateMaxW != null
+                ? Number(stateMaxW) || 0
+                : agents[index].maxWood;
+            }
             else if (key === "plannedB") row[index] = Number(state.planned_berries) || 0;
             else if (key === "plannedW") row[index] = Number(state.planned_wood) || 0;
             else if (key === "gatheredB") row[index] = Number(state.gathered_berries) || 0;

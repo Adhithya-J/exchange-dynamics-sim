@@ -79,6 +79,19 @@ def test_replay_records_the_specialisation_latent():
         assert isinstance(agent["specialisation_z"], (int, float))
 
 
+def test_replay_records_commons_density_and_effective_yields():
+    replay = build_replay(small_world())
+    tick = replay["ticks"][1]
+
+    assert "berries_commons_pct" in tick["metrics"]
+    assert "wood_commons_pct" in tick["metrics"]
+    for state in tick["agents"]:
+        assert "effective_berries_per_day" in state
+        assert "effective_wood_per_day" in state
+        assert state["effective_berries_per_day"] >= 0
+        assert state["effective_wood_per_day"] >= 0
+
+
 def test_replay_round_trip_is_deterministic(tmp_path):
     replay = build_replay(small_world())
     path = write_replay(replay, tmp_path / "replay.json.gz")

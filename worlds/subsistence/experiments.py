@@ -34,6 +34,8 @@ DEFAULT_METRICS: tuple[str, ...] = (
     "mean_health",
     "total_berries",
     "total_wood",
+    "berries_commons_pct",
+    "wood_commons_pct",
     "berries_spoiled",
     "trade_berries",
     "barter_price",

@@ -161,9 +161,9 @@ def test_labour_allocation_follows_comparative_advantage():
     world._allocate_labour(wood_specialist)
 
     assert berry_specialist.planned_berries > 0
-    assert berry_specialist.planned_wood == 0
     assert wood_specialist.planned_wood > 0
-    assert wood_specialist.planned_berries == 0
+    assert berry_specialist.planned_berries > wood_specialist.planned_berries
+    assert wood_specialist.planned_wood > berry_specialist.planned_wood
 
 
 def test_ppf_intercepts_come_from_time_and_skill():
@@ -218,8 +218,10 @@ def test_skill_latent_is_negatively_correlated_and_clipped():
 
 
 def test_default_skill_and_health_parameters():
-    settings = SubsistenceWorld(CONFIG).agent_settings
+    world = SubsistenceWorld(CONFIG)
+    settings = world.agent_settings
 
+    assert world.min_commons_density == pytest.approx(0.10)
     assert settings["max_health"] == 4
     assert settings["starting_health"] == 4
     assert settings["food_per_iteration"] == 6
@@ -247,6 +249,69 @@ def test_partial_wood_work_carries_between_days():
     assert agent.wood == 1
     assert agent.wood_progress == pytest.approx(0.1)
     assert world.commons_wood == 9
+
+
+def test_effective_yields_scale_with_commons_density():
+    world = SubsistenceWorld(make_config(SIMULATION={"AGENTS": 1}))
+    agent = world.initialize_agents()[0]
+    full_berries = world.effective_max_berries_per_day(agent)
+    full_wood = world.effective_max_wood_per_day(agent)
+
+    world.commons_berries = world.initial_commons_berries // 2
+    world.commons_wood = world.initial_commons_wood // 2
+    world._current_berries_density = world._commons_density("berries")
+    world._current_wood_density = world._commons_density("wood")
+
+    assert world._current_berries_density == pytest.approx(0.5)
+    assert world._current_wood_density == pytest.approx(0.5)
+    assert world.effective_max_berries_per_day(agent) == pytest.approx(
+        full_berries / 2
+    )
+    assert world.effective_max_wood_per_day(agent) == pytest.approx(
+        full_wood / 2
+    )
+
+    world.commons_berries = 0
+    world._current_berries_density = 0.0
+    assert world.effective_max_berries_per_day(agent) == pytest.approx(
+        full_berries * world.min_commons_density
+    )
+
+
+def test_berry_pickup_is_capped_and_leftover_goes_to_wood():
+    world = SubsistenceWorld(make_config(SIMULATION={"AGENTS": 1}))
+    world.initialize_agents()
+    agent = world.agents[0]
+    agent.berry_skill = 4.0
+    agent.wood_skill = 1.0
+    agent.berries = 20
+    agent.wood = 0
+    world.trade_price = 5
+    world._current_berries_density = 1.0
+    world._current_wood_density = 1.0
+
+    world._allocate_labour(agent)
+
+    # The crate is empty, so the cap is just the six-berry ration. The agent
+    # already has more than enough, so the leftover day goes to chopping.
+    assert agent.planned_berries == 0
+    assert agent.planned_wood > 0
+
+
+def test_berry_cap_bounds_new_pickup_not_total_holding():
+    world = SubsistenceWorld(make_config(SIMULATION={"AGENTS": 1}))
+    world.initialize_agents()
+    agent = world.agents[0]
+    agent.wood = 8
+    agent.berries = 8
+
+    # Capacity is 10. The agent can pick its two missing target berries; the
+    # cap is on new berries, not on the total it already holds.
+    assert world._target_berries(agent) == 10
+    assert world._rational_berry_target(agent) == 10
+
+    agent.berries = 20
+    assert world._rational_berry_target(agent) == 20
 
 
 def test_trade_is_off_when_feature_is_disabled():

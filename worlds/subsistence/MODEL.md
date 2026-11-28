@@ -73,13 +73,36 @@ Chopping one block of wood costs:
 WOOD_TIME_COST / wood_skill      minutes
 ```
 
-Chopping is deliberately much slower than picking. The maximum daily yields
-are therefore:
+Chopping is deliberately much slower than picking, and both activities become
+slower as the commons thins out. The model tracks each stock's density as its
+current stock divided by its initial stock, capped at 1:
 
 ```text
-max_berries = TIME_PER_ITERATION * berry_skill / BERRY_TIME_COST
-max_wood    = TIME_PER_ITERATION * wood_skill  / WOOD_TIME_COST
+berry_density = min(1, commons_berries / initial_commons_berries)
+wood_density  = min(1, commons_wood  / initial_commons_wood)
 ```
+
+Sparse commons add search and travel time. With a floor of `MIN_DENSITY`
+(default `0.10`), the effective minutes per unit are:
+
+```text
+effective_berry_minutes =
+    BERRY_TIME_COST / (berry_skill * max(berry_density, MIN_DENSITY))
+effective_wood_minutes =
+    WOOD_TIME_COST / (wood_skill * max(wood_density, MIN_DENSITY))
+```
+
+The floor keeps costs finite even when a stock is empty. The maximum daily
+yields therefore contract with density:
+
+```text
+max_berries = TIME_PER_ITERATION / effective_berry_minutes
+max_wood    = TIME_PER_ITERATION / effective_wood_minutes
+```
+
+At full density these reduce to the familiar skill-only yields. The PPF chart
+uses these density-adjusted yields for the selected iteration, so the frontier
+visibly contracts as bushes or trees become sparse.
 
 With all available time used, the frontier is the straight line:
 
@@ -113,20 +136,27 @@ tomorrow. Wood stocks therefore stay whole without throwing away slow work.
 ### Labour allocation
 
 With `FEATURES.TRADE: true`, an agent first chooses the activity with the
-higher market value per minute:
+higher density-adjusted market value per minute:
 
 ```text
-berry value per minute = berry_skill / BERRY_TIME_COST
-wood value per minute  = wood_skill * price / WOOD_TIME_COST
+berry value per minute =
+    berry_skill * max(berry_density, MIN_DENSITY) / BERRY_TIME_COST
+wood value per minute =
+    wood_skill * max(wood_density, MIN_DENSITY) * price / WOOD_TIME_COST
 ```
 
 - A **wood specialist** spends enough time to finish the next whole block
   (using any carried `wood_progress`), then uses the rest of the day to gather
-  food and its berry reserve. This lets a low-berry villager produce a tradable
-  block even though a full ration would otherwise consume the whole day.
+  food and its berry reserve.
 - A **berry specialist** covers today's food and its berry reserve, then
   produces a small surplus to buy one block of wood plus `TRADE_SURPLUS`.
-- A berry specialist does not chop its own wood; it buys wood with berries.
+- Berry pickup is also capped at one daily ration plus the empty space left in
+  the crate:
+  `FOOD_PER_ITERATION + max(0, storage_capacity - berries)`. Planned barter
+  can raise that cap. Any leftover working minutes are reallocated to chopping
+  wood instead of picking berries that would only spoil.
+- A berry specialist does not have to chop its own wood, but it will use spare
+  minutes that way once its rational berry target is met.
 - A wood specialist does not have to gather all of its own berries; it can sell
   wood for them.
 
@@ -163,7 +193,12 @@ waste = raw - usable
 ```
 
 Berries regrow quickly and are abundant. Wood regrows much more slowly and is
-the scarce, valuable resource.
+the scarce, valuable resource. Density is measured against the initial stock
+and capped at 1, so a stock above its initial level is still treated as full;
+the `MIN_DENSITY` floor of `0.10` prevents division by zero when a stock is
+exhausted. Each iteration records `berries_commons_pct` and
+`wood_commons_pct` for the harvesting phase, and the viewer uses those values
+for both the frontier and the multi-site search animation.
 
 ## Health and eating
 
@@ -314,9 +349,10 @@ until they wear out or spoil, so a death never silently deletes resources.
 ## Iteration order
 
 1. Reset per-iteration observations.
-2. Regenerate the berry and wood commons as whole units.
-3. Allocate the finite day and gather; living agents are processed in random
-   order, berries before wood within an agent.
+2. Regenerate the berry and wood commons as whole units, then record
+   `berries_commons_pct` and `wood_commons_pct` for the harvest.
+3. Allocate the finite day using density-adjusted costs and gather; living
+   agents are processed in random order, berries before wood within an agent.
 4. Optional need-based whole-berry gifts.
 5. Optional whole-unit barter, including the price update.
 6. Record each living agent's post-trade holdings.
@@ -386,11 +422,13 @@ The flags are independent. For example:
   resource definitions, initial commons and totals, the initial price, and the
   full config.
 - `agents` — id, label, colour, berry and wood skills, the `specialisation_z`
-  latent, time budget, time costs, maximum daily yields, initial health, and
-  the storage container ratio.
+  latent, time budget, time costs, base maximum daily yields, initial health,
+  and the storage container ratio.
 - `ticks` — one row per iteration plus iteration zero. Each tick has summary
-  metrics and one state per agent: whole health, berries, wood and storage
-  capacity; the labour split; carried wood progress; planned berries and wood;
+  metrics, including `berries_commons_pct` and `wood_commons_pct`, and one
+  state per agent: whole health, berries, wood and storage capacity; the labour
+  split; density-adjusted `effective_berries_per_day` and
+  `effective_wood_per_day`; carried wood progress; planned berries and wood;
   actual whole gathered berries and wood; whole post-trade holdings; and alive
   status.
 - `events` — typed `gather`, `gift`, `trade`, `spoil`, and `death` records with
@@ -403,9 +441,10 @@ The viewer reads this replay and never imports the model.
 ## Metrics
 
 The world records, among others: `alive`, `mean_health`, `total_berries`,
-`total_wood`, `commons_berries`, `commons_wood`, `gini_berries`, `gini_wood`,
-`barter_price`, `berries_gathered`, `wood_gathered`, `berries_eaten`,
-`unmet_food`, `berries_spoiled`, `wood_decayed`, `commons_waste_berries`,
+`total_wood`, `commons_berries`, `commons_wood`, `berries_commons_pct`,
+`wood_commons_pct`, `gini_berries`, `gini_wood`, `barter_price`,
+`berries_gathered`, `wood_gathered`, `berries_eaten`, `unmet_food`,
+`berries_spoiled`, `wood_decayed`, `commons_waste_berries`,
 `commons_waste_wood`, `storage_capacity`, `storage_used`,
 `storage_utilization`, `trade_berries`, `trade_wood`, `gifts`, `gift_berries`,
 `specialisation`, `ppf_efficiency`, and `extinction_iteration`.
@@ -422,15 +461,17 @@ the commons limited the plan.
 3. Labour spent on berries and wood never exceeds the agent's finite day.
 4. `wood_progress` is fractional, stays in `[0, 1)`, and carries between
    iterations; it is never counted as stored wood.
-5. Total berries and total wood change only by the sources and sinks in the
+5. `berries_commons_pct` and `wood_commons_pct` stay in `[0, 1]`, and effective
+   minute costs use `max(density, MIN_DENSITY)` so they remain finite.
+6. Total berries and total wood change only by the sources and sinks in the
    ledger above.
-5. Gifts and trades conserve both goods.
-6. Dead agents do not participate in gathering, gifting, trade, or eating.
-7. The barter price stays within `[MIN_PRICE, MAX_PRICE]` and is a whole
+7. Gifts and trades conserve both goods.
+8. Dead agents do not participate in gathering, gifting, trade, or eating.
+9. The barter price stays within `[MIN_PRICE, MAX_PRICE]` and is a whole
    number of berries per wood.
-8. Storage capacity is
-   `(wood * BERRIES_PER_CONTAINER) // WOOD_PER_CONTAINER` while storage is
-   enabled, and zero otherwise.
+10. Storage capacity is
+    `(wood * BERRIES_PER_CONTAINER) // WOOD_PER_CONTAINER` while storage is
+    enabled, and zero otherwise.
 
 ## Open decisions
 

@@ -151,6 +151,26 @@ def build_replay(simulation: SubsistenceWorld) -> dict[str, Any]:
                         "gathered_wood": int(
                             rows[agent_id].get("gathered_wood", 0)
                         ),
+                        "effective_berries_per_day": float(
+                            rows[agent_id].get(
+                                "effective_berries_per_day", 0.0
+                            )
+                        ),
+                        "effective_wood_per_day": float(
+                            rows[agent_id].get(
+                                "effective_wood_per_day", 0.0
+                            )
+                        ),
+                        "max_berries_per_day": float(
+                            rows[agent_id].get(
+                                "effective_berries_per_day", 0.0
+                            )
+                        ),
+                        "max_wood_per_day": float(
+                            rows[agent_id].get(
+                                "effective_wood_per_day", 0.0
+                            )
+                        ),
                         "post_trade_berries": int(
                             rows[agent_id].get("post_trade_berries", 0)
                         ),
@@ -304,6 +324,12 @@ def _initial_metrics(
         "total_wood": total_wood,
         "commons_berries": int(simulation.initial_commons_berries),
         "commons_wood": int(simulation.initial_commons_wood),
+        "berries_commons_pct": (
+            1.0 if simulation.initial_commons_berries > 0 else 0.0
+        ),
+        "wood_commons_pct": (
+            1.0 if simulation.initial_commons_wood > 0 else 0.0
+        ),
         "total_berries_all": total_berries
         + int(simulation.initial_commons_berries),
         "total_wood_all": total_wood + int(simulation.initial_commons_wood),

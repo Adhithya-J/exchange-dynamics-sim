@@ -78,6 +78,8 @@ DEFAULT_RESOURCE_SETTINGS: dict[str, float] = {
     "EXTRACTION_EFFICIENCY": 1.0,
 }
 
+DEFAULT_COMMONS_MIN_DENSITY = 0.10
+
 DEFAULT_STORAGE_SETTINGS: dict[str, float] = {
     "WOOD_PER_CONTAINER": 8,
     "BERRIES_PER_CONTAINER": 10,
@@ -242,6 +244,7 @@ class SubsistenceWorld:
         self.commons_settings = {
             name: self._resource_settings(name) for name in ("berries", "wood")
         }
+        self.min_commons_density = self._commons_min_density()
         self.storage_settings = self._storage_settings()
         self.trade_settings = self._trade_settings()
         self.gifting_settings = self._gifting_settings()
@@ -250,6 +253,8 @@ class SubsistenceWorld:
         self.commons_wood = 0
         self.initial_commons_berries = 0
         self.initial_commons_wood = 0
+        self._current_berries_density = 0.0
+        self._current_wood_density = 0.0
         self.price = float(self.trade_settings["initial_price"])
         self.trade_price = int(self.trade_settings["initial_price"])
         self.initial_price = self.trade_price
@@ -441,6 +446,18 @@ class SubsistenceWorld:
             "extraction_efficiency": efficiency,
         }
 
+    def _commons_min_density(self) -> float:
+        configured = self.config.get("COMMONS") or {}
+        try:
+            min_density = float(
+                configured.get("MIN_DENSITY", DEFAULT_COMMONS_MIN_DENSITY)
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("COMMONS.MIN_DENSITY must be numeric") from exc
+        if not 0 < min_density <= 1:
+            raise ValueError("COMMONS.MIN_DENSITY must be in (0, 1]")
+        return min_density
+
     def _storage_settings(self) -> dict[str, float]:
         configured = self.config.get("STORAGE") or {}
         merged = {**DEFAULT_STORAGE_SETTINGS, **configured}
@@ -600,6 +617,8 @@ class SubsistenceWorld:
         self.initial_commons_wood = wood["initial"]
         self.commons_berries = berries["initial"]
         self.commons_wood = wood["initial"]
+        self._current_berries_density = self._commons_density("berries")
+        self._current_wood_density = self._commons_density("wood")
         self.price = float(self.trade_settings["initial_price"])
         self.trade_price = int(self.trade_settings["initial_price"])
         self.initial_price = self.trade_price
@@ -607,6 +626,66 @@ class SubsistenceWorld:
         self._reset_iteration_state()
         self._record_agent_snapshot(iteration=0)
         return self.agents
+
+    def _commons_density(self, resource: str) -> float:
+        """Current stock as a fraction of the initial stock, capped at 1."""
+
+        if resource == "berries":
+            initial = self.initial_commons_berries
+            stock = self.commons_berries
+        else:
+            initial = self.initial_commons_wood
+            stock = self.commons_wood
+        if initial <= 0:
+            return 0.0
+        return min(1.0, max(0.0, float(stock) / float(initial)))
+
+    @property
+    def berries_commons_pct(self) -> float:
+        return self._commons_density("berries")
+
+    @property
+    def wood_commons_pct(self) -> float:
+        return self._commons_density("wood")
+
+    def _effective_density(self, density: float) -> float:
+        return max(float(density), self.min_commons_density)
+
+    def effective_berry_minutes(
+        self, agent: Agent, density: float | None = None
+    ) -> float:
+        if agent.berry_skill <= 0 or agent.berry_time_cost <= 0:
+            return float("inf")
+        current = self.berries_commons_pct if density is None else density
+        return agent.berry_time_cost / (
+            agent.berry_skill * self._effective_density(current)
+        )
+
+    def effective_wood_minutes(
+        self, agent: Agent, density: float | None = None
+    ) -> float:
+        if agent.wood_skill <= 0 or agent.wood_time_cost <= 0:
+            return float("inf")
+        current = self.wood_commons_pct if density is None else density
+        return agent.wood_time_cost / (
+            agent.wood_skill * self._effective_density(current)
+        )
+
+    def effective_max_berries_per_day(
+        self, agent: Agent, density: float | None = None
+    ) -> float:
+        minutes = self.effective_berry_minutes(agent, density)
+        if not math.isfinite(minutes) or minutes <= 0:
+            return 0.0
+        return agent.time_per_iteration / minutes
+
+    def effective_max_wood_per_day(
+        self, agent: Agent, density: float | None = None
+    ) -> float:
+        minutes = self.effective_wood_minutes(agent, density)
+        if not math.isfinite(minutes) or minutes <= 0:
+            return 0.0
+        return agent.time_per_iteration / minutes
 
     def _reset_iteration_state(self) -> None:
         for agent in self.agents:
@@ -644,6 +723,8 @@ class SubsistenceWorld:
         self._reset_iteration_state()
 
         self._regenerate_commons()
+        self._current_berries_density = self._commons_density("berries")
+        self._current_wood_density = self._commons_density("wood")
         self._gather_all()
         if self.features["GIFTING"]:
             self._process_gifts()
@@ -729,6 +810,29 @@ class SubsistenceWorld:
         capacity = agent.storage_capacity if self.features["STORAGE"] else 0
         return max(food, min(capacity, reserve))
 
+    def _rational_berry_cap(self, agent: Agent) -> float:
+        """Most new berries worth picking today, before planned barter.
+
+        The cap is one daily ration plus whatever empty crate space remains.
+        With spoilage disabled, berries keep indefinitely, so there is no
+        rational cap.
+        """
+
+        if not self.features["SPOILAGE"]:
+            return float("inf")
+        ration = self.agent_settings["food_per_iteration"]
+        capacity = agent.storage_capacity if self.features["STORAGE"] else 0
+        remaining_crate = max(0, capacity - agent.berries)
+        return float(ration + remaining_crate)
+
+    def _rational_berry_target(self, agent: Agent) -> float:
+        """Total berry holding to aim for after non-barter gathering."""
+
+        target = self._target_berries(agent)
+        new_needed = max(0, target - agent.berries)
+        new_allowed = self._rational_berry_cap(agent)
+        return float(agent.berries + min(new_needed, new_allowed))
+
     def _allocate_labour(self, agent: Agent) -> None:
         """Spend the finite day between berries and wood.
 
@@ -740,16 +844,31 @@ class SubsistenceWorld:
         settings = self.agent_settings
         food = settings["food_per_iteration"]
         remaining = agent.time_per_iteration
-        berry_minutes = (
-            agent.berry_time_cost / agent.berry_skill
-            if agent.berry_skill > 0
-            else float("inf")
+        berry_density = self._effective_density(self._current_berries_density)
+        wood_density = self._effective_density(self._current_wood_density)
+        berry_minutes = self.effective_berry_minutes(
+            agent, self._current_berries_density
         )
-        wood_minutes = (
-            agent.wood_time_cost / agent.wood_skill
-            if agent.wood_skill > 0
-            else float("inf")
+        wood_minutes = self.effective_wood_minutes(
+            agent, self._current_wood_density
         )
+        berry_value_per_minute = (
+            agent.berry_skill * berry_density / agent.berry_time_cost
+            if agent.berry_time_cost > 0 and math.isfinite(berry_minutes)
+            else 0.0
+        )
+        wood_value_per_minute = (
+            agent.wood_skill
+            * wood_density
+            * self.trade_price
+            / agent.wood_time_cost
+            if agent.wood_time_cost > 0 and math.isfinite(wood_minutes)
+            else 0.0
+        )
+        wood_has_value = self.features["STORAGE"] and self.features["SPOILAGE"]
+        if not wood_has_value:
+            # Wood is only fuel for storage here; do not spend berry time on it.
+            wood_value_per_minute = 0.0
 
         def spend_berries(amount: float) -> None:
             nonlocal remaining
@@ -773,31 +892,28 @@ class SubsistenceWorld:
             agent.labor_wood += used / agent.time_per_iteration
             remaining -= used
 
-        # With trade, pick the activity with the higher market value per
-        # minute. A wood specialist chops first, finishing the next whole
-        # block, then gathers food with any remaining time. That lets a
-        # low-berry villager produce a tradable block instead of spending the
-        # whole day failing to gather a full ration. A berry specialist covers
-        # food and its reserve, then produces a small surplus to buy wood.
+        def spend_leftover_wood() -> None:
+            if remaining <= 0 or wood_value_per_minute <= 0:
+                return
+            surplus = (
+                settings["trade_surplus"] if self.features["TRADE"] else 0
+            )
+            wood_cap = self._target_wood(agent) + surplus
+            spend_wood(max(0.0, wood_cap - agent.wood - agent.planned_wood))
+
+        # With trade, pick the activity with the higher density-adjusted
+        # market value per minute. A wood specialist chops first, finishing
+        # the next whole block, then gathers food with any remaining time. A
+        # berry specialist covers food and its crate, then produces a small
+        # surplus to buy wood. Any time left after the rational berry cap goes
+        # to chopping instead of picking berries that would only spoil.
         if self.features["TRADE"]:
             target_berries = self._target_berries(agent)
+            rational_target = self._rational_berry_target(agent)
             target_wood = self._target_wood(agent)
-            berry_value_per_minute = (
-                agent.berry_skill / agent.berry_time_cost
-                if agent.berry_time_cost > 0
-                else 0.0
-            )
-            wood_value_per_minute = (
-                agent.wood_skill * self.trade_price / agent.wood_time_cost
-                if agent.wood_time_cost > 0
-                else 0.0
-            )
-            if not (self.features["STORAGE"] and self.features["SPOILAGE"]):
-                # Wood has no preservation value in these control settings.
-                wood_value_per_minute = 0.0
 
             if wood_value_per_minute > berry_value_per_minute:
-                wood_cap = target_wood + self.agent_settings["trade_surplus"]
+                wood_cap = target_wood + settings["trade_surplus"]
                 if agent.wood < wood_cap and math.isfinite(wood_minutes):
                     needed = max(0.0, 1.0 - agent.wood_progress)
                     minutes_for_block = min(remaining, needed * wood_minutes)
@@ -808,7 +924,7 @@ class SubsistenceWorld:
                     spend_berries(
                         max(
                             0.0,
-                            target_berries
+                            rational_target
                             - agent.berries
                             - agent.planned_berries,
                         )
@@ -818,7 +934,9 @@ class SubsistenceWorld:
                 spend_berries(
                     max(
                         0.0,
-                        target_berries - agent.berries - agent.planned_berries,
+                        rational_target
+                        - agent.berries
+                        - agent.planned_berries,
                     )
                 )
                 wood_deficit = max(0, target_wood - agent.wood)
@@ -826,27 +944,32 @@ class SubsistenceWorld:
                 berries_for_wood = min(
                     purchase_target * self.trade_price, 8
                 )
-                berry_cap = (
-                    target_berries
-                    + berries_for_wood
-                    + self.agent_settings["trade_surplus"]
-                )
-                spend_berries(
-                    max(
-                        0.0,
-                        berry_cap - agent.berries - agent.planned_berries,
+                barter_allowance = berries_for_wood
+                if purchase_target > 0:
+                    barter_allowance += settings["trade_surplus"]
+                current_surplus = max(0, agent.berries - target_berries)
+                barter_need = max(0, barter_allowance - current_surplus)
+                if barter_need > 0:
+                    berry_cap = rational_target + barter_need
+                    spend_berries(
+                        max(
+                            0.0,
+                            berry_cap
+                            - agent.berries
+                            - agent.planned_berries,
+                        )
                     )
-                )
+            spend_leftover_wood()
             return
 
         # Without trade, aim for self-sufficiency.
         spend_berries(max(0, food - agent.berries))
 
-        if self.features["STORAGE"]:
+        if self.features["STORAGE"] and self.features["SPOILAGE"]:
             spend_wood(max(0, self._target_wood(agent) - agent.wood))
 
         if self.features["STORAGE"] and self.features["SPOILAGE"]:
-            target = self._target_berries(agent)
+            target = self._rational_berry_target(agent)
             spend_berries(
                 max(0.0, target - agent.berries - agent.planned_berries)
             )
@@ -854,6 +977,8 @@ class SubsistenceWorld:
         if remaining > 0 and not self.features["SPOILAGE"]:
             if math.isfinite(berry_minutes):
                 spend_berries(remaining / berry_minutes)
+
+        spend_leftover_wood()
 
     def _extract(self, agent: Agent, resource: str, requested: float) -> int:
         settings = self.commons_settings[resource]
@@ -1252,6 +1377,8 @@ class SubsistenceWorld:
             "storage_utilization": (
                 storage_used / storage_capacity if storage_capacity > 0 else 0.0
             ),
+            "berries_commons_pct": self._current_berries_density,
+            "wood_commons_pct": self._current_wood_density,
             "trade_berries": self._last_trade_berries,
             "trade_wood": self._last_trade_wood,
             "gifts": self._last_gifts,
@@ -1261,12 +1388,16 @@ class SubsistenceWorld:
 
     def _record_agent_snapshot(self, iteration: int) -> None:
         for agent in self.agents:
-            self.agent_history.append(
-                {
-                    "iteration": iteration,
-                    **agent.to_dict(),
-                }
+            row = agent.to_dict()
+            row["effective_berries_per_day"] = (
+                self.effective_max_berries_per_day(
+                    agent, self._current_berries_density
+                )
             )
+            row["effective_wood_per_day"] = self.effective_max_wood_per_day(
+                agent, self._current_wood_density
+            )
+            self.agent_history.append({"iteration": iteration, **row})
 
     def to_frame(self) -> pd.DataFrame:
         columns = [
@@ -1312,6 +1443,8 @@ class SubsistenceWorld:
             "specialisation_z",
             "max_berries_per_day",
             "max_wood_per_day",
+            "effective_berries_per_day",
+            "effective_wood_per_day",
             "labor_berries",
             "labor_wood",
             "wood_progress",

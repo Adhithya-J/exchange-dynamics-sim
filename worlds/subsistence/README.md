@@ -5,8 +5,10 @@ working day gathering whole berries and whole wood from a shared commons, eat,
 store food, and optionally barter. Health is a short four-day buffer, eight
 wood blocks store ten berries, chopping is much slower than picking, and a
 shared specialisation latent makes berry and wood skills negatively correlated.
-Partial chopping carries between days. Little villagers walk out to the berry
-bushes and forest during the run.
+Gathering and chopping also slow down as the commons thins, so search time
+rises and the production frontier contracts. Partial chopping carries between
+days. Little villagers walk out to the berry bushes and forest, visiting
+several sparse sites when the commons is depleted.
 
 ## Run it
 

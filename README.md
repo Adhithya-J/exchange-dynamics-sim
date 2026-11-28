@@ -2,11 +2,11 @@
 
 ![The subsistence village at iteration 50](docs/subsistence-world.png)
 
-*Default subsistence configuration at iteration 50. Seven villagers are alive,
-the four-day health buffer is under pressure, the berry commons is full, and
-the forest is down to about 15% while two barter trades clear at six berries per
-wood. Villagers walk out to pick berries or chop wood; the selected villager is
-inspecting the market.*
+*Default subsistence configuration at iteration 50. Five villagers remain, the
+berry commons is full, and the forest is at about 89%. The selected villager's
+effective wood yield has contracted from its full-commons value because harvest
+density is below 100%. The inspector shows the harvest density used by the
+frontier and search animation.*
 
 An experimental agent-based laboratory for exchange, survival, and inequality.
 The repository now holds **two worlds** that share a small set of simulation
@@ -59,6 +59,10 @@ drag the timeline to scrub, and click a villager to inspect them.
 - **The day is finite.** Each villager has a fixed number of working minutes.
   Picking berries is quick; chopping wood is much slower and yields much rarer,
   more valuable wood. Unfinished chopping carries into the next day.
+- **Sparse commons adds search time.** Gathering and chopping costs rise as the
+  berry bushes and forest thin, with a safe density floor. The production
+  possibilities frontier contracts with the current commons density, and
+  villagers visibly move between several sparse sites.
 - **Skills differ.** Each villager draws one shared specialisation latent `z`.
   Berry skill rises with `z` and wood skill falls with it, so strong pickers are
   weak choppers and strong choppers are weak pickers. Together with the finite
@@ -99,10 +103,12 @@ The money world keeps its own flags (`GIFTING.ENABLED`, `MARKET.ENABLED`,
 ## The production possibilities chart
 
 Press **P** or the **PPF** button to expand the chart. It shows the selected
-villager's frontier, their planned labour point, what they actually gathered,
-and their holdings after barter. The dashed line is the current exchange
-ratio. **Zoom to frontier** scales the axes to the frontier so the trade-off is
-readable; **Show all villagers** overlays every living villager's frontier.
+villager's density-adjusted frontier, their planned labour point, what they
+actually gathered, and their holdings after barter. The dashed line is the
+current exchange ratio. **Zoom to frontier** scales the axes to the effective
+frontier so the trade-off is readable; **Show all villagers** overlays every
+living villager's frontier. In the normal view the axes stay at full-commons
+limits, so a contraction from sparse bushes or trees is visible.
 
 ![The expanded production possibilities chart](docs/subsistence-ppf.png)
 
