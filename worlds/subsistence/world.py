@@ -9,12 +9,16 @@ There is no money anywhere in the model.
 The optional layers are deliberately small:
 
 - ``FEATURES.TRADE`` enables whole-unit barter at a berries-per-wood ratio.
-- ``FEATURES.STORAGE`` lets wood provide storage capacity.
+- ``FEATURES.STORAGE`` lets finished crates provide storage capacity.
 - ``FEATURES.SPOILAGE`` makes unprotected berries spoil.
 - ``FEATURES.GIFTING`` enables need-based whole-berry gifts.
+- ``FEATURES.TRUST`` adds public credit reputation.
+- ``FEATURES.RECIPROCITY`` turns gifts into soft zero-interest obligations.
+- ``FEATURES.CREDIT`` enables reciprocal or risk-priced loans.
+- ``FEATURES.SHOCKS`` adds temporary commons droughts.
 
-Trust, reciprocity, and shocks are reserved for shared utilities and are not
-active in this world yet.
+Feature code lives in ``worlds/subsistence/features``; the core world keeps the
+resource, labour, and market engine.
 """
 
 from __future__ import annotations
@@ -29,7 +33,19 @@ import numpy as np
 import pandas as pd
 
 from utils import MetricsCalculator, load_config
-from utils.social import GiftSettings, process_berry_gifts, validate_gift_settings
+from worlds.subsistence.features import (
+    CreditLayer,
+    FeatureRegistry,
+    GiftingLayer,
+    GoodsLedger,
+    Obligation,
+    ObligationBook,
+    PassiveLayer,
+    ReciprocityLayer,
+    ShockLayer,
+    TradeLayer,
+    TrustLayer,
+)
 
 CONFIG: dict[str, dict[str, Any]] = load_config(
     Path(__file__).resolve().parent / "config.yaml"
@@ -41,6 +57,7 @@ EPSILON = 1e-9
 DEFAULT_FEATURES: dict[str, bool] = {
     "GIFTING": False,
     "TRADE": True,
+    "CREDIT": False,
     "STORAGE": True,
     "SPOILAGE": True,
     "TRUST": False,
@@ -107,13 +124,8 @@ DEFAULT_TRADE_SETTINGS: dict[str, float] = {
     "MAX_CRATE_PRICE": 400,
 }
 
-DEFAULT_GIFTING_SETTINGS: dict[str, Any] = {
-    "PROBABILITY": 0.25,
-    "AMOUNT_RANGE": (1, 3),
-    "MIN_RESERVE": 2,
-}
-
-UNSUPPORTED_FEATURES = ("TRUST", "RECIPROCITY", "SHOCKS")
+# Backwards-compatible name for the generic obligation record.
+Loan = Obligation
 
 
 class Agent:
@@ -155,6 +167,12 @@ class Agent:
         # Per-villager taste for a days-of-food reserve. The world draws this
         # once at initialization so stocks differ across the population.
         self.reserve_days_preference = 0.0
+        # Credit reputation: a public score updated by repayment and default.
+        self.trust = 0.5
+        self.defaults = 0
+        self.repayments = 0
+        self.loans_taken = 0
+        self.loans_given = 0
         # Fractional wood work completed toward the next whole block. It
         # persists across iterations so slow chopping is not lost each day.
         self.wood_progress = 0.0
@@ -241,6 +259,11 @@ class Agent:
             "crate_durability": self.crate_durability,
             "craft_progress": self.craft_progress,
             "price_belief": self.price_belief,
+            "trust": self.trust,
+            "defaults": self.defaults,
+            "repayments": self.repayments,
+            "loans_taken": self.loans_taken,
+            "loans_given": self.loans_given,
             "storage_capacity": self.storage_capacity,
             "berry_skill": self.berry_skill,
             "wood_skill": self.wood_skill,
@@ -279,7 +302,6 @@ class SubsistenceWorld:
         self.metrics_history: list[dict[str, Any]] = []
         self.agent_history: list[dict[str, Any]] = []
 
-        self.features = self._feature_settings()
         self.agent_settings = self._agent_settings()
         self.commons_settings = {
             name: self._resource_settings(name) for name in ("berries", "wood")
@@ -287,7 +309,19 @@ class SubsistenceWorld:
         self.min_commons_density = self._commons_min_density()
         self.storage_settings = self._storage_settings()
         self.trade_settings = self._trade_settings()
-        self.gifting_settings = self._gifting_settings()
+
+        self.ledger = GoodsLedger(self)
+        self.obligations = ObligationBook(self)
+        self.feature_registry = FeatureRegistry(self)
+        self.feature_registry.register(PassiveLayer(self, "STORAGE"))
+        self.feature_registry.register(PassiveLayer(self, "SPOILAGE"))
+        self.feature_registry.register(TradeLayer(self))
+        self.feature_registry.register(GiftingLayer(self))
+        self.feature_registry.register(TrustLayer(self))
+        self.feature_registry.register(ReciprocityLayer(self))
+        self.feature_registry.register(CreditLayer(self))
+        self.feature_registry.register(ShockLayer(self))
+        self.features = self.feature_registry.resolve(self._requested_features())
 
         self.commons_berries = 0
         self.commons_wood = 0
@@ -295,6 +329,8 @@ class SubsistenceWorld:
         self.initial_commons_wood = 0
         self._current_berries_density = 0.0
         self._current_wood_density = 0.0
+        self._berry_regen_factor = 1.0
+        self._wood_regen_factor = 1.0
         self.initial_price = int(self.trade_settings["initial_price"])
         self.last_market_price = self.initial_price
         self.last_crate_price = 0
@@ -312,6 +348,10 @@ class SubsistenceWorld:
         self.gift_log: list[dict[str, Any]] = []
         self.spoil_log: list[dict[str, Any]] = []
         self.death_log: list[dict[str, Any]] = []
+        self.loan_log: list[dict[str, Any]] = []
+        self.repayment_log: list[dict[str, Any]] = []
+        self.default_log: list[dict[str, Any]] = []
+        self.shock_log: list[dict[str, Any]] = []
         self._dead_logged: set[str] = set()
 
         self._last_gathered_berries = 0
@@ -331,6 +371,18 @@ class SubsistenceWorld:
         self._last_trade_crates = 0
         self._last_gifts = 0
         self._last_gift_berries = 0
+
+    @property
+    def loans(self) -> list[Obligation]:
+        return [
+            obligation
+            for obligation in self.obligations.obligations
+            if obligation.kind == "loan"
+        ]
+
+    @property
+    def credit_events(self) -> list[dict[str, Any]]:
+        return self.obligations.events
 
     # ------------------------------------------------------------------
     # Configuration
@@ -357,17 +409,16 @@ class SubsistenceWorld:
             )
         return lower, upper
 
-    def _feature_settings(self) -> dict[str, bool]:
+    def _requested_features(self) -> dict[str, bool]:
         configured = self.config.get("FEATURES") or {}
+        unknown = set(configured) - set(DEFAULT_FEATURES)
+        if unknown:
+            raise ValueError(
+                f"Unknown FEATURES flags: {sorted(unknown)}; valid flags are "
+                f"{sorted(DEFAULT_FEATURES)}"
+            )
         merged = {**DEFAULT_FEATURES, **configured}
-        features = {key: bool(value) for key, value in merged.items()}
-        for key in UNSUPPORTED_FEATURES:
-            if features.get(key):
-                raise ValueError(
-                    f"FEATURES.{key} is not active in the subsistence world yet; "
-                    "it is reserved for the shared social utilities"
-                )
-        return features
+        return {key: bool(value) for key, value in merged.items()}
 
     def _agent_settings(self) -> dict[str, Any]:
         configured = self.config.get("AGENTS") or {}
@@ -619,28 +670,6 @@ class SubsistenceWorld:
             "max_crate_price": max_crate_price,
         }
 
-    def _gifting_settings(self) -> GiftSettings:
-        configured = self.config.get("GIFTING") or {}
-        merged = {**DEFAULT_GIFTING_SETTINGS, **configured}
-        try:
-            probability = float(merged["PROBABILITY"])
-            amount_range = self._validated_int_range(
-                merged["AMOUNT_RANGE"], "GIFTING.AMOUNT_RANGE"
-            )
-            min_reserve = int(merged["MIN_RESERVE"])
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                "GIFTING settings must be numeric; amounts and reserves must be "
-                "whole berries"
-            ) from exc
-        settings = GiftSettings(
-            probability=probability,
-            amount_range=amount_range,
-            min_reserve=min_reserve,
-        )
-        validate_gift_settings(settings)
-        return settings
-
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -728,6 +757,15 @@ class SubsistenceWorld:
                 settings["reserve_days"]
                 * self.random.uniform(1.0 - jitter, 1.0 + jitter),
             )
+            trust_layer = getattr(self, "trust_layer", None)
+            if trust_layer is not None:
+                trust_layer.reset_agent(agent)
+            else:
+                agent.trust = 0.0
+                agent.defaults = 0
+                agent.repayments = 0
+                agent.loans_taken = 0
+                agent.loans_given = 0
         self.initial_price = baseline
         self.last_market_price = baseline
         self.last_crate_price = 0
@@ -742,6 +780,11 @@ class SubsistenceWorld:
         self.gift_log = []
         self.spoil_log = []
         self.death_log = []
+        self.loan_log = []
+        self.repayment_log = []
+        self.default_log = []
+        self.shock_log = []
+        self.obligations.reset()
         self._dead_logged = set()
         berries = self.commons_settings["berries"]
         wood = self.commons_settings["wood"]
@@ -879,20 +922,22 @@ class SubsistenceWorld:
         self._current_iteration = iteration
         self._reset_iteration_state()
 
+        self.feature_registry.run("before_regenerate")
         self._regenerate_commons()
         self._current_berries_density = self._commons_density("berries")
         self._current_wood_density = self._commons_density("wood")
+        self.feature_registry.run("start_of_tick")
         self._gather_all()
-        if self.features["GIFTING"]:
-            self._process_gifts()
-        if self.features["TRADE"]:
-            self._process_trade()
+        self.feature_registry.run("after_gather")
+        self.feature_registry.run("market")
+        self.feature_registry.run("before_consume")
         for agent in self.agents:
             if agent.is_alive:
                 agent.post_trade_berries = agent.berries
                 agent.post_trade_wood = agent.wood
         self._eat_all()
         self._decay_and_spoil()
+        self.feature_registry.run("end_of_tick")
 
         metrics = self._metrics(iteration)
         self.metrics_history.append(metrics)
@@ -932,7 +977,14 @@ class SubsistenceWorld:
             settings = self.commons_settings[name]
             attribute = f"commons_{name}"
             current = getattr(self, attribute)
-            amount = self._stochastic_round(settings["regeneration"])
+            factor = (
+                self._berry_regen_factor
+                if name == "berries"
+                else self._wood_regen_factor
+            )
+            amount = self._stochastic_round(
+                settings["regeneration"] * float(factor)
+            )
             amount = min(amount, max(0, settings["capacity"] - current))
             setattr(self, attribute, current + amount)
             if name == "berries":
@@ -1000,7 +1052,7 @@ class SubsistenceWorld:
             agent.craft_progress = max(
                 0.0, agent.craft_progress - craft_minutes
             )
-            agent.wood -= wood_per_crate
+            self.ledger.consume(agent, "wood", wood_per_crate)
             agent.crates.append(1.0)
             agent.planned_crates += 1
             agent.crafted_crates += 1
@@ -1390,22 +1442,13 @@ class SubsistenceWorld:
     # Gifts and barter
     # ------------------------------------------------------------------
     def _process_gifts(self) -> None:
-        gifts = process_berry_gifts(
-            self.agents,
-            settings=self.gifting_settings,
-            random=self.random,
-        )
-        for gift in gifts:
-            self.gift_log.append(
-                {
-                    "iteration": self._current_iteration,
-                    "giver": gift["giver"],
-                    "receiver": gift["receiver"],
-                    "amount": gift["amount"],
-                }
-            )
-            self._last_gifts += 1
-            self._last_gift_berries += gift["amount"]
+        self.feature_registry.run("after_gather")
+
+    def _settle_credit(self) -> None:
+        self.feature_registry.layer("CREDIT").start_of_tick()
+
+    def _originate_credit(self) -> None:
+        self.feature_registry.layer("CREDIT").before_consume()
 
     def _survival_urgency(self, agent: Agent) -> int:
         food = self.agent_settings["food_per_iteration"]
@@ -1673,8 +1716,14 @@ class SubsistenceWorld:
                 buyer_agent = buyer["agent"]
                 berries = qty * price
                 if good == "wood":
-                    seller_agent.wood -= qty
-                    buyer_agent.wood += qty
+                    moved = self.ledger.move(
+                        seller_agent, buyer_agent, "wood", qty, "trade"
+                    )
+                    if moved != qty:
+                        qty = moved
+                        berries = qty * price
+                    if qty <= 0:
+                        continue
                     self._last_trade_wood += qty
                     self.trade_log.append(
                         {
@@ -1691,11 +1740,14 @@ class SubsistenceWorld:
                         }
                     )
                 else:
-                    for _ in range(qty):
-                        if seller_agent.crates:
-                            buyer_agent.crates.append(
-                                seller_agent.crates.pop()
-                            )
+                    moved = self.ledger.move(
+                        seller_agent, buyer_agent, "crates", qty, "trade"
+                    )
+                    if moved != qty:
+                        qty = moved
+                        berries = qty * price
+                    if qty <= 0:
+                        continue
                     self._last_crate_trades += qty
                     self._last_trade_crates += qty
                     self.trade_log.append(
@@ -1712,8 +1764,13 @@ class SubsistenceWorld:
                             "price": price,
                         }
                     )
-                buyer_agent.berries -= berries
-                seller_agent.berries += berries
+                paid = self.ledger.move(
+                    buyer_agent, seller_agent, "berries", berries, "trade"
+                )
+                if paid != berries:
+                    # The plans already reserve the berries, so this is a
+                    # defensive guard rather than an expected path.
+                    berries = paid
                 self._last_trade_berries += berries
                 buyer["budget"] -= berries
                 seller["qty"] -= qty
@@ -1899,7 +1956,7 @@ class SubsistenceWorld:
             if not agent.is_alive:
                 continue
             meal = min(agent.berries, food)
-            agent.berries -= meal
+            self.ledger.consume(agent, "berries", meal)
             agent.meals_eaten = meal
             agent.unmet_food = max(0, food - meal)
             if meal >= food:
@@ -1923,7 +1980,7 @@ class SubsistenceWorld:
                 for _ in range(agent.wood):
                     if self.random.random() < settings["wood_decay_chance"]:
                         decayed += 1
-                agent.wood -= decayed
+                self.ledger.consume(agent, "wood", decayed)
                 self._last_wood_decayed += decayed
             wear = settings["crate_wear_rate"]
             if agent.crates and wear > 0:
@@ -1953,14 +2010,14 @@ class SubsistenceWorld:
             if not self.features["SPOILAGE"]:
                 continue
             spoiled = max(0, agent.berries - capacity)
-            agent.berries -= spoiled
+            self.ledger.consume(agent, "berries", spoiled)
             if settings["stored_spoil_rate"] > 0:
                 stored = min(agent.berries, capacity)
                 stored_spoiled = self._stochastic_round(
                     stored * settings["stored_spoil_rate"]
                 )
                 stored_spoiled = min(stored_spoiled, stored)
-                agent.berries -= stored_spoiled
+                self.ledger.consume(agent, "berries", stored_spoiled)
                 spoiled += stored_spoiled
             self._last_berries_spoiled += spoiled
             if spoiled > 0:
@@ -2044,7 +2101,7 @@ class SubsistenceWorld:
         )
         if alive == 0 and self.extinction_iteration is None:
             self.extinction_iteration = iteration
-        return {
+        metrics = {
             "iteration": iteration,
             "alive": alive,
             "mean_health": (
@@ -2134,6 +2191,8 @@ class SubsistenceWorld:
             "gift_berries": self._last_gift_berries,
             "extinction_iteration": self.extinction_iteration,
         }
+        metrics.update(self.feature_registry.metrics(iteration))
+        return metrics
 
     def _record_agent_snapshot(self, iteration: int) -> None:
         for agent in self.agents:
@@ -2145,6 +2204,22 @@ class SubsistenceWorld:
             )
             row["effective_wood_per_day"] = self.effective_max_wood_per_day(
                 agent, self._current_wood_density
+            )
+            row["debt_wood"] = self.obligations.outstanding(agent.id, "wood")
+            row["debt_berries"] = self.obligations.outstanding(
+                agent.id, "berries"
+            )
+            row["debt_crates"] = self.obligations.outstanding(
+                agent.id, "crates"
+            )
+            row["credit_out_wood"] = self.obligations.receivable(
+                agent.id, "wood"
+            )
+            row["credit_out_berries"] = self.obligations.receivable(
+                agent.id, "berries"
+            )
+            row["credit_out_crates"] = self.obligations.receivable(
+                agent.id, "crates"
             )
             self.agent_history.append({"iteration": iteration, **row})
 
@@ -2159,6 +2234,14 @@ class SubsistenceWorld:
             "berry_skill",
             "wood_skill",
             "specialisation_z",
+            "price_belief",
+            "trust",
+            "debt_wood",
+            "debt_berries",
+            "debt_crates",
+            "credit_out_wood",
+            "credit_out_berries",
+            "credit_out_crates",
             "max_berries_per_day",
             "max_wood_per_day",
             "labor_berries",
@@ -2176,7 +2259,27 @@ class SubsistenceWorld:
         ]
         if not self.agents:
             return pd.DataFrame(columns=columns).set_index("id")
-        return pd.DataFrame([agent.to_dict() for agent in self.agents]).set_index("id")
+        rows = []
+        for agent in self.agents:
+            row = agent.to_dict()
+            row["debt_wood"] = self.obligations.outstanding(agent.id, "wood")
+            row["debt_berries"] = self.obligations.outstanding(
+                agent.id, "berries"
+            )
+            row["debt_crates"] = self.obligations.outstanding(
+                agent.id, "crates"
+            )
+            row["credit_out_wood"] = self.obligations.receivable(
+                agent.id, "wood"
+            )
+            row["credit_out_berries"] = self.obligations.receivable(
+                agent.id, "berries"
+            )
+            row["credit_out_crates"] = self.obligations.receivable(
+                agent.id, "crates"
+            )
+            rows.append(row)
+        return pd.DataFrame(rows, columns=columns).set_index("id")
 
     def agent_history_frame(self) -> pd.DataFrame:
         columns = [
@@ -2190,6 +2293,14 @@ class SubsistenceWorld:
             "berry_skill",
             "wood_skill",
             "specialisation_z",
+            "price_belief",
+            "trust",
+            "debt_wood",
+            "debt_berries",
+            "debt_crates",
+            "credit_out_wood",
+            "credit_out_berries",
+            "credit_out_crates",
             "max_berries_per_day",
             "max_wood_per_day",
             "effective_berries_per_day",

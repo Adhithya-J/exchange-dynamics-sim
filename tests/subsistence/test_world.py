@@ -602,9 +602,23 @@ def test_gifting_can_be_enabled():
     assert world.metrics_history[-1]["gifts"] >= 1
 
 
-def test_unsupported_feature_flags_are_rejected():
-    with pytest.raises(ValueError, match="TRUST"):
-        SubsistenceWorld(make_config(FEATURES={"TRUST": True}))
+def test_feature_dependencies_are_resolved():
+    world = SubsistenceWorld(
+        make_config(
+            FEATURES={"CREDIT": True, "RECIPROCITY": True}
+        )
+    )
+
+    # RECIPROCITY pulls in GIFTING and TRUST; CREDIT also needs TRUST.
+    assert world.features["RECIPROCITY"]
+    assert world.features["GIFTING"]
+    assert world.features["TRUST"]
+    assert world.features["CREDIT"]
+
+
+def test_unknown_feature_flags_are_rejected():
+    with pytest.raises(ValueError, match="Unknown FEATURES"):
+        SubsistenceWorld(make_config(FEATURES={"NOT_A_FEATURE": True}))
 
 
 def test_wood_is_not_a_specialisation_without_storage():

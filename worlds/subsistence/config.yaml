@@ -15,13 +15,17 @@ FEATURES:
   GIFTING: false
   # Bilateral barter in the central market square.
   TRADE: true
+  # Deferred-payment loans of wood or berries. Off by default.
+  CREDIT: false
   # Finished crates provide storage capacity for berries.
   STORAGE: true
   # Berries held outside storage spoil at the end of the iteration.
   SPOILAGE: true
-  # Reserved for the shared social utilities; not used by this world yet.
+  # Public credit reputation. Auto-enabled by CREDIT and RECIPROCITY.
   TRUST: false
+  # Soft, zero-interest gift obligations. Auto-enables GIFTING and TRUST.
   RECIPROCITY: false
+  # Temporary commons regeneration shocks.
   SHOCKS: false
 
 AGENTS:
@@ -128,6 +132,43 @@ STORAGE:
   # Fraction of stored berries lost each iteration. Zero means sealed storage.
   STORED_SPOIL_RATE: 0.0
 
+# Deferred-payment credit. Loans move whole goods now; the borrower promises
+# to return the same good (plus interest in market mode) by a due date.
+# MODE "reciprocal" is a zero-interest, trust/collateral-gated loan.
+# MODE "market" prices default risk into a goods-denominated interest rate.
+CREDIT:
+  MODE: reciprocal
+  # How many iterations a loan runs before repayment is due.
+  TERM_DAYS: 20
+  # Extra iterations allowed before a missed payment becomes a default.
+  GRACE_DAYS: 2
+  # Maximum principal in whole units for each loan good.
+  MAX_WOOD_PRINCIPAL: 8
+  MAX_BERRY_PRINCIPAL: 6
+  MAX_CRATE_PRINCIPAL: 1
+  # Lenders keep this much of their own stock before lending.
+  LENDER_WOOD_BUFFER: 2
+  LENDER_BERRY_BUFFER: 2
+  # Always keep at least this many crates before lending crate capacity.
+  LENDER_CRATE_RESERVE: 1
+  # Reciprocal loans require this trust level unless a crate is pledged.
+  MIN_TRUST: 0.40
+  # Market loans require at least this much trust; risk is priced above it.
+  MIN_MARKET_TRUST: 0.30
+  # Concurrent loan limits per side.
+  MAX_LOANS_PER_BORROWER: 2
+  MAX_LOANS_PER_LENDER: 3
+  # A borrower may owe at most this fraction of expected production over the
+  # loan term, so a loan is not obviously unrepayable.
+  REPAYMENT_CAPACITY_FRACTION: 0.80
+  # Market-mode interest: base spread, risk premium, and bounds.
+  BASE_INTEREST: 0.05
+  RISK_PREMIUM: 0.75
+  MIN_INTEREST: 0.02
+  MAX_INTEREST: 0.75
+  # Pledged crates reduce the risk premium by at most this fraction.
+  COLLATERAL_DISCOUNT: 0.50
+
 TRADE:
   # Fallback baseline when agents have no usable opportunity costs.
   INITIAL_PRICE: 5
@@ -149,3 +190,31 @@ GIFTING:
   # Whole berries per gift.
   AMOUNT_RANGE: [1, 3]
   MIN_RESERVE: 2
+
+# Public credit reputation. Enabled automatically by CREDIT and RECIPROCITY.
+TRUST:
+  DEFAULT: 0.50
+  GAIN: 0.08
+  LOSS: 0.25
+  # Fraction of the gap back to DEFAULT removed each iteration. Zero keeps
+  # reputation sticky.
+  DECAY: 0.0
+
+# Reciprocal gifts. A gift still moves berries immediately, but it also
+# creates a soft zero-interest obligation. The receiver repays it when it can
+# afford to, so this is the low-commitment end of the credit spectrum.
+RECIPROCITY:
+  # Whole berries above today's meal that a debtor may use to repay a gift.
+  REPAY_THRESHOLD: 2
+  # Ignore gifts smaller than this when creating an obligation.
+  MIN_GIFT: 1
+  # Cap outstanding soft-gift berries per receiver.
+  MAX_OUTSTANDING: 6
+
+# Temporary commons shocks. A shock reduces regeneration for a few iterations.
+SHOCKS:
+  PROBABILITY: 0.04
+  # Inclusive whole-day duration range.
+  DURATION_RANGE: [3, 8]
+  BERRY_REGEN_FACTOR: 0.40
+  WOOD_REGEN_FACTOR: 0.60

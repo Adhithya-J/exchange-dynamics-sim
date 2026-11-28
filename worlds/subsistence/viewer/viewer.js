@@ -34,6 +34,11 @@
     craft: "&#9881;",
     gift: "&#9829;",
     trade: "&#8646;",
+    loan: "&#8594;",
+    repay: "&#8634;",
+    default: "&#9888;",
+    late: "&#9203;",
+    shock: "&#9889;",
     spoil: "&#10005;",
     death: "&#8226;",
     quiet: "&#183;"
@@ -197,6 +202,13 @@
         crateDurability: series.crateDurability[t][index],
         craftProgress: series.craftProgress[t][index],
         priceBelief: series.priceBelief[t][index],
+        trust: series.trust[t][index],
+        debtWood: series.debtWood[t][index],
+        debtBerries: series.debtBerries[t][index],
+        debtCrates: series.debtCrates[t][index],
+        creditOutWood: series.creditOutWood[t][index],
+        creditOutBerries: series.creditOutBerries[t][index],
+        creditOutCrates: series.creditOutCrates[t][index],
         storage: series.storage[t][index],
         laborB: series.laborB[t][index],
         laborW: series.laborW[t][index],
@@ -247,7 +259,21 @@
         gifts: series.gifts[t],
         unmetFood: series.unmetFood[t],
         berriesGathered: series.berriesGathered[t],
-        woodGathered: series.woodGathered[t]
+        woodGathered: series.woodGathered[t],
+        loans: series.loans[t],
+        loanPrincipalWood: series.loanPrincipalWood[t],
+        loanPrincipalBerries: series.loanPrincipalBerries[t],
+        loanPrincipalCrates: series.loanPrincipalCrates[t],
+        meanInterest: series.meanInterest[t],
+        loansRepaid: series.loansRepaid[t],
+        loansDefaulted: series.loansDefaulted[t],
+        creditOutstandingWood: series.creditOutstandingWood[t],
+        creditOutstandingBerries: series.creditOutstandingBerries[t],
+        creditOutstandingCrates: series.creditOutstandingCrates[t],
+        meanTrust: series.meanTrust[t],
+        shockActive: series.shockActive[t],
+        shockCount: series.shockCount[t],
+        giftObligations: series.giftObligations[t]
       };
     }
 
@@ -894,6 +920,22 @@
             duration: 850,
             fade: 160
           });
+        } else if (event.type === "loan" || event.type === "repay") {
+          var creditFrom = homes[event.actor];
+          var creditTo = homes[event.target];
+          if (!creditFrom || !creditTo) return;
+          state.particles.push({
+            kind: event.resource === "berries" ? "berry" : "wood",
+            from: { x: creditFrom.x, y: creditFrom.y },
+            to: { x: creditTo.x, y: creditTo.y },
+            control: {
+              x: (creditFrom.x + creditTo.x) / 2,
+              y: (creditFrom.y + creditTo.y) / 2 + 44
+            },
+            start: now,
+            duration: 950,
+            fade: 180
+          });
         } else if (event.type === "spoil") {
           var spoiledHome = homes[event.actor];
           if (!spoiledHome) return;
@@ -1064,6 +1106,18 @@
       if (metrics.spoiled > 0.05) {
         parts.push(formatNumber(metrics.spoiled, 0) + " berries spoiled");
       }
+      if (metrics.loans > 0.05) {
+        parts.push(
+          formatNumber(metrics.loans, 0) + " loan" +
+          (metrics.loans === 1 ? "" : "s") + " made"
+        );
+      }
+      if (metrics.loansDefaulted > 0.05) {
+        parts.push(formatNumber(metrics.loansDefaulted, 0) + " defaulted");
+      }
+      if (metrics.shockActive > 0.05) {
+        parts.push("a commons shock is active");
+      }
       if (metrics.unmetFood > 0.05) {
         parts.push(formatNumber(metrics.unmetFood, 0) + " berries short of food");
       }
@@ -1079,6 +1133,12 @@
     function renderInspector(metrics) {
       var panel = document.getElementById("selectedPanel");
       if (state.selected == null) {
+        var social = !!(meta.features.CREDIT || meta.features.RECIPROCITY);
+        var creditDetails = social
+          ? detail("Credit", formatNumber(metrics.creditOutstandingWood, 0) + " w · " + formatNumber(metrics.creditOutstandingBerries, 0) + " b · " + formatNumber(metrics.creditOutstandingCrates, 0) + " c") +
+            detail("Loans", formatNumber(metrics.loans, 0) + " new · " + formatNumber(metrics.loansDefaulted, 0) + " defaulted") +
+            detail("Mean trust", formatPercent(metrics.meanTrust))
+          : "";
         panel.innerHTML =
           "<div class=\"panel-head\"><div class=\"panel-title\">A villager</div>" +
           "<div class=\"panel-note\">click a hut</div></div>" +
@@ -1090,6 +1150,7 @@
           formatNumber(metrics.totalCrates, 0) + " crates.</p>" +
           "<div class=\"detail-grid\">" +
           detail("Trade", formatNumber(metrics.tradeBerries, 0) + " berries") +
+          creditDetails +
           detail("Crate trades", formatNumber(metrics.crateTrades, 0)) +
           detail("Spoiled", formatNumber(metrics.spoiled, 0)) +
           detail("Food shortfall", formatNumber(metrics.unmetFood, 0)) +
@@ -1116,6 +1177,12 @@
       var potentialW = agentState.maxW;
       var belief = agentState.priceBelief;
       var craftShare = agent.labour > 0 ? agentState.laborC / agent.labour : 0;
+      var social = !!(meta.features.CREDIT || meta.features.RECIPROCITY);
+      var creditDetails = social
+        ? detail("Trust", formatPercent(agentState.trust)) +
+          detail("Debt", formatNumber(agentState.debtWood, 0) + " w · " + formatNumber(agentState.debtBerries, 0) + " b · " + formatNumber(agentState.debtCrates, 0) + " c") +
+          detail("Lent out", formatNumber(agentState.creditOutWood, 0) + " w · " + formatNumber(agentState.creditOutBerries, 0) + " b · " + formatNumber(agentState.creditOutCrates, 0) + " c")
+        : "";
 
       panel.innerHTML =
         "<div class=\"selected-hero\">" +
@@ -1140,6 +1207,7 @@
         detail("Effective max", formatNumber(potentialB, 1) + " b · " + formatNumber(potentialW, 1) + " w") +
         detail("Harvest density", formatPercent(metrics.commonsBerriesPct) + " b · " + formatPercent(metrics.commonsWoodPct) + " w") +
         detail("Gathered", formatNumber(agentState.gatheredB, 0) + " b · " + formatNumber(agentState.gatheredW, 0) + " w") +
+        creditDetails +
         "</div>" +
         "<div class=\"labour-legend\"><span>berry " + formatPercent(agent.labour > 0 ? agentState.laborB / agent.labour : 0) + "</span>" +
         "<span>wood " + formatPercent(agent.labour > 0 ? agentState.laborW / agent.labour : 0) + "</span>" +
@@ -1212,6 +1280,67 @@
             sub: "an in-kind gift",
             select: event.target
           });
+        } else if (event.type === "loan") {
+          rows.push({
+            order: 2,
+            icon: "loan",
+            title: agents[event.actor].label + " lent " +
+              formatNumber(event.principal, 0) + " " +
+              (event.resource === "wood" ? "wood" :
+                event.resource === "crates" ? "crate" : "berries") +
+              " to " + agents[event.target].label,
+            sub: "repay " + formatNumber(event.repayment, 0) + " in " +
+              formatNumber(event.dueIteration, 0) +
+              (event.interestRate > 0.001
+                ? " · " + formatPercent(event.interestRate) + " interest"
+                : " · reciprocal"),
+            select: event.target
+          });
+        } else if (event.type === "repay") {
+          rows.push({
+            order: 2,
+            icon: "repay",
+            title: agents[event.actor].label + " repaid " +
+              formatNumber(event.amount, 0) + " " +
+              (event.resource === "wood" ? "wood" :
+                event.resource === "crates" ? "crate" : "berries") +
+              " to " + agents[event.target].label,
+            sub: "principal " + formatNumber(event.principal, 0),
+            select: event.actor
+          });
+        } else if (event.type === "default") {
+          rows.push({
+            order: 1,
+            icon: "default",
+            title: agents[event.actor].label + " defaulted to " +
+              agents[event.target].label,
+            sub: "lost " + formatNumber(event.loss, 0) + " " +
+              (event.resource === "wood" ? "wood" :
+                event.resource === "crates" ? "crate" : "berries") +
+              (event.collateralSeized > 0
+                ? " · " + formatNumber(event.collateralSeized, 0) + " crate seized"
+                : ""),
+            select: event.actor
+          });
+        } else if (event.type === "late") {
+          rows.push({
+            order: 2,
+            icon: "late",
+            title: agents[event.actor].label + " missed a payment to " +
+              agents[event.target].label,
+            sub: "grace period extended",
+            select: event.actor
+          });
+        } else if (event.type === "shock") {
+          rows.push({
+            order: 0,
+            icon: "shock",
+            title: "A " + event.shockType + " reduced commons regrowth",
+            sub: formatNumber(event.duration, 0) + " days · berries " +
+              formatPercent(event.berryFactor) + " · wood " +
+              formatPercent(event.woodFactor),
+            select: state.selected == null ? 0 : state.selected
+          });
         } else if (event.type === "spoil") {
           rows.push({
             order: 3,
@@ -1255,7 +1384,7 @@
         feed.innerHTML =
           "<div class=\"feed-row\"><span class=\"feed-icon quiet\">" + FEED_ICONS.quiet + "</span>" +
           "<div class=\"feed-main\"><b>Nothing happened</b><div class=\"feed-sub\">" +
-          "no gather, trade, gift, spoilage, or death was recorded.</div></div></div>";
+          "no gather, trade, gift, credit, shock, spoilage, or death was recorded.</div></div></div>";
         return;
       }
       var shown = rows.slice(0, 14);

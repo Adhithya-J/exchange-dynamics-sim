@@ -2,8 +2,8 @@
 
 A replay is the stable boundary between the model and the viewer. It records
 only facts: the seed and configuration, agent skills, one snapshot per tick,
-summary metrics, and typed gather/gift/trade/spoil/death events. It contains
-no drawing coordinates or presentation state.
+summary metrics, and typed gather/craft/gift/trade/credit/shock/spoil/death
+events. It contains no drawing coordinates or presentation state.
 """
 
 from __future__ import annotations
@@ -47,13 +47,27 @@ AGENT_COLORS = [
 
 PHASE_ORDER = {
     "craft": 0,
-    "gather": 1,
-    "gift": 2,
-    "trade": 3,
-    "eat": 4,
-    "spoil": 5,
+    "shock": 1,
+    "gather": 2,
+    "gift": 3,
+    "trade": 4,
+    "credit": 5,
+    "eat": 6,
+    "spoil": 7,
 }
-EVENT_TYPES = {"gather", "craft", "gift", "trade", "spoil", "death"}
+EVENT_TYPES = {
+    "gather",
+    "craft",
+    "gift",
+    "trade",
+    "loan",
+    "repay",
+    "default",
+    "late",
+    "shock",
+    "spoil",
+    "death",
+}
 TRADE_FIELDS = ("berries", "wood", "price")
 
 
@@ -137,6 +151,23 @@ def build_replay(simulation: SubsistenceWorld) -> dict[str, Any]:
                         ),
                         "price_belief": int(
                             rows[agent_id].get("price_belief", 5)
+                        ),
+                        "trust": float(rows[agent_id].get("trust", 0.0)),
+                        "debt_wood": int(rows[agent_id].get("debt_wood", 0)),
+                        "debt_berries": int(
+                            rows[agent_id].get("debt_berries", 0)
+                        ),
+                        "debt_crates": int(
+                            rows[agent_id].get("debt_crates", 0)
+                        ),
+                        "credit_out_wood": int(
+                            rows[agent_id].get("credit_out_wood", 0)
+                        ),
+                        "credit_out_berries": int(
+                            rows[agent_id].get("credit_out_berries", 0)
+                        ),
+                        "credit_out_crates": int(
+                            rows[agent_id].get("credit_out_crates", 0)
                         ),
                         "storage_capacity": int(
                             rows[agent_id]["storage_capacity"]
@@ -257,6 +288,12 @@ def build_replay(simulation: SubsistenceWorld) -> dict[str, Any]:
                     simulation.trade_settings["max_crate_price"]
                 ),
             },
+            "credit": jsonable(dict(getattr(simulation, "credit_settings", {}))),
+            "trust": jsonable(dict(getattr(simulation, "trust_settings", {}))),
+            "reciprocity": jsonable(
+                dict(getattr(simulation, "reciprocity_settings", {}))
+            ),
+            "shocks": jsonable(dict(getattr(simulation, "shock_settings", {}))),
             "resources": {
                 "berries": {
                     "label": "Berries",
@@ -421,6 +458,37 @@ def _initial_metrics(
         "trade_crates": 0,
         "gifts": 0,
         "gift_berries": 0,
+        "mean_trust": (
+            float(np.mean([float(row.get("trust", 0.0)) for row in first_rows.values()]))
+            if first_rows
+            else 0.0
+        ),
+        "mean_defaults": 0.0,
+        "loans_originated": 0,
+        "loan_principal_wood": 0,
+        "loan_principal_berries": 0,
+        "loan_principal_crates": 0,
+        "mean_interest_rate": 0.0,
+        "loans_repaid": 0,
+        "repayment_wood": 0,
+        "repayment_berries": 0,
+        "repayment_crates": 0,
+        "loans_defaulted": 0,
+        "default_loss_wood": 0,
+        "default_loss_berries": 0,
+        "default_loss_crates": 0,
+        "loans_late": 0,
+        "collateral_seized": 0,
+        "loans_active": 0,
+        "credit_outstanding_wood": 0,
+        "credit_outstanding_berries": 0,
+        "credit_outstanding_crates": 0,
+        "gift_obligations": 0,
+        "gift_obligation_berries": 0,
+        "gift_repayments": 0,
+        "gift_repayment_berries": 0,
+        "shock_active": 0,
+        "shocks": 0,
         "extinction_iteration": None,
     }
 
@@ -495,6 +563,75 @@ def _build_events(
             }
         )
 
+    for entry in simulation.credit_events:
+        kind = entry.get("kind", "loan")
+        event = entry.get("event")
+        if event == "origination" and kind == "gift":
+            continue
+        base = {
+            "tick": int(entry["iteration"]),
+            "phase": "credit",
+            "actor": entry["debtor"],
+            "target": entry["creditor"],
+            "resource": entry["good"],
+            "amount": int(entry.get("amount", 0)),
+            "principal": int(entry.get("principal", 0)),
+            "interest_rate": float(entry.get("interest_rate", 0.0)),
+            "due_iteration": int(entry.get("due_iteration") or 0),
+            "collateral_crates": int(entry.get("collateral_crates", 0)),
+        }
+        if event == "origination":
+            base.update(
+                {
+                    "type": "loan",
+                    "actor": entry["creditor"],
+                    "target": entry["debtor"],
+                    "amount": int(entry["principal"]),
+                    "repayment": int(entry["amount_due"]),
+                }
+            )
+        elif event == "repayment":
+            base.update(
+                {
+                    "type": "repay",
+                    "repayment": int(entry.get("amount", 0)),
+                }
+            )
+        elif event == "default":
+            base.update(
+                {
+                    "type": "default",
+                    "recovered": int(entry.get("recovered", 0)),
+                    "loss": int(entry.get("loss", 0)),
+                    "collateral_seized": int(
+                        entry.get("collateral_seized", 0)
+                    ),
+                    "reason": str(entry.get("reason", "")),
+                }
+            )
+        elif event == "late":
+            base.update({"type": "late", "reason": "missed_payment"})
+        else:
+            continue
+        if kind == "gift":
+            base["kind"] = "gift"
+        entries.append(base)
+
+    for entry in simulation.shock_log:
+        entries.append(
+            {
+                "tick": int(entry["iteration"]),
+                "phase": "shock",
+                "type": "shock",
+                "actor": None,
+                "target": None,
+                "shock_type": str(entry.get("type", "drought")),
+                "duration": int(entry.get("duration", 1)),
+                "berry_factor": float(entry.get("berry_factor", 1.0)),
+                "wood_factor": float(entry.get("wood_factor", 1.0)),
+            }
+        )
+
     for entry in simulation.spoil_log:
         entries.append(
             {
@@ -524,7 +661,7 @@ def _build_events(
         entry
         for entry in entries
         if 1 <= entry["tick"] <= last_iteration
-        and entry.get("actor") in agent_index
+        and (entry.get("actor") is None or entry.get("actor") in agent_index)
         and (entry.get("target") is None or entry["target"] in agent_index)
     ]
     entries.sort(
@@ -635,7 +772,17 @@ def validate_replay(replay: dict[str, Any]) -> None:
                     f"tick {expected_iteration} {state.get('id')} {field}",
                     minimum=0,
                 )
-            for field in ("crates", "price_belief", "planned_crates"):
+            for field in (
+                "crates",
+                "price_belief",
+                "planned_crates",
+                "debt_wood",
+                "debt_berries",
+                "debt_crates",
+                "credit_out_wood",
+                "credit_out_berries",
+                "credit_out_crates",
+            ):
                 if field in state:
                     required_int(
                         state[field],
@@ -650,6 +797,7 @@ def validate_replay(replay: dict[str, Any]) -> None:
                 "planned_wood",
                 "craft_progress",
                 "crate_durability",
+                "trust",
             ):
                 if field in state:
                     required_float(
@@ -716,6 +864,51 @@ def validate_replay(replay: dict[str, Any]) -> None:
                 )
             if event.get("price", 0) < 1:
                 raise ValueError(f"Event {event_id} price must be positive")
+        if event["type"] in {"loan", "repay", "default", "late"}:
+            if event.get("resource") not in {"wood", "berries", "crates"}:
+                raise ValueError(
+                    f"Event {event_id} has an invalid credit resource"
+                )
+            for field in ("principal", "due_iteration", "collateral_crates"):
+                if event.get(field) is not None:
+                    required_int(
+                        event[field],
+                        f"event {event_id} {field}",
+                        minimum=0,
+                    )
+            if event.get("interest_rate") is not None:
+                required_float(
+                    event["interest_rate"],
+                    f"event {event_id} interest_rate",
+                )
+            if event["type"] == "loan":
+                if not event.get("actor") or not event.get("target"):
+                    raise ValueError(
+                        f"Event {event_id} loan needs a creditor and debtor"
+                    )
+                required_int(
+                    event.get("repayment"),
+                    f"event {event_id} repayment",
+                    minimum=0,
+                )
+            if event["type"] == "default":
+                for field in ("recovered", "loss", "collateral_seized"):
+                    if event.get(field) is not None:
+                        required_int(
+                            event[field],
+                            f"event {event_id} {field}",
+                            minimum=0,
+                        )
+        if event["type"] == "shock":
+            required_int(
+                event.get("duration"), f"event {event_id} duration", minimum=1
+            )
+            required_float(
+                event.get("berry_factor"), f"event {event_id} berry_factor"
+            )
+            required_float(
+                event.get("wood_factor"), f"event {event_id} wood_factor"
+            )
         if event["type"] == "death" and event.get("cause") != "hunger":
             raise ValueError(f"Event {event_id} has an invalid death cause")
 

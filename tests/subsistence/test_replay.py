@@ -27,6 +27,23 @@ def small_world() -> SubsistenceWorld:
     return world
 
 
+def credit_world() -> SubsistenceWorld:
+    config = deepcopy(CONFIG)
+    config["SIMULATION"].update({"AGENTS": 8, "RANDOM_SEED": 3})
+    config["FEATURES"].update(
+        {
+            "CREDIT": True,
+            "GIFTING": True,
+            "RECIPROCITY": True,
+            "SHOCKS": True,
+        }
+    )
+    config["SHOCKS"]["PROBABILITY"] = 0.5
+    world = SubsistenceWorld(config)
+    world.run(iterations=60)
+    return world
+
+
 def test_build_replay_has_versioned_structure():
     world = small_world()
     replay = build_replay(world)
@@ -52,9 +69,11 @@ def test_replay_contains_typed_events():
         assert event["tick"] >= 1
         assert event["phase"] in {
             "craft",
+            "shock",
             "gather",
             "gift",
             "trade",
+            "credit",
             "eat",
             "spoil",
         }
@@ -112,6 +131,43 @@ def test_replay_records_beliefs_crates_and_crafting():
     assert "mean_price_belief" in tick["metrics"]
     assert "total_crates" in tick["metrics"]
     assert replay["meta"]["storage"]["base_craft_minutes"] > 0
+
+
+def test_replay_records_credit_trust_and_shock_layers():
+    replay = build_replay(credit_world())
+
+    assert replay["meta"]["credit"]["mode"] == "reciprocal"
+    assert replay["meta"]["trust"]["default"] == 0.5
+    assert replay["meta"]["shocks"]["probability"] == 0.5
+    state = replay["ticks"][1]["agents"][0]
+    for field in (
+        "trust",
+        "debt_wood",
+        "debt_berries",
+        "debt_crates",
+        "credit_out_wood",
+        "credit_out_berries",
+        "credit_out_crates",
+    ):
+        assert field in state
+    metrics = replay["ticks"][1]["metrics"]
+    for field in (
+        "loans_originated",
+        "mean_trust",
+        "shock_active",
+        "gift_obligations",
+    ):
+        assert field in metrics
+    event_types = {event["type"] for event in replay["events"]}
+    assert "loan" in event_types
+    assert "shock" in event_types
+    for event in replay["events"]:
+        if event["type"] in {"loan", "repay", "default"}:
+            assert event["phase"] == "credit"
+            assert event["resource"] in {"wood", "berries", "crates"}
+        if event["type"] == "shock":
+            assert event["phase"] == "shock"
+            assert event["duration"] >= 1
 
 
 def test_replay_round_trip_is_deterministic(tmp_path):

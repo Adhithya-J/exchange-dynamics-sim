@@ -16,7 +16,7 @@ utilities:
 
 | World | Directory | What it models |
 | --- | --- | --- |
-| **Subsistence** | `worlds/subsistence/` | Goods only. Villagers start with ten berries and one crate, gather perishable berries and durable wood from a shared commons, eat, store food in perishable crates, and barter. No money. |
+| **Subsistence** | `worlds/subsistence/` | Goods only. Villagers start with ten berries and one crate, gather perishable berries and durable wood from a shared commons, eat, store food in perishable crates, barter, and optionally lend wood, berries, or crate capacity. No money. |
 | **Money** | `worlds/money/` | The original model: money transfers, gifts, a goods market, reciprocity, trust, and environmental shocks. |
 
 The subsistence world is the new primary world and has its own experiment
@@ -81,6 +81,17 @@ drag the timeline to scrub, and click a villager to inspect them.
 - **Choices are sampled.** Each day a villager draws a small taste shock on the
   berry-versus-wood comparison and occasionally explores the other activity, so
   behaviour varies around the rational benchmark instead of repeating exactly.
+- **Credit is optional.** A loan moves wood, berries, or crate capacity now and
+  returns the same good later. Reciprocal mode is zero-interest and gated by
+  trust or collateral; market mode prices default risk into a real goods
+  interest rate. Loans, repayments, and defaults run through the same goods
+  ledger as gifts and trade.
+- **Gifts and reciprocity share one obligation book.** A plain gift is one-way.
+  With reciprocity on it also creates a soft zero-interest obligation that the
+  receiver repays when it has surplus berries. That is the low-commitment end of
+  the credit spectrum.
+- **Shocks are optional.** A drought temporarily cuts berry and wood
+  regeneration, so the same labour yields less until it passes.
 - **The commons is shared and depletable.** Berry bushes and forest regenerate
   each iteration. Berry bushes recover quickly; wood regrows much more slowly.
 
@@ -95,11 +106,12 @@ Every experimental layer is a flag in `worlds/subsistence/config.yaml`:
 FEATURES:
   GIFTING: false       # direct in-kind gifts, off by default
   TRADE: true          # barter at a berries-per-wood ratio
+  CREDIT: false        # reciprocal or risk-priced loans
   STORAGE: true        # finished crates provide storage capacity
   SPOILAGE: true       # unprotected berries spoil
-  TRUST: false         # reserved for shared social utilities
-  RECIPROCITY: false   # reserved for shared social utilities
-  SHOCKS: false        # reserved for a later layer
+  TRUST: false         # public credit reputation
+  RECIPROCITY: false   # gifts become soft obligations
+  SHOCKS: false        # temporary commons droughts
 ```
 
 Set a flag to `false` to isolate a mechanism. For example, turning `SPOILAGE`
@@ -139,9 +151,39 @@ http://localhost:8000/worlds/subsistence/viewer/?replay=/replay-subsistence.json
 
 The viewer shows health rings, berry baskets, raw wood, perishable crates and
 their durability, shared berry bushes and forest, villagers walking out to pick,
-chop, or craft, bilateral barter tokens, price beliefs, spoilage, and deaths.
-The side panel explains the iconography and lists each iteration's gather,
-craft, trade, spoilage, and death events.
+chop, or craft, bilateral barter tokens, price beliefs, credit flows, spoilage,
+and deaths. The side panel explains the iconography and lists each iteration's
+gather, craft, gift, trade, credit, shock, spoilage, and death events.
+
+## Credit modes
+
+Credit is opt-in. The two modes use the same loan book and goods ledger:
+
+```yaml
+FEATURES:
+  CREDIT: true
+CREDIT:
+  MODE: reciprocal   # zero-interest, trust or crate collateral
+```
+
+```yaml
+FEATURES:
+  CREDIT: true
+CREDIT:
+  MODE: market       # default risk priced into a real goods interest rate
+```
+
+A loan can move wood, berries, or a whole crate. Crate lending is direct
+capacity lending: the borrower gets storage now and returns a crate later. The
+lent crate also serves as collateral. Defaults seize pledged crates and then the
+borrower's stock of the loan good; the rest is a claim loss, not destroyed goods.
+
+![Credit and trust in the subsistence viewer](docs/subsistence-credit.png)
+
+*A market-credit run. The selected villager has defaulted on a crate loan,
+has borrowed four wood and two crate-capacities, has lent seven berries, and
+carries a 75% trust score. The feed shows a default, a gift, crate-capacity
+loans, and repayments in the same iteration.*
 
 To write only a replay:
 
@@ -164,6 +206,8 @@ python -m worlds.subsistence.experiments --iterations 300 --seeds 1 2 3 \
   --sweep FEATURES.GIFTING=true,false \
   --sweep FEATURES.STORAGE=true,false \
   --sweep STORAGE.WOOD_DECAY_CHANCE=0,0.02,0.05 \
+  --sweep FEATURES.CREDIT=true \
+  --sweep CREDIT.MODE=reciprocal,market \
   --output results/subsistence.csv
 ```
 
@@ -183,6 +227,8 @@ utils/                    shared tooling: config, metrics, replay I/O,
 worlds/
   money/                  original money world, config, replay, and docs
   subsistence/            goods-only world, config, replay, viewer, and docs
+    features/             composable trade, gift, trust, reciprocity, credit,
+                          and shock layers
 viewer/                   original money-world viewer
 docs/                     README screenshots
 tests/                    tests for both worlds and the shared utilities
@@ -197,7 +243,8 @@ compatibility shims for the money world. New code should import from
 ## Model documents
 
 - [`worlds/subsistence/MODEL.md`](worlds/subsistence/MODEL.md) — berries, wood,
-  health, storage, spoilage, barter, PPF, and the conservation ledger.
+  health, storage, spoilage, barter, credit, trust, reciprocity, shocks, PPF,
+  and the conservation ledger.
 - [`worlds/money/MODEL.md`](worlds/money/MODEL.md) — money, gifts, reciprocity,
   trust, the market, and shocks.
 - [`MODEL.md`](MODEL.md) — a short index of both.
@@ -205,7 +252,7 @@ compatibility shims for the money world. New code should import from
 ## Limitations
 
 The subsistence world has two goods, a shared commons, and simple,
-explainable labour and trade heuristics rather than a full optimisation model.
-Trust, reciprocity, and shocks are reserved for shared utilities and are not
-active there yet. Results depend on the chosen rules and random seed; treat
-each run as an experiment, not a prediction.
+explainable labour, trade, and credit heuristics rather than a full optimisation
+model. Credit and social layers are opt-in and off by default; their results
+depend on the chosen rules and random seed, so treat each run as an experiment,
+not a prediction.

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from random import Random
-from typing import Any, Protocol, Sequence
+from typing import Any, Callable, Protocol, Sequence
 
 
 class BerryAgent(Protocol):
@@ -48,12 +48,17 @@ def process_berry_gifts(
     *,
     settings: GiftSettings,
     random: Random,
+    transfer: Callable[[BerryAgent, BerryAgent, int], int] | None = None,
 ) -> list[dict[str, Any]]:
     """Move whole berries from agents with a surplus to the neediest agent.
 
     The receiver is chosen by the lowest health, then the lowest berry stock.
     A giver keeps ``min_reserve`` berries. The returned records are
     observations; the caller is responsible for logging them.
+
+    When ``transfer`` is provided it performs the actual move and returns the
+    whole amount moved. This lets a world route every transfer through its own
+    goods ledger without changing the selection rule.
     """
 
     validate_gift_settings(settings)
@@ -77,8 +82,13 @@ def process_berry_gifts(
         amount = min(random.randint(*settings.amount_range), surplus)
         if amount < 1:
             continue
-        giver.berries -= amount
-        receiver.berries += amount
+        if transfer is not None:
+            amount = int(transfer(giver, receiver, amount))
+            if amount < 1:
+                continue
+        else:
+            giver.berries -= amount
+            receiver.berries += amount
         gifts.append(
             {
                 "giver": giver.id,

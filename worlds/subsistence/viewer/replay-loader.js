@@ -101,7 +101,21 @@
       unmetFood: [],
       berriesGathered: [],
       woodGathered: [],
-      storageCapacity: []
+      storageCapacity: [],
+      loans: [],
+      loanPrincipalWood: [],
+      loanPrincipalBerries: [],
+      loanPrincipalCrates: [],
+      meanInterest: [],
+      loansRepaid: [],
+      loansDefaulted: [],
+      creditOutstandingWood: [],
+      creditOutstandingBerries: [],
+      creditOutstandingCrates: [],
+      meanTrust: [],
+      shockActive: [],
+      shockCount: [],
+      giftObligations: []
     };
     var eventTicks = [];
     var deaths = [];
@@ -176,6 +190,38 @@
       metrics.berriesGathered.push(Number(rowMetrics.berries_gathered) || 0);
       metrics.woodGathered.push(Number(rowMetrics.wood_gathered) || 0);
       metrics.storageCapacity.push(Number(rowMetrics.storage_capacity) || 0);
+      metrics.loans.push(Number(rowMetrics.loans_originated) || 0);
+      metrics.loanPrincipalWood.push(
+        Number(rowMetrics.loan_principal_wood) || 0
+      );
+      metrics.loanPrincipalBerries.push(
+        Number(rowMetrics.loan_principal_berries) || 0
+      );
+      metrics.loanPrincipalCrates.push(
+        Number(rowMetrics.loan_principal_crates) || 0
+      );
+      metrics.meanInterest.push(
+        Number(rowMetrics.mean_interest_rate) || 0
+      );
+      metrics.loansRepaid.push(Number(rowMetrics.loans_repaid) || 0);
+      metrics.loansDefaulted.push(
+        Number(rowMetrics.loans_defaulted) || 0
+      );
+      metrics.creditOutstandingWood.push(
+        Number(rowMetrics.credit_outstanding_wood) || 0
+      );
+      metrics.creditOutstandingBerries.push(
+        Number(rowMetrics.credit_outstanding_berries) || 0
+      );
+      metrics.creditOutstandingCrates.push(
+        Number(rowMetrics.credit_outstanding_crates) || 0
+      );
+      metrics.meanTrust.push(Number(rowMetrics.mean_trust) || 0);
+      metrics.shockActive.push(Number(rowMetrics.shock_active) || 0);
+      metrics.shockCount.push(Number(rowMetrics.shocks) || 0);
+      metrics.giftObligations.push(
+        Number(rowMetrics.gift_obligations) || 0
+      );
 
       if (metrics.aliveCount[t] > 0) lastAliveIteration = t;
       if (extinctionIteration == null && t > 0 && metrics.aliveCount[t] === 0) {
@@ -186,7 +232,9 @@
     // Build the per-agent series directly from the replay rows.
     var stateSeries = {};
     ["health", "berries", "wood", "crates", "crateDurability",
-     "craftProgress", "priceBelief", "storage", "laborB", "laborW",
+     "craftProgress", "priceBelief", "trust", "debtWood", "debtBerries",
+     "debtCrates", "creditOutWood", "creditOutBerries", "creditOutCrates",
+     "storage", "laborB", "laborW",
      "laborC", "maxB", "maxW", "plannedB", "plannedW", "plannedCrates",
      "gatheredB", "gatheredW", "postTradeB", "postTradeW", "alive"].forEach(
       function (key) {
@@ -208,6 +256,13 @@
               var belief = Number(state.price_belief);
               row[index] = belief > 0 ? belief : agents[index].priceBelief;
             }
+            else if (key === "trust") row[index] = Number(state.trust) || 0;
+            else if (key === "debtWood") row[index] = Number(state.debt_wood) || 0;
+            else if (key === "debtBerries") row[index] = Number(state.debt_berries) || 0;
+            else if (key === "debtCrates") row[index] = Number(state.debt_crates) || 0;
+            else if (key === "creditOutWood") row[index] = Number(state.credit_out_wood) || 0;
+            else if (key === "creditOutBerries") row[index] = Number(state.credit_out_berries) || 0;
+            else if (key === "creditOutCrates") row[index] = Number(state.credit_out_crates) || 0;
             else if (key === "storage") row[index] = Number(state.storage_capacity) || 0;
             else if (key === "laborB") row[index] = Number(state.labor_berries) || 0;
             else if (key === "laborW") row[index] = Number(state.labor_wood) || 0;
@@ -263,7 +318,21 @@
         crates: Number(event.crates) || 0,
         quantity: Number(event.quantity) || 0,
         price: Number(event.price) || 0,
-        cause: event.cause || null
+        cause: event.cause || null,
+        kind: event.kind || null,
+        principal: Number(event.principal) || 0,
+        repayment: Number(event.repayment) || 0,
+        interestRate: Number(event.interest_rate) || 0,
+        dueIteration: Number(event.due_iteration) || 0,
+        collateralCrates: Number(event.collateral_crates) || 0,
+        recovered: Number(event.recovered) || 0,
+        loss: Number(event.loss) || 0,
+        collateralSeized: Number(event.collateral_seized) || 0,
+        reason: event.reason || null,
+        shockType: event.shock_type || null,
+        duration: Number(event.duration) || 0,
+        berryFactor: Number(event.berry_factor) || 0,
+        woodFactor: Number(event.wood_factor) || 0
       });
       if (event.type === "death") {
         deaths.push({ tick: tickNumber, index: actor, cause: event.cause });
@@ -306,6 +375,10 @@
         features: replay.meta.features || {},
         health: replay.meta.health || { max: 4, food_per_iteration: 6 },
         resources: replay.meta.resources || {},
+        credit: replay.meta.credit || {},
+        trust: replay.meta.trust || {},
+        reciprocity: replay.meta.reciprocity || {},
+        shocks: replay.meta.shocks || {},
         initialCommons: replay.meta.initial_commons || { berries: 0, wood: 0 },
         initialTotals: replay.meta.initial_totals || { berries: 0, wood: 0 },
         extinctionIteration: extinctionIteration,
