@@ -23,7 +23,7 @@ def test_world_html_embeds_a_versioned_replay():
     html = build_world_html(small_world())
 
     assert "window.__REPLAY__" in html
-    assert '"schema_version":2' in html
+    assert '"schema_version":3' in html
     assert '"world":"subsistence"' in html
     assert "/*__INLINE_REPLAY__*/" not in html
     assert "<script src=" not in html

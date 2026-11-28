@@ -104,6 +104,13 @@ COMMONS:
   # Floor on density so effective costs never divide by zero. At the floor,
   # search costs ten times the full-commons base cost.
   MIN_DENSITY: 0.10
+  # Scale the shared stocks with village size, relative to REFERENCE_AGENTS.
+  # A 50-agent village then gets five times the berry and wood flow of the
+  # 10-agent baseline, so the per-villager ecology is comparable and a large
+  # village is not starving by construction. The values below stay the raw
+  # per-village numbers when this is false.
+  SCALE_WITH_AGENTS: true
+  REFERENCE_AGENTS: 10
   BERRIES:
     INITIAL: 2000
     CAPACITY: 3000
@@ -114,6 +121,29 @@ COMMONS:
     CAPACITY: 120
     REGENERATION: 1.0
     EXTRACTION_EFFICIENCY: 1.0
+
+# Seasons change how fast the commons recovers. A full year runs through the
+# cycle below. Wood regrows in every season; berries do not recover at all in
+# winter, so a village that eats the commons down to nothing in summer goes
+# hungry in winter. Saving berries, or leaving stock standing, is the only way
+# through.
+SEASONS:
+  ENABLED: true
+  # Iterations per season. A full year is LENGTH * len(CYCLE).
+  LENGTH: 45
+  CYCLE:
+    - NAME: spring
+      BERRY_REGEN: 1.00
+      WOOD_REGEN: 1.00
+    - NAME: summer
+      BERRY_REGEN: 1.40
+      WOOD_REGEN: 1.00
+    - NAME: autumn
+      BERRY_REGEN: 0.80
+      WOOD_REGEN: 1.00
+    - NAME: winter
+      BERRY_REGEN: 0.00
+      WOOD_REGEN: 1.00
 
 STORAGE:
   # Eight raw wood blocks are crafted into one crate, and one crate stores ten

@@ -268,6 +268,47 @@ def test_partial_wood_work_carries_between_days():
     assert world.commons_wood == 9
 
 
+def test_fractional_chopping_cannot_bank_a_windfall():
+    world = SubsistenceWorld(make_config())
+    agent = world.initialize_agents()[0]
+    world.commons_wood = 100
+
+    gathered = 0
+    for _ in range(10):
+        gathered += world._extract(agent, "wood", 0.4)
+        assert 0.0 <= agent.wood_progress < 1.0
+
+    assert gathered == 4
+    assert agent.wood == 4
+    assert agent.wood_progress == pytest.approx(0.0, abs=1e-9)
+
+
+def test_empty_forest_keeps_the_finished_fraction_of_a_block():
+    world = SubsistenceWorld(make_config())
+    agent = world.initialize_agents()[0]
+    agent.wood_progress = 0.8
+    world.commons_wood = 0
+
+    assert world._extract(agent, "wood", 0.4) == 0
+    # The eight tenths already chopped are not thrown away.
+    assert agent.wood_progress == pytest.approx(0.8)
+    assert agent.wood == 0
+    assert world._last_blocked_wood == 1
+
+
+def test_thin_forest_wastes_unavailable_blocks_but_carries_the_fraction():
+    world = SubsistenceWorld(make_config())
+    agent = world.initialize_agents()[0]
+    agent.wood_progress = 0.9
+    world.commons_wood = 1
+
+    assert world._extract(agent, "wood", 1.4) == 1
+    assert agent.wood == 1
+    assert agent.wood_progress == pytest.approx(0.3)
+    assert world.commons_wood == 0
+    assert world._last_blocked_wood == 1
+
+
 def test_effective_yields_scale_with_commons_density():
     world = SubsistenceWorld(make_config(SIMULATION={"AGENTS": 1}))
     agent = world.initialize_agents()[0]

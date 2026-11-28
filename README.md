@@ -97,8 +97,15 @@ drag the timeline to scrub, and click a villager to inspect them.
   the low-commitment end of the credit spectrum.
 - **Shocks are optional.** A drought temporarily cuts berry and wood
   regeneration, so the same labour yields less until it passes.
+- **Seasons turn.** Spring, summer, autumn, and winter each last 45 iterations
+  by default. Berry regrowth peaks in summer and stops completely in winter;
+  wood regrows every season. The commons is the granary, so a village that
+  strips the bushes in summer meets a hungry winter.
 - **The commons is shared and depletable.** Berry bushes and forest regenerate
   each iteration. Berry bushes recover quickly; wood regrows much more slowly.
+- **Village size scales the commons.** Stocks and regeneration scale with the
+  number of agents relative to a 10-agent baseline, so 50- and 100-agent runs
+  keep a comparable per-villager ecology instead of starving by construction.
 
 The detailed rules, formulas, iteration order, and conservation ledger are in
 [`worlds/subsistence/MODEL.md`](worlds/subsistence/MODEL.md).
@@ -117,6 +124,10 @@ FEATURES:
   TRUST: false         # public credit reputation
   RECIPROCITY: false   # gifts become soft obligations
   SHOCKS: false        # temporary commons droughts
+SEASONS:
+  ENABLED: true        # berry regrowth follows the seasons
+COMMONS:
+  SCALE_WITH_AGENTS: true   # ecology scales with village size
 ```
 
 Set a flag to `false` to isolate a mechanism. For example, turning `SPOILAGE`
@@ -127,6 +138,40 @@ from a shared utility. The harvesting, health, and commons rules stay the same.
 The money world keeps its own flags (`GIFTING.ENABLED`, `MARKET.ENABLED`,
 `SOCIAL.RECIPROCITY_ENABLED`, `TRUST.ENABLED`, `SHOCKS.ENABLED`) in
 `worlds/money/config.yaml`. Gifting is off there by default too.
+
+## What emerged
+
+A 50-villager, 5,000-iteration run with the default flags is recorded as a
+60-second video of one full year, with the details in
+[`docs/EMERGENT_FINDINGS.md`](docs/EMERGENT_FINDINGS.md).
+
+[![The village in spring](docs/subsistence-year-poster.png)](docs/subsistence-year.webm)
+
+- **The cold start filters, not winter.** All 20 villagers with berry skill
+  below 0.60 die, 19 of them in the first spring, and the village then
+  stabilises at 26 survivors through iteration 5,000. Only 3 deaths happen in
+  winter.
+- **Winter is a granary, not a massacre.** Zero berry regrowth is survivable
+  because the commons carries stock through; wood prices rise from about 9.5 to
+  11.2 berries.
+- **The crate market saturates.** The village holds 51 crates across 26
+  survivors at iteration 4057 and trades none that year, so carpentry is a
+  replacement trade rather than a growth trade.
+- **Thin wood demand bounds the division of labour.** The marginal chopper
+  cannot sell enough wood to buy a day's ration, which is why deep specialists
+  go first and why credit or gifts are the natural next experiment.
+- **Fractional chopping is deterministic.** Work on the next block carries
+  between days and never banks a windfall; blocked plans appear as
+  `wood_blocked`.
+
+To record the video again:
+
+```bash
+python -m worlds.subsistence --agents 50 --iterations 5000 \
+  --replay replay-50.json.gz
+node worlds/subsistence/viewer/capture.mjs --replay replay-50.json.gz \
+  --out docs/subsistence-year.webm --from 1 --to 181 --seconds 60
+```
 
 ## The production possibilities chart
 
@@ -159,6 +204,24 @@ their durability, shared berry bushes and forest, villagers walking out to pick,
 chop, or craft, bilateral barter tokens, price beliefs, credit flows, spoilage,
 and deaths. The side panel explains the iconography and lists each iteration's
 gather, craft, gift, trade, credit, shock, spoilage, and death events.
+
+To record the village as a video, use the Playwright capture script:
+
+```bash
+node worlds/subsistence/viewer/capture.mjs \
+  --replay replay-subsistence.json.gz \
+  --out docs/subsistence-year.webm --from 1 --to 181 --seconds 60
+```
+
+It serves the viewer and replay locally, pauses playback, and walks the
+timeline at a fixed rate while recording. `--width` and `--height` set the
+frame size; `--no-trim` keeps the raw Playwright recording.
+
+The village is drawn as huts scattered in rings around the central market, with
+berry bushes on one side, worked forest on the other, and a pale wild forest
+beyond them for a horizon. Larger villages add rings and shrink the huts, so 50
+or 100 villagers still read as a village. The scene is tinted by the current
+season and the header names it.
 
 ## Credit modes
 
@@ -201,10 +264,12 @@ To write only a replay:
 python -m worlds.subsistence --iterations 1000 --replay replay-subsistence.json.gz
 ```
 
-The replay is version 2 and carries the world type, feature flags, agent
+The replay is version 3 and carries the world type, feature flags, agent
 skills, per-tick health and goods, pre/post-trade production points, and typed
-`gather`, `gift`, `trade`, `spoil`, and `death` events. `worlds/subsistence/replay.py`
-validates it on write and load.
+`gather`, `gift`, `trade`, `spoil`, and `death` events. Agent state is stored in
+compact positional rows, so a 50-agent, 5,000-iteration replay is about 5 MB
+compressed instead of about 20 MB. `worlds/subsistence/replay.py` validates it
+on write and load, and still reads version 2 files.
 
 ## Experiments
 

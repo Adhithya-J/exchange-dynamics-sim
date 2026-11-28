@@ -3,15 +3,24 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
+from typing import Any
 
 from utils import load_config
 from worlds.subsistence.replay import export_replay
-from worlds.subsistence.world import SubsistenceWorld
+from worlds.subsistence.world import CONFIG, SubsistenceWorld
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default=None, help="Custom YAML configuration")
+    parser.add_argument(
+        "--agents",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Override SIMULATION.AGENTS for a larger or smaller village",
+    )
     parser.add_argument(
         "--iterations", type=int, default=None, help="Override the run length"
     )
@@ -32,9 +41,25 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def build_config(args: argparse.Namespace) -> dict[str, Any] | None:
+    """Apply command-line overrides to the loaded (or default) config."""
+
+    if args.config is None and args.agents is None:
+        return None
+    config = deepcopy(
+        load_config(args.config) if args.config else CONFIG
+    )
+    if args.agents is not None:
+        if args.agents < 1:
+            raise SystemExit("--agents must be at least 1")
+        settings = config.setdefault("SIMULATION", {})
+        settings["AGENTS"] = args.agents
+    return config
+
+
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
-    config = load_config(args.config) if args.config else None
+    config = build_config(args)
     simulation = SubsistenceWorld(config)
     final_state = simulation.run(iterations=args.iterations)
 

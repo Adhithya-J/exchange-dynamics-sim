@@ -106,6 +106,17 @@ DEFAULT_RESOURCE_SETTINGS: dict[str, float] = {
 
 DEFAULT_COMMONS_MIN_DENSITY = 0.10
 
+DEFAULT_SEASONS: dict[str, Any] = {
+    "ENABLED": False,
+    "LENGTH": 90,
+    "CYCLE": [
+        {"NAME": "spring", "BERRY_REGEN": 1.0, "WOOD_REGEN": 1.0},
+        {"NAME": "summer", "BERRY_REGEN": 1.0, "WOOD_REGEN": 1.0},
+        {"NAME": "autumn", "BERRY_REGEN": 1.0, "WOOD_REGEN": 1.0},
+        {"NAME": "winter", "BERRY_REGEN": 1.0, "WOOD_REGEN": 1.0},
+    ],
+}
+
 DEFAULT_STORAGE_SETTINGS: dict[str, float] = {
     "WOOD_PER_CONTAINER": 8,
     "BERRIES_PER_CONTAINER": 10,
@@ -307,6 +318,7 @@ class SubsistenceWorld:
         self.min_commons_density = self._commons_min_density()
         self.storage_settings = self._storage_settings()
         self.trade_settings = self._trade_settings()
+        self.season_settings = self._season_settings()
 
         self.ledger = GoodsLedger(self)
         self.obligations = ObligationBook(self)
@@ -341,6 +353,12 @@ class SubsistenceWorld:
         self._failed_trades = 0
         self._gossip_price = self.initial_price
         self._current_iteration = 0
+        self._season: dict[str, Any] = {
+            "index": -1,
+            "name": "temperate",
+            "berry_regen": 1.0,
+            "wood_regen": 1.0,
+        }
         self.extinction_iteration: int | None = None
 
         self.gather_log: list[dict[str, Any]] = []
@@ -360,6 +378,7 @@ class SubsistenceWorld:
         self._last_gathered_wood = 0
         self._last_waste_berries = 0
         self._last_waste_wood = 0
+        self._last_blocked_wood = 0
         self._last_regenerated_berries = 0
         self._last_regenerated_wood = 0
         self._last_berries_spoiled = 0
@@ -539,6 +558,18 @@ class SubsistenceWorld:
             "exploration_rate": exploration_rate,
         }
 
+    def _commons_scale(self) -> float:
+        """Multiplier that keeps the ecology comparable at any village size."""
+
+        commons = self.config.get("COMMONS") or {}
+        if not commons.get("SCALE_WITH_AGENTS", False):
+            return 1.0
+        reference = int(commons.get("REFERENCE_AGENTS", 10) or 10)
+        if reference <= 0:
+            raise ValueError("COMMONS.REFERENCE_AGENTS must be positive")
+        agents = int(self.config["SIMULATION"]["AGENTS"])
+        return max(0.0, agents / reference)
+
     def _resource_settings(self, name: str) -> dict[str, float]:
         configured = (self.config.get("COMMONS") or {}).get(name.upper()) or {}
         merged = {**DEFAULT_RESOURCE_SETTINGS, **configured}
@@ -568,10 +599,11 @@ class SubsistenceWorld:
             raise ValueError(
                 f"COMMONS.{name.upper()}.EXTRACTION_EFFICIENCY must be in (0, 1]"
             )
+        scale = self._commons_scale()
         return {
-            "initial": initial,
-            "capacity": capacity,
-            "regeneration": regeneration,
+            "initial": int(round(initial * scale)),
+            "capacity": int(round(capacity * scale)),
+            "regeneration": regeneration * scale,
             "extraction_efficiency": efficiency,
         }
 
@@ -586,6 +618,62 @@ class SubsistenceWorld:
         if not 0 < min_density <= 1:
             raise ValueError("COMMONS.MIN_DENSITY must be in (0, 1]")
         return min_density
+
+    def _season_settings(self) -> dict[str, Any]:
+        configured = self.config.get("SEASONS") or {}
+        merged = {**DEFAULT_SEASONS, **configured}
+        try:
+            length = int(merged["LENGTH"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("SEASONS.LENGTH must be a whole number") from exc
+        if length <= 0:
+            raise ValueError("SEASONS.LENGTH must be positive")
+        cycle: list[dict[str, Any]] = []
+        for index, season in enumerate(merged.get("CYCLE") or []):
+            if not isinstance(season, dict):
+                raise ValueError("SEASONS.CYCLE entries must be mappings")
+            try:
+                berry = float(season.get("BERRY_REGEN", 1.0))
+                wood = float(season.get("WOOD_REGEN", 1.0))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "SEASONS.CYCLE regeneration factors must be numeric"
+                ) from exc
+            if berry < 0 or wood < 0:
+                raise ValueError(
+                    "SEASONS.CYCLE regeneration factors must not be negative"
+                )
+            cycle.append(
+                {
+                    "name": str(season.get("NAME", f"season-{index + 1}")),
+                    "berry_regen": berry,
+                    "wood_regen": wood,
+                }
+            )
+        if not cycle:
+            raise ValueError("SEASONS.CYCLE must contain at least one season")
+        return {"enabled": bool(merged["ENABLED"]), "length": length, "cycle": cycle}
+
+    def season_for(self, iteration: int) -> dict[str, Any]:
+        """The season covering ``iteration`` (one-based)."""
+
+        settings = self.season_settings
+        if not settings["enabled"]:
+            return {
+                "index": -1,
+                "name": "temperate",
+                "berry_regen": 1.0,
+                "wood_regen": 1.0,
+            }
+        cycle = settings["cycle"]
+        index = ((max(1, int(iteration)) - 1) // settings["length"]) % len(cycle)
+        season = cycle[index]
+        return {
+            "index": index,
+            "name": season["name"],
+            "berry_regen": season["berry_regen"],
+            "wood_regen": season["wood_regen"],
+        }
 
     def _storage_settings(self) -> dict[str, float]:
         configured = self.config.get("STORAGE") or {}
@@ -887,6 +975,7 @@ class SubsistenceWorld:
         self._last_gathered_wood = 0
         self._last_waste_berries = 0
         self._last_waste_wood = 0
+        self._last_blocked_wood = 0
         self._last_regenerated_berries = 0
         self._last_regenerated_wood = 0
         self._last_berries_spoiled = 0
@@ -965,6 +1054,12 @@ class SubsistenceWorld:
         return lower
 
     def _regenerate_commons(self) -> None:
+        season = self.season_for(self._current_iteration)
+        self._season = season
+        season_factors = {
+            "berries": float(season["berry_regen"]),
+            "wood": float(season["wood_regen"]),
+        }
         for name in ("berries", "wood"):
             settings = self.commons_settings[name]
             attribute = f"commons_{name}"
@@ -975,7 +1070,7 @@ class SubsistenceWorld:
                 else self._wood_regen_factor
             )
             amount = self._stochastic_round(
-                settings["regeneration"] * float(factor)
+                settings["regeneration"] * float(factor) * season_factors[name]
             )
             amount = min(amount, max(0, settings["capacity"] - current))
             setattr(self, attribute, current + amount)
@@ -1383,18 +1478,41 @@ class SubsistenceWorld:
         attribute = f"commons_{resource}"
         stock = int(getattr(self, attribute))
         efficiency = settings["extraction_efficiency"]
+        carried = 0.0
         if resource == "wood":
             # Chopping is slow, so carry the fractional part of a block into
             # the next day. Whole blocks are still the only wood ever stored.
-            total = agent.wood_progress + max(0.0, requested)
+            # The carried fraction stays below one block, so a fractional
+            # chopper can never bank a windfall and convert two blocks at once.
+            carried = agent.wood_progress
+            total = carried + max(0.0, requested)
             requested_whole = int(math.floor(total + EPSILON))
-            agent.wood_progress = max(0.0, total - requested_whole)
+            remainder = max(0.0, min(0.999999, total - requested_whole))
         else:
             requested_whole = self._stochastic_round(requested)
-        if requested_whole <= 0 or stock <= 0:
+            remainder = 0.0
+        if requested_whole <= 0:
+            if resource == "wood":
+                agent.wood_progress = remainder
+            return 0
+        if stock <= 0:
+            # The commons is empty. No new work converts, but the fraction of
+            # a block already chopped is not silently discarded.
+            if resource == "wood":
+                agent.wood_progress = carried
+                self._last_blocked_wood += requested_whole
             return 0
         usable_cap = int(stock * efficiency)
         usable = min(requested_whole, usable_cap)
+        if resource == "wood":
+            if usable <= 0:
+                agent.wood_progress = carried
+                self._last_blocked_wood += requested_whole
+                return 0
+            # Work that the thinning forest could not supply is wasted, like
+            # standing at an empty copse; the finished fraction carries on.
+            agent.wood_progress = remainder
+            self._last_blocked_wood += max(0, requested_whole - usable)
         if usable <= 0:
             return 0
         raw = (
@@ -2298,6 +2416,7 @@ class SubsistenceWorld:
             ),
             "berries_gathered": self._last_gathered_berries,
             "wood_gathered": self._last_gathered_wood,
+            "wood_blocked": self._last_blocked_wood,
             "berries_eaten": int(
                 sum(agent.meals_eaten for agent in self.agents)
             ),
@@ -2315,6 +2434,10 @@ class SubsistenceWorld:
             ),
             "berries_commons_pct": self._current_berries_density,
             "wood_commons_pct": self._current_wood_density,
+            "season": self._season["index"],
+            "season_name": self._season["name"],
+            "berry_regen_factor": self._season["berry_regen"],
+            "wood_regen_factor": self._season["wood_regen"],
             "trade_berries": self._last_trade_berries,
             "trade_wood": self._last_trade_wood,
             "crate_trades": self._last_crate_trades,

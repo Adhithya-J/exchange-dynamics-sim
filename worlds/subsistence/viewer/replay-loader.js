@@ -7,17 +7,19 @@
 (function (global) {
   "use strict";
 
-  var SCHEMA_VERSION = 2;
+  var SCHEMA_VERSION = 3;
+  var SUPPORTED_SCHEMA_VERSIONS = [2, 3];
   var STORAGE_KEY = "subsistenceReplayBytes";
 
   function assertReplay(replay) {
     if (!replay || typeof replay !== "object") {
       throw new Error("The replay file is empty or is not JSON.");
     }
-    if (replay.schema_version !== SCHEMA_VERSION) {
+    if (SUPPORTED_SCHEMA_VERSIONS.indexOf(replay.schema_version) === -1) {
       throw new Error(
         "Unsupported replay schema version " + replay.schema_version +
-        "; this viewer reads version " + SCHEMA_VERSION + "."
+        "; this viewer reads versions " + SUPPORTED_SCHEMA_VERSIONS.join(", ") +
+        "."
       );
     }
     if (!replay.meta || replay.meta.world !== "subsistence") {
@@ -115,7 +117,10 @@
       meanTrust: [],
       shockActive: [],
       shockCount: [],
-      giftObligations: []
+      giftObligations: [],
+      season: [],
+      berryRegen: [],
+      woodRegen: []
     };
     var eventTicks = [];
     var deaths = [];
@@ -222,6 +227,15 @@
       metrics.giftObligations.push(
         Number(rowMetrics.gift_obligations) || 0
       );
+      metrics.season.push(
+        rowMetrics.season == null ? 0 : Number(rowMetrics.season)
+      );
+      metrics.berryRegen.push(Number(rowMetrics.berry_regen_factor) || 0);
+      metrics.woodRegen.push(
+        rowMetrics.wood_regen_factor == null
+          ? 1
+          : Number(rowMetrics.wood_regen_factor)
+      );
 
       if (metrics.aliveCount[t] > 0) lastAliveIteration = t;
       if (extinctionIteration == null && t > 0 && metrics.aliveCount[t] === 0) {
@@ -229,73 +243,91 @@
       }
     }
 
-    // Build the per-agent series directly from the replay rows.
+    // Build the per-agent series from the replay rows. Schema 3 stores each
+    // agent state as a positional row (field names live in meta); schema 2
+    // stored the same state as an object.
+    var stateFieldByKey = {
+      health: "health",
+      berries: "berries",
+      wood: "wood",
+      crates: "crates",
+      crateDurability: "crate_durability",
+      craftProgress: "craft_progress",
+      priceBelief: "price_belief",
+      trust: "trust",
+      debtWood: "debt_wood",
+      debtBerries: "debt_berries",
+      debtCrates: "debt_crates",
+      creditOutWood: "credit_out_wood",
+      creditOutBerries: "credit_out_berries",
+      creditOutCrates: "credit_out_crates",
+      storage: "storage_capacity",
+      laborB: "labor_berries",
+      laborW: "labor_wood",
+      laborC: "labor_craft",
+      maxB: "effective_berries_per_day",
+      maxW: "effective_wood_per_day",
+      plannedB: "planned_berries",
+      plannedW: "planned_wood",
+      plannedCrates: "planned_crates",
+      woodProgress: "wood_progress",
+      gatheredB: "gathered_berries",
+      gatheredW: "gathered_wood",
+      postTradeB: "post_trade_berries",
+      postTradeW: "post_trade_wood",
+      alive: "alive"
+    };
+    var fieldPositions = null;
+    if (replay.meta.agent_state_fields) {
+      fieldPositions = {};
+      replay.meta.agent_state_fields.forEach(function (field, position) {
+        fieldPositions[field] = position;
+      });
+    }
+    var idPosition = fieldPositions ? fieldPositions.id : -1;
+
     var stateSeries = {};
-    ["health", "berries", "wood", "crates", "crateDurability",
-     "craftProgress", "priceBelief", "trust", "debtWood", "debtBerries",
-     "debtCrates", "creditOutWood", "creditOutBerries", "creditOutCrates",
-     "storage", "laborB", "laborW",
-     "laborC", "maxB", "maxW", "plannedB", "plannedW", "plannedCrates",
-     "gatheredB", "gatheredW", "postTradeB", "postTradeW", "alive"].forEach(
-      function (key) {
-        stateSeries[key] = [];
-        for (var t = 0; t < N; t += 1) {
-          var row = new Array(A).fill(0);
-          var tick = ticks[t];
-          for (var s = 0; s < tick.agents.length; s += 1) {
-            var state = tick.agents[s];
-            var index = indexById[state.id];
-            if (index === undefined) continue;
-            if (key === "health") row[index] = Number(state.health) || 0;
-            else if (key === "berries") row[index] = Number(state.berries) || 0;
-            else if (key === "wood") row[index] = Number(state.wood) || 0;
-            else if (key === "crates") row[index] = Number(state.crates) || 0;
-            else if (key === "crateDurability") row[index] = Number(state.crate_durability) || 0;
-            else if (key === "craftProgress") row[index] = Number(state.craft_progress) || 0;
-            else if (key === "priceBelief") {
-              var belief = Number(state.price_belief);
-              row[index] = belief > 0 ? belief : agents[index].priceBelief;
-            }
-            else if (key === "trust") row[index] = Number(state.trust) || 0;
-            else if (key === "debtWood") row[index] = Number(state.debt_wood) || 0;
-            else if (key === "debtBerries") row[index] = Number(state.debt_berries) || 0;
-            else if (key === "debtCrates") row[index] = Number(state.debt_crates) || 0;
-            else if (key === "creditOutWood") row[index] = Number(state.credit_out_wood) || 0;
-            else if (key === "creditOutBerries") row[index] = Number(state.credit_out_berries) || 0;
-            else if (key === "creditOutCrates") row[index] = Number(state.credit_out_crates) || 0;
-            else if (key === "storage") row[index] = Number(state.storage_capacity) || 0;
-            else if (key === "laborB") row[index] = Number(state.labor_berries) || 0;
-            else if (key === "laborW") row[index] = Number(state.labor_wood) || 0;
-            else if (key === "laborC") row[index] = Number(state.labor_craft) || 0;
-            else if (key === "maxB") {
-              var stateMaxB = state.effective_berries_per_day != null
-                ? state.effective_berries_per_day
-                : state.max_berries_per_day;
-              row[index] = stateMaxB != null
-                ? Number(stateMaxB) || 0
-                : agents[index].maxBerries;
-            }
-            else if (key === "maxW") {
-              var stateMaxW = state.effective_wood_per_day != null
-                ? state.effective_wood_per_day
-                : state.max_wood_per_day;
-              row[index] = stateMaxW != null
-                ? Number(stateMaxW) || 0
-                : agents[index].maxWood;
-            }
-            else if (key === "plannedB") row[index] = Number(state.planned_berries) || 0;
-            else if (key === "plannedW") row[index] = Number(state.planned_wood) || 0;
-            else if (key === "plannedCrates") row[index] = Number(state.planned_crates) || 0;
-            else if (key === "gatheredB") row[index] = Number(state.gathered_berries) || 0;
-            else if (key === "gatheredW") row[index] = Number(state.gathered_wood) || 0;
-            else if (key === "postTradeB") row[index] = Number(state.post_trade_berries) || 0;
-            else if (key === "postTradeW") row[index] = Number(state.post_trade_wood) || 0;
-            else if (key === "alive") row[index] = Boolean(state.alive);
+    Object.keys(stateFieldByKey).forEach(function (key) {
+      var field = stateFieldByKey[key];
+      var position = fieldPositions ? fieldPositions[field] : -1;
+      var values = [];
+      for (var t = 0; t < N; t += 1) {
+        var row = new Array(A).fill(0);
+        var states = ticks[t].agents;
+        for (var s = 0; s < states.length; s += 1) {
+          var state = states[s];
+          var index = indexById[
+            position >= 0 ? state[idPosition] : state.id
+          ];
+          if (index === undefined) continue;
+          var value = position >= 0 ? state[position] : state[field];
+          if (key === "alive") {
+            row[index] = Boolean(value);
+          } else if (key === "priceBelief") {
+            var belief = Number(value);
+            row[index] = belief > 0 ? belief : agents[index].priceBelief;
+          } else if (key === "maxB") {
+            var stateMaxB = value != null ? value : (
+              position >= 0 ? null : state.max_berries_per_day
+            );
+            row[index] = stateMaxB != null
+              ? Number(stateMaxB) || 0
+              : agents[index].maxBerries;
+          } else if (key === "maxW") {
+            var stateMaxW = value != null ? value : (
+              position >= 0 ? null : state.max_wood_per_day
+            );
+            row[index] = stateMaxW != null
+              ? Number(stateMaxW) || 0
+              : agents[index].maxWood;
+          } else {
+            row[index] = Number(value) || 0;
           }
-          stateSeries[key].push(row);
         }
+        values.push(row);
       }
-    );
+      stateSeries[key] = values;
+    });
 
     for (var e = 0; e < replay.events.length; e += 1) {
       var event = replay.events[e];
@@ -381,6 +413,8 @@
         trust: replay.meta.trust || {},
         reciprocity: replay.meta.reciprocity || {},
         shocks: replay.meta.shocks || {},
+        seasons: replay.meta.seasons || null,
+        commons: replay.meta.commons || null,
         initialCommons: replay.meta.initial_commons || { berries: 0, wood: 0 },
         initialTotals: replay.meta.initial_totals || { berries: 0, wood: 0 },
         extinctionIteration: extinctionIteration,

@@ -4,7 +4,7 @@ from copy import deepcopy
 
 import pytest
 
-from worlds.subsistence.replay import build_replay
+from worlds.subsistence.replay import build_replay, decode_tick_agents
 from worlds.subsistence.world import CONFIG, SubsistenceWorld
 
 
@@ -366,7 +366,7 @@ def test_replay_metadata_uses_initial_crates_and_beliefs():
     tick_zero = replay["ticks"][0]
     expected_storage = sum(
         min(state["berries"], state["storage_capacity"])
-        for state in tick_zero["agents"]
+        for state in decode_tick_agents(tick_zero)
     )
     assert tick_zero["metrics"]["storage_used"] == expected_storage
 
