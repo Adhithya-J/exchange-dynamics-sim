@@ -28,10 +28,12 @@ is no stored unit of account and no medium of exchange.
 Each agent has:
 
 - `berry_skill` and `wood_skill` — efficiency multipliers on the time costs;
+- `specialisation_z` — the shared latent `z` that generated the skills;
 - `time_per_iteration` — the finite working day, in minutes;
 - `berry_time_cost` and `wood_time_cost` — base minutes per whole unit;
 - `health` and `max_health`;
 - `berries` and `wood`;
+- `wood_progress` — fractional chopping work carried toward the next block;
 - `storage_wood_per_container` and `storage_berries_per_container`;
 - per-iteration observations: `labor_berries`, `labor_wood`,
   `planned_berries`, `planned_wood`, `gathered_berries`, `gathered_wood`,
@@ -42,9 +44,19 @@ Agents start with the configured starting berries and wood (default zero) and
 full health. They start with no money because money does not exist in this
 world.
 
-Skills are drawn as **complementary** pairs: a strong berry picker is a weak
-wood chopper and vice versa. This creates genuine specialists and a reason to
-exchange.
+Skills are drawn from one shared specialisation latent variable `z` per
+villager, so they are **negatively correlated** by construction. A high `z` is
+a berry specialist; a low `z` is a wood specialist. The default configuration
+draws `z` uniformly from `[-2, 2]` and then clips:
+
+```text
+berry_skill = clip(0.85 + 0.35 * z, 0.30, 1.50)
+wood_skill  = clip(1.05 - 0.25 * z, 0.45, 1.45)
+```
+
+With `BERRY_TIME_COST = 10`, `WOOD_TIME_COST = 120`, and a 100-minute day,
+this gives roughly 3–15 berries/day and 0.4–1.2 wood/day. The wood spread is
+deliberately narrower so top choppers do not strip the forest immediately.
 
 ## A finite day and the production possibilities frontier
 
@@ -87,25 +99,33 @@ The PPF chart plots this line, the planned labour point, the actual gathered
 point, and the holding after barter.
 
 The daily yield is planned in fractional units but harvested as whole units.
-A planned yield of `2.4` berries becomes two berries, with a 40% chance of a
-third, using a seeded random draw. This keeps the expected output equal to the
-time spent while keeping every stock whole.
+Berries use stochastic rounding: a planned yield of `2.4` berries becomes two
+berries, with a 40% chance of a third, using a seeded random draw. This keeps
+the expected output equal to the time spent while keeping every berry stock
+whole.
+
+Wood uses a carried fractional progress instead. Chopping is slow, so a
+villager may not finish a whole block in one day. `wood_progress` holds the
+fraction of the next block already completed; each day adds that day's planned
+wood, extracts every whole block now available, and keeps the remainder for
+tomorrow. Wood stocks therefore stay whole without throwing away slow work.
 
 ### Labour allocation
 
-With `FEATURES.TRADE: true`, an agent first covers today's food and its berry
-reserve. It then chooses the activity with the higher market value per minute:
+With `FEATURES.TRADE: true`, an agent first chooses the activity with the
+higher market value per minute:
 
 ```text
 berry value per minute = berry_skill / BERRY_TIME_COST
 wood value per minute  = wood_skill * price / WOOD_TIME_COST
 ```
 
-- A **wood specialist** spends the rest of the day chopping wood, up to its
-  target plus `TRADE_SURPLUS`.
-- A **berry specialist** spends the rest of the day producing berries, up to
-  its reserve plus enough berries to buy one block of wood plus
-  `TRADE_SURPLUS`.
+- A **wood specialist** spends enough time to finish the next whole block
+  (using any carried `wood_progress`), then uses the rest of the day to gather
+  food and its berry reserve. This lets a low-berry villager produce a tradable
+  block even though a full ration would otherwise consume the whole day.
+- A **berry specialist** covers today's food and its berry reserve, then
+  produces a small surplus to buy one block of wood plus `TRADE_SURPLUS`.
 - A berry specialist does not chop its own wood; it buys wood with berries.
 - A wood specialist does not have to gather all of its own berries; it can sell
   wood for them.
@@ -168,11 +188,13 @@ Otherwise the day is short:
 health -= STARVATION_RATE
 ```
 
-Death is `health <= 0`. With the defaults (`MAX_HEALTH = 10`,
-`FOOD_PER_ITERATION = 6`, `HEAL_PER_MEAL = 1`, `STARVATION_RATE = 1`), a
-full-health agent survives exactly ten days without food, and a full day's
-ration restores one point of health up to the maximum. A short day costs one
-point regardless of how many berries were missing.
+Death is `health <= 0`. With the defaults (`MAX_HEALTH = 4`,
+`STARTING_HEALTH = 4`, `FOOD_PER_ITERATION = 6`, `HEAL_PER_MEAL = 1`,
+`STARVATION_RATE = 1`), a full-health agent survives exactly four days without
+food, and a full day's ration restores one point of health up to the maximum. A
+short day costs one point regardless of how many berries were missing. The
+four-day buffer is deliberate: missing the six-berry ration creates immediate
+early-game scarcity and a reason to barter instead of a ten-day cushion.
 
 Dead agents do not gather, gift, trade, or eat. Their goods remain in their
 inventory and are still counted in world totals; their wood continues to wear
@@ -363,12 +385,14 @@ The flags are independent. For example:
   health settings, the finite-day time costs, the storage container ratio,
   resource definitions, initial commons and totals, the initial price, and the
   full config.
-- `agents` — id, label, colour, berry and wood skills, time budget, time costs,
-  maximum daily yields, initial health, and the storage container ratio.
+- `agents` — id, label, colour, berry and wood skills, the `specialisation_z`
+  latent, time budget, time costs, maximum daily yields, initial health, and
+  the storage container ratio.
 - `ticks` — one row per iteration plus iteration zero. Each tick has summary
   metrics and one state per agent: whole health, berries, wood and storage
-  capacity; the labour split; planned berries and wood; actual whole gathered
-  berries and wood; whole post-trade holdings; and alive status.
+  capacity; the labour split; carried wood progress; planned berries and wood;
+  actual whole gathered berries and wood; whole post-trade holdings; and alive
+  status.
 - `events` — typed `gather`, `gift`, `trade`, `spoil`, and `death` records with
   a tick, phase, sequence number, and stable id. Trades carry whole quantities
   and the whole price; gather events carry the whole extracted amount and
@@ -396,7 +420,9 @@ the commons limited the plan.
    negative, and berries, wood, storage capacity, and health are whole numbers.
 2. Health stays within `[0, MAX_HEALTH]`.
 3. Labour spent on berries and wood never exceeds the agent's finite day.
-4. Total berries and total wood change only by the sources and sinks in the
+4. `wood_progress` is fractional, stays in `[0, 1)`, and carries between
+   iterations; it is never counted as stored wood.
+5. Total berries and total wood change only by the sources and sinks in the
    ledger above.
 5. Gifts and trades conserve both goods.
 6. Dead agents do not participate in gathering, gifting, trade, or eating.

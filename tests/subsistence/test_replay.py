@@ -61,6 +61,7 @@ def test_replay_records_pre_and_post_trade_points():
     for field in (
         "labor_berries",
         "labor_wood",
+        "wood_progress",
         "gathered_berries",
         "gathered_wood",
         "post_trade_berries",
@@ -68,6 +69,14 @@ def test_replay_records_pre_and_post_trade_points():
     ):
         assert field in state
         assert isinstance(state[field], (int, float))
+
+
+def test_replay_records_the_specialisation_latent():
+    replay = build_replay(small_world())
+
+    for agent in replay["agents"]:
+        assert "specialisation_z" in agent
+        assert isinstance(agent["specialisation_z"], (int, float))
 
 
 def test_replay_round_trip_is_deterministic(tmp_path):
@@ -121,5 +130,5 @@ def test_validate_replay_rejects_missing_agent_state():
 def test_tick_zero_uses_the_initial_barter_price():
     replay = build_replay(small_world())
 
-    assert replay["ticks"][0]["metrics"]["barter_price"] == 4
-    assert replay["meta"]["initial_price"] == 4
+    assert replay["ticks"][0]["metrics"]["barter_price"] == 5
+    assert replay["meta"]["initial_price"] == 5

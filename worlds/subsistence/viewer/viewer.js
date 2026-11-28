@@ -470,7 +470,7 @@
       var hovered = state.hover === index;
       var x = home.x;
       var y = home.y;
-      var maxHealth = meta.health.max || 10;
+      var maxHealth = meta.health.max || 4;
       var healthFraction = clamp(agentState.health / maxHealth, 0, 1);
       var alive = agentState.alive;
 
@@ -1018,7 +1018,7 @@
       }
       var agent = agents[state.selected];
       var agentState = stateAt(state.selected, state.tick);
-      var maxHealth = meta.health.max || 10;
+      var maxHealth = meta.health.max || 4;
       var healthFraction = clamp(agentState.health / maxHealth, 0, 1);
       var berryScale = Math.max(4, series.storage[state.tick][state.selected] || 4);
       var berryFraction = clamp(agentState.berries / berryScale, 0, 1);
@@ -1500,7 +1500,7 @@
       tooltip.innerHTML =
         "<strong>" + agent.label + "</strong> " +
         (agentState.alive ? "" : "<span class=\"muted\">(dead)</span>") +
-        "<br>health " + formatNumber(agentState.health, 0) + " / " + formatNumber(meta.health.max || 10, 0) +
+        "<br>health " + formatNumber(agentState.health, 0) + " / " + formatNumber(meta.health.max || 4, 0) +
         "<br>berries " + formatNumber(agentState.berries, 0) +
         " · wood " + formatNumber(agentState.wood, 0) +
         "<br>storage " + formatNumber(Math.min(agentState.berries, agentState.storage), 0) +

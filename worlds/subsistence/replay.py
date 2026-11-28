@@ -136,6 +136,9 @@ def build_replay(simulation: SubsistenceWorld) -> dict[str, Any]:
                         "labor_wood": float(
                             rows[agent_id].get("labor_wood", 0.0)
                         ),
+                        "wood_progress": float(
+                            rows[agent_id].get("wood_progress", 0.0)
+                        ),
                         "planned_berries": float(
                             rows[agent_id].get("planned_berries", 0.0)
                         ),
@@ -263,6 +266,7 @@ def _agent_metadata(
                 "color": AGENT_COLORS[index % len(AGENT_COLORS)],
                 "berry_skill": float(agent.berry_skill),
                 "wood_skill": float(agent.wood_skill),
+                "specialisation_z": float(agent.specialisation_z),
                 "labour": 1.0,
                 "time_per_iteration": float(agent.time_per_iteration),
                 "berry_time_cost": float(agent.berry_time_cost),
@@ -532,6 +536,11 @@ def validate_replay(replay: dict[str, Any]) -> None:
                 required_float(
                     state.get(field),
                     f"tick {expected_iteration} {state.get('id')} {field}",
+                )
+            if "wood_progress" in state:
+                required_float(
+                    state["wood_progress"],
+                    f"tick {expected_iteration} {state.get('id')} wood_progress",
                 )
             if not isinstance(state.get("alive"), bool):
                 raise ValueError(

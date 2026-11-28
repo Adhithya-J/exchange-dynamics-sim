@@ -25,21 +25,33 @@ FEATURES:
   SHOCKS: false
 
 AGENTS:
-  # Efficiency multipliers on the time costs below. A higher berry skill
-  # means more berries per minute; a higher wood skill means more wood per
-  # minute.
-  BERRY_SKILL_RANGE: [0.7, 1.8]
-  WOOD_SKILL_RANGE: [0.7, 1.8]
+  # Skills come from one shared specialisation latent z, drawn uniformly from
+  # [-SKILL_Z_RANGE, SKILL_Z_RANGE]. A high z is a berry specialist; a low z
+  # is a wood specialist. The two skills are therefore negatively correlated.
+  #
+  #   berry_skill = clip(BERRY_INTERCEPT + BERRY_SLOPE * z, BERRY_SKILL_RANGE)
+  #   wood_skill  = clip(WOOD_INTERCEPT  + WOOD_SLOPE  * z, WOOD_SKILL_RANGE)
+  #
+  # With the defaults this gives roughly 3-15 berries/day and 0.4-1.2
+  # wood/day. The wood spread is deliberately lower so top choppers do not
+  # strip the forest immediately.
+  SKILL_Z_RANGE: 2.0
+  BERRY_INTERCEPT: 0.85
+  BERRY_SLOPE: 0.35
+  WOOD_INTERCEPT: 1.05
+  WOOD_SLOPE: -0.25
+  BERRY_SKILL_RANGE: [0.30, 1.50]
+  WOOD_SKILL_RANGE: [0.45, 1.45]
   # One iteration is a finite working day.
   TIME_PER_ITERATION: 100.0
   # Minutes of work per whole berry at skill 1.
   BERRY_TIME_COST: 10.0
   # Minutes of work per whole wood at skill 1. Chopping is much slower.
   WOOD_TIME_COST: 120.0
-  # Health is a whole-day buffer. Full health survives this many days without
-  # food.
-  MAX_HEALTH: 10
-  STARTING_HEALTH: 10
+  # Health is a short whole-day food buffer. Full health survives only a few
+  # missed days, so early ration shortfalls create real scarcity.
+  MAX_HEALTH: 4
+  STARTING_HEALTH: 4
   # Berries needed for a full day's food.
   FOOD_PER_ITERATION: 6
   HEAL_PER_MEAL: 1
@@ -80,7 +92,7 @@ STORAGE:
 
 TRADE:
   # Relative price: whole berries given per whole unit of wood.
-  INITIAL_PRICE: 4
+  INITIAL_PRICE: 5
   # Fraction of the supply/demand imbalance applied to next iteration's price.
   PRICE_ADJUSTMENT: 0.1
   MIN_PRICE: 1

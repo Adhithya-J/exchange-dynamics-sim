@@ -59,7 +59,7 @@
         <details class="legend-details">
           <summary class="panel-title">The village <span class="panel-note">legend</span></summary>
           <div class="legend-body">
-            <div class="legend-row"><span class="ico health"></span><span><b>Health ring.</b> Full health is a ten-day buffer. A day short of food drains it; a full ration restores it.</span></div>
+            <div class="legend-row"><span class="ico health"></span><span><b>Health ring.</b> Full health is only a four-day buffer. A day short of food drains it; a full ration restores it.</span></div>
             <div class="legend-row"><span class="ico berries"></span><span><b>Berry basket.</b> Food. Berries not eaten and not inside storage spoil at the end of the iteration.</span></div>
             <div class="legend-row"><span class="ico wood"></span><span><b>Wood pile.</b> Builds storage crates and is bartered for berries.</span></div>
             <div class="legend-row"><span class="ico crate"></span><span><b>Storage crate.</b> Wood protects a limited berry stock from spoiling. Eight blocks store ten berries.</span></div>
@@ -130,7 +130,7 @@
     <h2 id="helpTitle">How to read Subsistence</h2>
     <p>This page replays the simulation. It does not change the rules or the numbers. Every villager is an agent from the recorded run.</p>
     <ol>
-      <li><b>Health is a food buffer.</b> Full health survives ten days without food. A day with a full ration restores one point; a day short of food drains it.</li>
+      <li><b>Health is a food buffer.</b> Full health survives only four days without food. A day with a full ration restores one point; a day short of food drains it. Missing the six-berry ration creates immediate scarcity.</li>
       <li><b>Berries are food.</b> A villager eats every iteration. Berries outside a storage crate spoil at the end of the iteration.</li>
       <li><b>Wood is capital.</b> Wood builds storage crates. Eight blocks protect ten berries, and chopping wood is much slower than picking berries. Wood regrows much more slowly than berries, so it is the scarce, valuable resource.</li>
       <li><b>Skills differ.</b> Berry skill and wood skill set each villager's production possibilities frontier. A steep frontier means a villager gives up a lot of berries to chop one wood.</li>

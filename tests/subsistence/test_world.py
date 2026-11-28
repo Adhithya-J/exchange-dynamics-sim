@@ -39,38 +39,44 @@ def test_agents_start_with_nothing_but_full_health():
     for agent in world.agents:
         assert agent.berries == 0.0
         assert agent.wood == 0.0
-        assert agent.health == 10.0
+        assert agent.health == world.agent_settings["max_health"]
         assert agent.is_alive
 
 
-def test_full_health_survives_exactly_ten_missed_meals():
+def test_full_health_survives_exactly_max_health_missed_days():
     world = SubsistenceWorld(quiet_config(SIMULATION={"AGENTS": 1}))
     agent = world.initialize_agents()[0]
+    max_health = world.agent_settings["max_health"]
 
-    for iteration in range(1, 10):
+    for iteration in range(1, max_health):
         world.run_iteration()
         assert agent.is_alive
-        assert agent.health == pytest.approx(10.0 - iteration)
+        assert agent.health == pytest.approx(max_health - iteration)
 
     world.run_iteration()
     assert not agent.is_alive
     assert agent.health == 0.0
-    assert world.extinction_iteration == 10
+    assert world.extinction_iteration == max_health
     assert world.death_log[-1]["cause"] == "hunger"
 
 
 def test_eating_restores_one_health():
+    max_health = SubsistenceWorld(make_config()).agent_settings["max_health"]
+    start_health = max_health - 1
     world = SubsistenceWorld(
         quiet_config(
             SIMULATION={"AGENTS": 1},
-            AGENTS={"STARTING_HEALTH": 5, "STARTING_BERRIES": 6},
+            AGENTS={
+                "STARTING_HEALTH": start_health,
+                "STARTING_BERRIES": 6,
+            },
         )
     )
     agent = world.initialize_agents()[0]
 
     world.run_iteration()
 
-    assert agent.health == pytest.approx(6.0)
+    assert agent.health == pytest.approx(start_health + 1)
 
 
 def test_no_storage_means_all_uneaten_berries_spoil():
@@ -177,6 +183,70 @@ def test_ppf_intercepts_come_from_time_and_skill():
     assert agent.max_berries_per_day == pytest.approx(15.0)
     assert agent.max_wood_per_day == pytest.approx(1.25)
     assert agent.opportunity_cost_of_wood == pytest.approx(12.0)
+
+
+def test_skill_latent_is_negatively_correlated_and_clipped():
+    world = SubsistenceWorld(
+        make_config(SIMULATION={"AGENTS": 200, "RANDOM_SEED": 11})
+    )
+    agents = world.initialize_agents()
+    berry = [agent.berry_skill for agent in agents]
+    wood = [agent.wood_skill for agent in agents]
+
+    mean_berry = sum(berry) / len(berry)
+    mean_wood = sum(wood) / len(wood)
+    covariance = sum(
+        (b - mean_berry) * (w - mean_wood) for b, w in zip(berry, wood)
+    )
+    variance_berry = sum((b - mean_berry) ** 2 for b in berry)
+    variance_wood = sum((w - mean_wood) ** 2 for w in wood)
+    correlation = covariance / (variance_berry * variance_wood) ** 0.5
+
+    assert correlation < -0.8
+    for agent in agents:
+        assert 0.30 <= agent.berry_skill <= 1.50
+        assert 0.45 <= agent.wood_skill <= 1.45
+        assert agent.berry_skill == pytest.approx(
+            min(1.50, max(0.30, 0.85 + 0.35 * agent.specialisation_z))
+        )
+        assert agent.wood_skill == pytest.approx(
+            min(1.45, max(0.45, 1.05 - 0.25 * agent.specialisation_z))
+        )
+    assert max(agent.max_berries_per_day for agent in agents) <= 15.0
+    assert max(agent.max_wood_per_day for agent in agents) <= 100 * 1.45 / 120
+    assert max(agent.max_wood_per_day for agent in agents) >= 1.0
+
+
+def test_default_skill_and_health_parameters():
+    settings = SubsistenceWorld(CONFIG).agent_settings
+
+    assert settings["max_health"] == 4
+    assert settings["starting_health"] == 4
+    assert settings["food_per_iteration"] == 6
+    assert settings["skill_z_range"] == pytest.approx(2.0)
+    assert settings["berry_intercept"] == pytest.approx(0.85)
+    assert settings["berry_slope"] == pytest.approx(0.35)
+    assert settings["wood_intercept"] == pytest.approx(1.05)
+    assert settings["wood_slope"] == pytest.approx(-0.25)
+    assert settings["berry_skill_range"] == pytest.approx((0.30, 1.50))
+    assert settings["wood_skill_range"] == pytest.approx((0.45, 1.45))
+
+
+def test_partial_wood_work_carries_between_days():
+    world = SubsistenceWorld(make_config())
+    agent = world.initialize_agents()[0]
+    world.commons_wood = 10
+
+    world._extract(agent, "wood", 0.9)
+
+    assert agent.wood == 0
+    assert agent.wood_progress == pytest.approx(0.9)
+
+    world._extract(agent, "wood", 0.2)
+
+    assert agent.wood == 1
+    assert agent.wood_progress == pytest.approx(0.1)
+    assert world.commons_wood == 9
 
 
 def test_trade_is_off_when_feature_is_disabled():

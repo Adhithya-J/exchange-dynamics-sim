@@ -2,10 +2,11 @@
 
 A goods-only world with no money. Villagers start with nothing, spend a finite
 working day gathering whole berries and whole wood from a shared commons, eat,
-store food, and optionally barter. Health is a ten-day buffer, eight wood
-blocks store ten berries, chopping is much slower than picking, and
-complementary skills create a production possibilities frontier. Little
-villagers walk out to the berry bushes and forest during the run.
+store food, and optionally barter. Health is a short four-day buffer, eight
+wood blocks store ten berries, chopping is much slower than picking, and a
+shared specialisation latent makes berry and wood skills negatively correlated.
+Partial chopping carries between days. Little villagers walk out to the berry
+bushes and forest during the run.
 
 ## Run it
 

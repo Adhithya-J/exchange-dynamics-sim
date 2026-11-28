@@ -187,7 +187,7 @@
     var maxValues = {
       berries: 1,
       wood: 1,
-      health: 10,
+      health: 4,
       storage: 1,
       potentialBerries: 1,
       potentialWood: 1
@@ -218,7 +218,7 @@
         seed: replay.meta.seed,
         agentCount: A,
         features: replay.meta.features || {},
-        health: replay.meta.health || { max: 10, food_per_iteration: 1 },
+        health: replay.meta.health || { max: 4, food_per_iteration: 6 },
         resources: replay.meta.resources || {},
         initialCommons: replay.meta.initial_commons || { berries: 0, wood: 0 },
         initialTotals: replay.meta.initial_totals || { berries: 0, wood: 0 },

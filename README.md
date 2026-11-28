@@ -2,10 +2,11 @@
 
 ![The subsistence village at iteration 50](docs/subsistence-world.png)
 
-*Default subsistence configuration at iteration 50. Ten villagers are alive,
-the berry commons is full, the forest is down to about a quarter, and three
-barter trades are visible. Villagers walk out to pick berries or chop wood; the
-selected villager is inspecting a six-berry-per-wood market.*
+*Default subsistence configuration at iteration 50. Seven villagers are alive,
+the four-day health buffer is under pressure, the berry commons is full, and
+the forest is down to about 15% while two barter trades clear at six berries per
+wood. Villagers walk out to pick berries or chop wood; the selected villager is
+inspecting the market.*
 
 An experimental agent-based laboratory for exchange, survival, and inequality.
 The repository now holds **two worlds** that share a small set of simulation
@@ -47,19 +48,21 @@ drag the timeline to scrub, and click a villager to inspect them.
 
 - **Everyone starts with nothing.** No money, no initial berries, no initial
   wood. Health is full.
-- **Health is a ten-day food buffer.** A full-health villager survives ten days
-  without food. A day with a full ration restores one point; a day short of
-  food drains one. The default daily ration is six berries.
+- **Health is a four-day food buffer.** A full-health villager survives four
+  days without food. A day with a full ration restores one point; a day short of
+  food drains one. The default daily ration is six berries, so early shortfalls
+  force immediate barter instead of a long cushion.
 - **Berries are food and spoil.** Berries not eaten and not inside storage
   spoil at the end of the iteration. Berries and wood are always whole units.
 - **Wood is capital.** Eight blocks of wood store ten berries. Wood wears out,
   so it remains an ongoing need.
 - **The day is finite.** Each villager has a fixed number of working minutes.
   Picking berries is quick; chopping wood is much slower and yields much rarer,
-  more valuable wood.
-- **Skills differ.** Each villager has a complementary berry skill and wood
-  skill: strong pickers are weak choppers and vice versa. Together with the
-  finite day, that produces a linear production possibilities frontier.
+  more valuable wood. Unfinished chopping carries into the next day.
+- **Skills differ.** Each villager draws one shared specialisation latent `z`.
+  Berry skill rises with `z` and wood skill falls with it, so strong pickers are
+  weak choppers and strong choppers are weak pickers. Together with the finite
+  day, that produces a linear production possibilities frontier.
 - **Barter has a relative price.** There is no money or unit of account. The
   header price is only how many whole berries one block of wood buys.
   Villagers specialise where their time is worth more at that ratio.

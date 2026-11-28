@@ -49,21 +49,26 @@ DEFAULT_FEATURES: dict[str, bool] = {
 }
 
 DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
-    "BERRY_SKILL_RANGE": (0.6, 1.6),
-    "WOOD_SKILL_RANGE": (0.6, 1.6),
+    "SKILL_Z_RANGE": 2.0,
+    "BERRY_INTERCEPT": 0.85,
+    "BERRY_SLOPE": 0.35,
+    "WOOD_INTERCEPT": 1.05,
+    "WOOD_SLOPE": -0.25,
+    "BERRY_SKILL_RANGE": (0.30, 1.50),
+    "WOOD_SKILL_RANGE": (0.45, 1.45),
     "TIME_PER_ITERATION": 100.0,
     "BERRY_TIME_COST": 10.0,
-    "WOOD_TIME_COST": 80.0,
-    "MAX_HEALTH": 10,
-    "STARTING_HEALTH": 10,
-    "FOOD_PER_ITERATION": 1,
+    "WOOD_TIME_COST": 120.0,
+    "MAX_HEALTH": 4,
+    "STARTING_HEALTH": 4,
+    "FOOD_PER_ITERATION": 6,
     "HEAL_PER_MEAL": 1,
     "STARVATION_RATE": 1,
     "STARTING_BERRIES": 0,
     "STARTING_WOOD": 0,
-    "RESERVE_DAYS": 10,
-    "TRADE_SURPLUS": 2,
-    "MAX_WOOD_TARGET": 16,
+    "RESERVE_DAYS": 4,
+    "TRADE_SURPLUS": 1,
+    "MAX_WOOD_TARGET": 20,
 }
 
 DEFAULT_RESOURCE_SETTINGS: dict[str, float] = {
@@ -76,7 +81,7 @@ DEFAULT_RESOURCE_SETTINGS: dict[str, float] = {
 DEFAULT_STORAGE_SETTINGS: dict[str, float] = {
     "WOOD_PER_CONTAINER": 8,
     "BERRIES_PER_CONTAINER": 10,
-    "WOOD_DECAY_CHANCE": 0.01,
+    "WOOD_DECAY_CHANCE": 0.03,
     "STORED_SPOIL_RATE": 0.0,
 }
 
@@ -84,7 +89,7 @@ DEFAULT_TRADE_SETTINGS: dict[str, float] = {
     "INITIAL_PRICE": 5,
     "PRICE_ADJUSTMENT": 0.1,
     "MIN_PRICE": 1,
-    "MAX_PRICE": 20,
+    "MAX_PRICE": 6,
 }
 
 DEFAULT_GIFTING_SETTINGS: dict[str, Any] = {
@@ -113,10 +118,12 @@ class Agent:
         storage_berries_per_container: int,
         berries: int = 0,
         wood: int = 0,
+        specialisation_z: float = 0.0,
     ) -> None:
         self.id = id
         self.berry_skill = float(berry_skill)
         self.wood_skill = float(wood_skill)
+        self.specialisation_z = float(specialisation_z)
         self.time_per_iteration = float(time_per_iteration)
         self.berry_time_cost = float(berry_time_cost)
         self.wood_time_cost = float(wood_time_cost)
@@ -126,6 +133,9 @@ class Agent:
         self.storage_berries_per_container = int(storage_berries_per_container)
         self.berries = int(berries)
         self.wood = int(wood)
+        # Fractional wood work completed toward the next whole block. It
+        # persists across iterations so slow chopping is not lost each day.
+        self.wood_progress = 0.0
 
         # Per-iteration observations, reset before each gathering step.
         self.labor_berries = 0.0
@@ -142,6 +152,12 @@ class Agent:
     @property
     def is_alive(self) -> bool:
         return self.health > 0
+
+    @property
+    def specialisation(self) -> float:
+        """Alias for the shared skill latent, kept for readability."""
+
+        return self.specialisation_z
 
     @property
     def storage_capacity(self) -> int:
@@ -189,6 +205,7 @@ class Agent:
             "storage_capacity": self.storage_capacity,
             "berry_skill": self.berry_skill,
             "wood_skill": self.wood_skill,
+            "specialisation_z": self.specialisation_z,
             "time_per_iteration": self.time_per_iteration,
             "berry_time_cost": self.berry_time_cost,
             "wood_time_cost": self.wood_time_cost,
@@ -196,6 +213,7 @@ class Agent:
             "max_wood_per_day": self.max_wood_per_day,
             "labor_berries": self.labor_berries,
             "labor_wood": self.labor_wood,
+            "wood_progress": self.wood_progress,
             "planned_berries": self.planned_berries,
             "planned_wood": self.planned_wood,
             "gathered_berries": self.gathered_berries,
@@ -303,6 +321,11 @@ class SubsistenceWorld:
             time_per_iteration = float(merged["TIME_PER_ITERATION"])
             berry_time_cost = float(merged["BERRY_TIME_COST"])
             wood_time_cost = float(merged["WOOD_TIME_COST"])
+            skill_z_range = float(merged["SKILL_Z_RANGE"])
+            berry_intercept = float(merged["BERRY_INTERCEPT"])
+            berry_slope = float(merged["BERRY_SLOPE"])
+            wood_intercept = float(merged["WOOD_INTERCEPT"])
+            wood_slope = float(merged["WOOD_SLOPE"])
             max_health = int(merged["MAX_HEALTH"])
             starting_health = int(merged["STARTING_HEALTH"])
             food = int(merged["FOOD_PER_ITERATION"])
@@ -316,7 +339,7 @@ class SubsistenceWorld:
         except (TypeError, ValueError) as exc:
             raise ValueError(
                 "AGENTS health, food, and starting stock settings must be whole "
-                "numbers, and time settings must be numeric"
+                "numbers, and time and skill settings must be numeric"
             ) from exc
         berry_range = self._validated_range(
             merged["BERRY_SKILL_RANGE"], "AGENTS.BERRY_SKILL_RANGE"
@@ -328,6 +351,17 @@ class SubsistenceWorld:
             raise ValueError("AGENTS.TIME_PER_ITERATION must be positive")
         if berry_time_cost <= 0 or wood_time_cost <= 0:
             raise ValueError("AGENTS time costs must be positive")
+        if skill_z_range <= 0:
+            raise ValueError("AGENTS.SKILL_Z_RANGE must be positive")
+        if berry_slope < 0 or wood_slope > 0:
+            raise ValueError(
+                "AGENTS skill slopes must describe complementary skills: "
+                "BERRY_SLOPE >= 0 and WOOD_SLOPE <= 0"
+            )
+        if berry_slope == 0 and wood_slope == 0:
+            raise ValueError(
+                "AGENTS.BERRY_SLOPE and AGENTS.WOOD_SLOPE cannot both be zero"
+            )
         if max_health <= 0:
             raise ValueError("AGENTS.MAX_HEALTH must be positive")
         if not 0 < starting_health <= max_health:
@@ -349,6 +383,11 @@ class SubsistenceWorld:
         if max_wood_target < 0:
             raise ValueError("AGENTS.MAX_WOOD_TARGET must not be negative")
         return {
+            "skill_z_range": skill_z_range,
+            "berry_intercept": berry_intercept,
+            "berry_slope": berry_slope,
+            "wood_intercept": wood_intercept,
+            "wood_slope": wood_slope,
             "berry_skill_range": berry_range,
             "wood_skill_range": wood_range,
             "time_per_iteration": time_per_iteration,
@@ -497,19 +536,27 @@ class SubsistenceWorld:
         storage = self.storage_settings
         berry_low, berry_high = settings["berry_skill_range"]
         wood_low, wood_high = settings["wood_skill_range"]
-        skill_base = (berry_low + berry_high + wood_low + wood_high) / 4.0
-        berry_spread = (berry_high - berry_low) / 2.0
-        wood_spread = (wood_high - wood_low) / 2.0
         self.agents = []
         for index in range(count):
-            # Complementary skills: a strong berry picker is a weak wood
-            # chopper and vice versa. That creates real specialists.
-            bias = self.random.uniform(-1.0, 1.0)
+            # One shared specialisation latent per villager. A high z is a
+            # berry specialist and a low z is a wood specialist, so the two
+            # skills are negatively correlated by construction.
+            z = self.random.uniform(
+                -settings["skill_z_range"], settings["skill_z_range"]
+            )
             berry_skill = min(
-                berry_high, max(berry_low, skill_base + berry_spread * bias)
+                berry_high,
+                max(
+                    berry_low,
+                    settings["berry_intercept"] + settings["berry_slope"] * z,
+                ),
             )
             wood_skill = min(
-                wood_high, max(wood_low, skill_base - wood_spread * bias)
+                wood_high,
+                max(
+                    wood_low,
+                    settings["wood_intercept"] + settings["wood_slope"] * z,
+                ),
             )
             self.agents.append(
                 Agent(
@@ -533,6 +580,7 @@ class SubsistenceWorld:
                     ),
                     berries=settings["starting_berries"],
                     wood=settings["starting_wood"],
+                    specialisation_z=z,
                 )
             )
         self._agent_index = {agent.id: agent for agent in self.agents}
@@ -725,17 +773,14 @@ class SubsistenceWorld:
             agent.labor_wood += used / agent.time_per_iteration
             remaining -= used
 
-        # With trade, cover food and the existing berry reserve first. A wood
-        # specialist then chops wood. A berry specialist produces a small
-        # surplus to buy the wood it wants; it does not try to chop its own.
+        # With trade, pick the activity with the higher market value per
+        # minute. A wood specialist chops first, finishing the next whole
+        # block, then gathers food with any remaining time. That lets a
+        # low-berry villager produce a tradable block instead of spending the
+        # whole day failing to gather a full ration. A berry specialist covers
+        # food and its reserve, then produces a small surplus to buy wood.
         if self.features["TRADE"]:
-            spend_berries(max(0, food - agent.berries))
-
             target_berries = self._target_berries(agent)
-            spend_berries(
-                max(0.0, target_berries - agent.berries - agent.planned_berries)
-            )
-
             target_wood = self._target_wood(agent)
             berry_value_per_minute = (
                 agent.berry_skill / agent.berry_time_cost
@@ -753,10 +798,29 @@ class SubsistenceWorld:
 
             if wood_value_per_minute > berry_value_per_minute:
                 wood_cap = target_wood + self.agent_settings["trade_surplus"]
-                spend_wood(
-                    max(0.0, wood_cap - agent.wood - agent.planned_wood)
-                )
+                if agent.wood < wood_cap and math.isfinite(wood_minutes):
+                    needed = max(0.0, 1.0 - agent.wood_progress)
+                    minutes_for_block = min(remaining, needed * wood_minutes)
+                    if minutes_for_block > 0:
+                        spend_wood(minutes_for_block / wood_minutes)
+                if remaining > 0:
+                    spend_berries(max(0, food - agent.berries))
+                    spend_berries(
+                        max(
+                            0.0,
+                            target_berries
+                            - agent.berries
+                            - agent.planned_berries,
+                        )
+                    )
             else:
+                spend_berries(max(0, food - agent.berries))
+                spend_berries(
+                    max(
+                        0.0,
+                        target_berries - agent.berries - agent.planned_berries,
+                    )
+                )
                 wood_deficit = max(0, target_wood - agent.wood)
                 purchase_target = 1 if wood_deficit > 0 else 0
                 berries_for_wood = min(
@@ -796,7 +860,14 @@ class SubsistenceWorld:
         attribute = f"commons_{resource}"
         stock = int(getattr(self, attribute))
         efficiency = settings["extraction_efficiency"]
-        requested_whole = self._stochastic_round(requested)
+        if resource == "wood":
+            # Chopping is slow, so carry the fractional part of a block into
+            # the next day. Whole blocks are still the only wood ever stored.
+            total = agent.wood_progress + max(0.0, requested)
+            requested_whole = int(math.floor(total + EPSILON))
+            agent.wood_progress = max(0.0, total - requested_whole)
+        else:
+            requested_whole = self._stochastic_round(requested)
         if requested_whole <= 0 or stock <= 0:
             return 0
         usable_cap = int(stock * efficiency)
@@ -1207,10 +1278,12 @@ class SubsistenceWorld:
             "storage_capacity",
             "berry_skill",
             "wood_skill",
+            "specialisation_z",
             "max_berries_per_day",
             "max_wood_per_day",
             "labor_berries",
             "labor_wood",
+            "wood_progress",
             "planned_berries",
             "planned_wood",
             "gathered_berries",
@@ -1236,10 +1309,12 @@ class SubsistenceWorld:
             "storage_capacity",
             "berry_skill",
             "wood_skill",
+            "specialisation_z",
             "max_berries_per_day",
             "max_wood_per_day",
             "labor_berries",
             "labor_wood",
+            "wood_progress",
             "planned_berries",
             "planned_wood",
             "gathered_berries",
