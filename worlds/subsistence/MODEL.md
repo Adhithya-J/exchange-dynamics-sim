@@ -244,6 +244,32 @@ exhausted. Each iteration records `berries_commons_pct` and
 `wood_commons_pct` for the harvesting phase, and the viewer uses those values
 for both the frontier and the multi-site search animation.
 
+### Village size
+
+By default the commons scales with the village: `SCALE_WITH_AGENTS` multiplies
+`INITIAL`, `CAPACITY`, and `REGENERATION` by `AGENTS / REFERENCE_AGENTS`
+(`REFERENCE_AGENTS` defaults to 10). A 50-agent village therefore has five times
+the berry and wood flow of the baseline, so the same per-villager ecology holds
+at any size. The scaling is recorded in `meta.commons`; set it to `false` to
+use the raw `COMMONS` values at every village size.
+
+### Seasons
+
+`SEASONS` splits time into a repeating cycle (spring, summer, autumn, winter by
+default), `LENGTH` iterations each. Each season multiplies regeneration:
+
+```text
+regenerated = stochastic_round(REGENERATION * shock_factor * season_factor)
+```
+
+The default berry factors are `1.00`, `1.40`, `0.80`, and `0.00`; wood stays at
+`1.00` all year. Winter therefore stops berry regrowth entirely while wood keeps
+coming in. The commons is the village granary: a summer that strips the bushes
+leaves nothing to draw on when the berries stop, so saving berries (or leaving
+stock standing) is the only way through the winter. Season state is recorded per
+iteration as `season` (cycle index), `season_name`, `berry_regen_factor`, and
+`wood_regen_factor`, and the viewer tints the scene and labels the season.
+
 ## Health and eating
 
 Every living agent needs a full daily ration of `FOOD_PER_ITERATION` whole
@@ -673,29 +699,37 @@ example:
 - `CREDIT: true`, `CREDIT.MODE: market` — the same loans with risk-priced
   goods interest.
 - `SHOCKS: true` — occasional droughts cut commons regeneration.
+- `SEASONS.ENABLED: false` — a steady climate; the commons regenerates at the
+  same rate all year.
+- `COMMONS.SCALE_WITH_AGENTS: false` — the raw commons values regardless of
+  village size, so big villages are poor by construction.
 
-## Replay schema (version 2)
+## Replay schema (version 3)
 
-`worlds/subsistence/replay.py` writes and validates schema version 2 with
-`meta.world = "subsistence"`.
+`worlds/subsistence/replay.py` writes and validates schema version 3 with
+`meta.world = "subsistence"`. Version 2 replays still load.
 
-- `meta` — generator, world, iterations, seed, agent count, effective feature
-  flags, health settings, finite-day time costs, crate crafting and wear
-  settings, fractional-pricing marker, credit/trust/reciprocity/shock settings,
-  resource definitions, initial commons and totals, the initial market price,
-  and the full config.
+- `meta` — generator, world, iterations, seed, agent count, the ordered
+  `agent_state_fields`, effective feature flags, health settings, finite-day
+  time costs, crate crafting and wear settings, fractional-pricing marker,
+  credit/trust/reciprocity/shock settings, season cycle, commons scaling and
+  effective commons settings, resource definitions, initial commons and totals,
+  the initial market price, and the full config.
 - `agents` — id, label, colour, berry and wood skills, the `specialisation_z`
   latent, **initial** price belief, time budget, time costs, craft minutes, base
   maximum daily yields, **initial** health and crate count, and the storage
   container ratio.
 - `ticks` — one row per iteration plus iteration zero. Each tick has summary
   metrics, including commons density, market price, beliefs, crate counts,
-  credit originations/defaults, outstanding debt, mean trust, and shock state,
-  and one state per agent: whole health, berries, raw wood, crates with
-  durability, storage capacity, crafting progress, price belief, trust, debt and
-  credit receivables, the berry/wood/craft labour split, density-adjusted
-  effective yields, carried wood progress, planned goods, actual gathered goods,
-  post-trade holdings, and alive status.
+  credit originations/defaults, outstanding debt, mean trust, shock state, and
+  season, and one state per agent. Version 3 stores each agent state as a
+  positional row whose field order is `meta.agent_state_fields`: id, whole
+  health, berries, raw wood, crates with durability, storage capacity, crafting
+  progress, price belief, trust, debt and credit receivables, the berry/wood/
+  craft labour split, density-adjusted effective yields, carried wood progress,
+  planned goods, actual gathered goods, post-trade holdings, and alive status.
+  Positional rows cut a large replay to roughly a quarter of its version 2 size
+  and parse much faster at 50-100 agents.
 - `events` — typed `gather`, `craft`, `gift`, `trade`, `loan`, `repay`,
   `default`, `write_off`, `late`, `shock`, `spoil`, and `death` records with a
   tick, phase, sequence number, and stable id. Trades carry the goods type, whole
@@ -704,7 +738,8 @@ example:
   recovery, and collateral excess; shock events carry duration and regeneration
   factors.
 
-The viewer reads this replay and never imports the model.
+The viewer reads this replay and never imports the model. `decode_tick_agents`
+turns a tick's states into mappings for analysis code.
 
 ## Metrics
 
@@ -727,7 +762,8 @@ The world records, among others: `alive`, `mean_health`, `total_berries`,
 `credit_outstanding_crates`, `written_off_wood`, `written_off_berries`,
 `written_off_crates`, `gift_obligations`, `gift_obligation_berries`,
 `gift_repayments`, `gift_defaults`, `gift_default_berries`, `shock_active`,
-`shocks`, `specialisation`,
+`shocks`, `season`, `season_name`, `berry_regen_factor`, `wood_regen_factor`,
+`specialisation`,
 `ppf_efficiency`, and `extinction_iteration`.
 
 Metrics are per iteration. The experiment runner aggregates flow metrics

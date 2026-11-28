@@ -97,8 +97,15 @@ drag the timeline to scrub, and click a villager to inspect them.
   the low-commitment end of the credit spectrum.
 - **Shocks are optional.** A drought temporarily cuts berry and wood
   regeneration, so the same labour yields less until it passes.
+- **Seasons turn.** Spring, summer, autumn, and winter each last 45 iterations
+  by default. Berry regrowth peaks in summer and stops completely in winter;
+  wood regrows every season. The commons is the granary, so a village that
+  strips the bushes in summer meets a hungry winter.
 - **The commons is shared and depletable.** Berry bushes and forest regenerate
   each iteration. Berry bushes recover quickly; wood regrows much more slowly.
+- **Village size scales the commons.** Stocks and regeneration scale with the
+  number of agents relative to a 10-agent baseline, so 50- and 100-agent runs
+  keep a comparable per-villager ecology instead of starving by construction.
 
 The detailed rules, formulas, iteration order, and conservation ledger are in
 [`worlds/subsistence/MODEL.md`](worlds/subsistence/MODEL.md).
@@ -117,6 +124,10 @@ FEATURES:
   TRUST: false         # public credit reputation
   RECIPROCITY: false   # gifts become soft obligations
   SHOCKS: false        # temporary commons droughts
+SEASONS:
+  ENABLED: true        # berry regrowth follows the seasons
+COMMONS:
+  SCALE_WITH_AGENTS: true   # ecology scales with village size
 ```
 
 Set a flag to `false` to isolate a mechanism. For example, turning `SPOILAGE`
@@ -160,6 +171,12 @@ chop, or craft, bilateral barter tokens, price beliefs, credit flows, spoilage,
 and deaths. The side panel explains the iconography and lists each iteration's
 gather, craft, gift, trade, credit, shock, spoilage, and death events.
 
+The village is drawn as huts scattered in rings around the central market, with
+berry bushes on one side, worked forest on the other, and a pale wild forest
+beyond them for a horizon. Larger villages add rings and shrink the huts, so 50
+or 100 villagers still read as a village. The scene is tinted by the current
+season and the header names it.
+
 ## Credit modes
 
 Credit is opt-in. The two modes use the same loan book and goods ledger:
@@ -201,10 +218,12 @@ To write only a replay:
 python -m worlds.subsistence --iterations 1000 --replay replay-subsistence.json.gz
 ```
 
-The replay is version 2 and carries the world type, feature flags, agent
+The replay is version 3 and carries the world type, feature flags, agent
 skills, per-tick health and goods, pre/post-trade production points, and typed
-`gather`, `gift`, `trade`, `spoil`, and `death` events. `worlds/subsistence/replay.py`
-validates it on write and load.
+`gather`, `gift`, `trade`, `spoil`, and `death` events. Agent state is stored in
+compact positional rows, so a 50-agent, 5,000-iteration replay is about 5 MB
+compressed instead of about 20 MB. `worlds/subsistence/replay.py` validates it
+on write and load, and still reads version 2 files.
 
 ## Experiments
 

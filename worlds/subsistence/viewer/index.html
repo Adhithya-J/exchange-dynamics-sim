@@ -33,6 +33,11 @@
         <div class="stat-note">berries / wood</div>
       </div>
       <div class="stat">
+        <div class="stat-label">Season</div>
+        <div class="stat-value" id="statSeason">spring</div>
+        <div class="stat-note" id="statSeasonNote">berries regrow</div>
+      </div>
+      <div class="stat">
         <div class="stat-label">Commons</div>
         <div class="stat-value" id="statCommons">0%</div>
         <div class="stock-meter"><i id="commonsBar"></i></div>
@@ -64,7 +69,8 @@
             <div class="legend-row"><span class="ico wood"></span><span><b>Raw wood.</b> Material for carpentry, not storage. Eight blocks make one crate.</span></div>
             <div class="legend-row"><span class="ico crate"></span><span><b>Crate.</b> Eight raw wood plus about a day of skilled carpentry. One crate stores ten berries and wears out faster when full.</span></div>
             <div class="legend-row"><span class="ico worker"></span><span><b>Villagers.</b> Little figures walk out to a bush or tree and work the commons. A full day is finite, and chopping wood is much slower than picking berries. Sparse commons means more walking between stops.</span></div>
-            <div class="legend-row"><span class="ico commons"></span><span><b>Commons.</b> Berry bushes on the left and forest on the right are shared, depletable stocks. As they thin, each unit takes longer to find; wood regrows much more slowly.</span></div>
+            <div class="legend-row"><span class="ico commons"></span><span><b>Commons.</b> Berry bushes on the left and forest on the right are shared, depletable stocks. As they thin, each unit takes longer to find. The pale trees beyond them are wild forest: scenery, not a stock.</span></div>
+            <div class="legend-row"><span class="ico commons"></span><span><b>Seasons.</b> A year runs spring, summer, autumn, winter. Berries regrow fastest in summer and stop regrowing in winter; wood regrows in every season. A village that eats the commons down in summer has nothing to fall back on in winter.</span></div>
             <div class="legend-row"><span class="ico trade"></span><span><b>Barter.</b> Berries and wood cross in the central square at the current relative price.</span></div>
             <div class="legend-row"><span class="ico trade"></span><span><b>Credit.</b> A loan moves wood, berries, or a crate now and returns the same good later. Reciprocal loans charge no interest; market loans price default risk and crate wear.</span></div>
           </div>
@@ -138,6 +144,7 @@
       <li><b>Credit is optional.</b> A loan moves wood, berries, or crate capacity now for a promise of the same good later. Food is the first loan priority, berry debt keeps today's meal, and formal loans settle before soft gifts. Reciprocal credit charges no interest and relies on trust or collateral. Market credit prices default risk and crate durability into a goods-denominated interest rate. A missed payment first uses a grace period, then seizes pledged crates and the borrower's stock.</li>
       <li><b>Gifts can be reciprocal.</b> A plain gift is one-way. With reciprocity enabled it also creates a soft zero-interest obligation that the receiver repays when it has berries above its meal. That is the low-commitment end of the credit spectrum.</li>
       <li><b>Shocks are optional.</b> A drought temporarily reduces berry and wood regeneration, so the same labour yields less until it passes.</li>
+      <li><b>Seasons turn.</b> Spring, summer, and autumn bring berries; summer regrows fastest and autumn slower. In winter berry regeneration stops entirely, while wood keeps regrowing. The commons is therefore a store: a village that strips the bushes in summer meets a hungry winter.</li>
       <li><b>Sparse commons costs time.</b> Gathering and chopping minutes rise as bushes and trees thin. Villagers walk between several sparse sites, and the production possibilities frontier contracts with the harvest density shown in the inspector.</li>
       <li><b>Skills differ.</b> Berry skill and wood skill set each villager's production possibilities frontier. A steep frontier means a villager gives up a lot of berries to chop one wood.</li>
       <li><b>Barter is relative.</b> There is no money. The header shows the realized market price; the inspector shows each villager's belief and the PPF uses that belief for its price line.</li>

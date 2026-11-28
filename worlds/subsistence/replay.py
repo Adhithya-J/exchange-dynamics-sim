@@ -9,6 +9,7 @@ events. It contains no drawing coordinates or presentation state.
 from __future__ import annotations
 
 import argparse
+import math
 from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable
@@ -28,7 +29,51 @@ from utils.replay import (
 if TYPE_CHECKING:  # pragma: no cover - imported for type checkers only
     from worlds.subsistence.world import SubsistenceWorld
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+SUPPORTED_SCHEMA_VERSIONS = frozenset({2, 3})
+
+# Version 3 stores each agent's per-tick state as a positional row. The field
+# order lives in ``meta.agent_state_fields`` so the format stays self-describing
+# while cutting replay size by roughly three quarters: key names are written once
+# instead of once per agent per tick.
+AGENT_STATE_FIELDS = (
+    "id",
+    "health",
+    "berries",
+    "wood",
+    "crates",
+    "crate_durability",
+    "craft_progress",
+    "price_belief",
+    "trust",
+    "debt_wood",
+    "debt_berries",
+    "debt_crates",
+    "credit_out_wood",
+    "credit_out_berries",
+    "credit_out_crates",
+    "storage_capacity",
+    "labor_berries",
+    "labor_wood",
+    "labor_craft",
+    "wood_progress",
+    "planned_berries",
+    "planned_wood",
+    "planned_crates",
+    "crafted_crates",
+    "gathered_berries",
+    "gathered_wood",
+    "effective_berries_per_day",
+    "effective_wood_per_day",
+    "max_berries_per_day",
+    "max_wood_per_day",
+    "post_trade_berries",
+    "post_trade_wood",
+    "alive",
+)
+AGENT_STATE_INDEX = {
+    field: index for index, field in enumerate(AGENT_STATE_FIELDS)
+}
 
 AGENT_COLORS = [
     "#2f6fed",
@@ -81,7 +126,9 @@ def export_replay(
 ) -> Path:
     """Build a replay from ``simulation`` and write it to ``path``."""
 
-    return write_replay(build_replay(simulation), path, indent=indent)
+    return write_replay(
+        build_replay(simulation), path, indent=indent, validate=False
+    )
 
 
 def build_replay(simulation: SubsistenceWorld) -> dict[str, Any]:
@@ -139,100 +186,7 @@ def build_replay(simulation: SubsistenceWorld) -> dict[str, Any]:
                 "iteration": iteration,
                 "metrics": metrics,
                 "agents": [
-                    {
-                        "id": agent_id,
-                        "health": int(rows[agent_id]["health"]),
-                        "berries": int(rows[agent_id]["berries"]),
-                        "wood": int(rows[agent_id]["wood"]),
-                        "crates": int(rows[agent_id].get("crates", 0)),
-                        "crate_durability": float(
-                            rows[agent_id].get("crate_durability", 0.0)
-                        ),
-                        "craft_progress": float(
-                            rows[agent_id].get("craft_progress", 0.0)
-                        ),
-                        "price_belief": float(
-                            rows[agent_id].get("price_belief", 5.0)
-                        ),
-                        "trust": float(rows[agent_id].get("trust", 0.0)),
-                        "debt_wood": int(rows[agent_id].get("debt_wood", 0)),
-                        "debt_berries": int(
-                            rows[agent_id].get("debt_berries", 0)
-                        ),
-                        "debt_crates": int(
-                            rows[agent_id].get("debt_crates", 0)
-                        ),
-                        "credit_out_wood": int(
-                            rows[agent_id].get("credit_out_wood", 0)
-                        ),
-                        "credit_out_berries": int(
-                            rows[agent_id].get("credit_out_berries", 0)
-                        ),
-                        "credit_out_crates": int(
-                            rows[agent_id].get("credit_out_crates", 0)
-                        ),
-                        "storage_capacity": int(
-                            rows[agent_id]["storage_capacity"]
-                        ),
-                        "labor_berries": float(
-                            rows[agent_id].get("labor_berries", 0.0)
-                        ),
-                        "labor_wood": float(
-                            rows[agent_id].get("labor_wood", 0.0)
-                        ),
-                        "labor_craft": float(
-                            rows[agent_id].get("labor_craft", 0.0)
-                        ),
-                        "wood_progress": float(
-                            rows[agent_id].get("wood_progress", 0.0)
-                        ),
-                        "planned_berries": float(
-                            rows[agent_id].get("planned_berries", 0.0)
-                        ),
-                        "planned_wood": float(
-                            rows[agent_id].get("planned_wood", 0.0)
-                        ),
-                        "planned_crates": int(
-                            rows[agent_id].get("planned_crates", 0)
-                        ),
-                        "crafted_crates": int(
-                            rows[agent_id].get("crafted_crates", 0)
-                        ),
-                        "gathered_berries": int(
-                            rows[agent_id].get("gathered_berries", 0)
-                        ),
-                        "gathered_wood": int(
-                            rows[agent_id].get("gathered_wood", 0)
-                        ),
-                        "effective_berries_per_day": float(
-                            rows[agent_id].get(
-                                "effective_berries_per_day", 0.0
-                            )
-                        ),
-                        "effective_wood_per_day": float(
-                            rows[agent_id].get(
-                                "effective_wood_per_day", 0.0
-                            )
-                        ),
-                        "max_berries_per_day": float(
-                            rows[agent_id].get(
-                                "effective_berries_per_day", 0.0
-                            )
-                        ),
-                        "max_wood_per_day": float(
-                            rows[agent_id].get(
-                                "effective_wood_per_day", 0.0
-                            )
-                        ),
-                        "post_trade_berries": int(
-                            rows[agent_id].get("post_trade_berries", 0)
-                        ),
-                        "post_trade_wood": int(
-                            rows[agent_id].get("post_trade_wood", 0)
-                        ),
-                        "alive": bool(rows[agent_id]["alive"]),
-                    }
-                    for agent_id in agent_ids
+                    _agent_state_row(rows[agent_id]) for agent_id in agent_ids
                 ],
             }
         )
@@ -251,6 +205,7 @@ def build_replay(simulation: SubsistenceWorld) -> dict[str, Any]:
             "iterations": last_iteration,
             "seed": int(config["SIMULATION"]["RANDOM_SEED"]),
             "agent_count": len(agent_ids),
+            "agent_state_fields": list(AGENT_STATE_FIELDS),
             "features": dict(simulation.features),
             "health": {
                 "max": int(simulation.agent_settings["max_health"]),
@@ -293,6 +248,20 @@ def build_replay(simulation: SubsistenceWorld) -> dict[str, Any]:
                 dict(getattr(simulation, "reciprocity_settings", {}))
             ),
             "shocks": jsonable(dict(getattr(simulation, "shock_settings", {}))),
+            "seasons": jsonable(dict(getattr(simulation, "season_settings", {}))),
+            "commons": {
+                "scale_with_agents": bool(
+                    (simulation.config.get("COMMONS") or {}).get(
+                        "SCALE_WITH_AGENTS", False
+                    )
+                ),
+                "reference_agents": int(
+                    (simulation.config.get("COMMONS") or {}).get(
+                        "REFERENCE_AGENTS", 10
+                    )
+                ),
+                "settings": jsonable(dict(simulation.commons_settings)),
+            },
             "resources": {
                 "berries": {
                     "label": "Berries",
@@ -324,6 +293,55 @@ def build_replay(simulation: SubsistenceWorld) -> dict[str, Any]:
     }
     validate_replay(replay)
     return replay
+
+
+def decode_tick_agents(tick: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return one tick's agent states as mappings, whatever the schema."""
+
+    states = tick["agents"]
+    if states and isinstance(states[0], dict):
+        return list(states)
+    return [dict(zip(AGENT_STATE_FIELDS, row)) for row in states]
+
+
+def _agent_state_row(row: dict[str, Any]) -> list[Any]:
+    """Pack one agent snapshot into a positional row (schema 3)."""
+
+    return [
+        str(row["id"]),
+        int(row["health"]),
+        int(row["berries"]),
+        int(row["wood"]),
+        int(row.get("crates", 0)),
+        round(float(row.get("crate_durability", 0.0)), 4),
+        round(float(row.get("craft_progress", 0.0)), 4),
+        round(float(row.get("price_belief", 5.0)), 4),
+        round(float(row.get("trust", 0.0)), 4),
+        int(row.get("debt_wood", 0)),
+        int(row.get("debt_berries", 0)),
+        int(row.get("debt_crates", 0)),
+        int(row.get("credit_out_wood", 0)),
+        int(row.get("credit_out_berries", 0)),
+        int(row.get("credit_out_crates", 0)),
+        int(row["storage_capacity"]),
+        round(float(row.get("labor_berries", 0.0)), 4),
+        round(float(row.get("labor_wood", 0.0)), 4),
+        round(float(row.get("labor_craft", 0.0)), 4),
+        round(float(row.get("wood_progress", 0.0)), 4),
+        round(float(row.get("planned_berries", 0.0)), 4),
+        round(float(row.get("planned_wood", 0.0)), 4),
+        int(row.get("planned_crates", 0)),
+        int(row.get("crafted_crates", 0)),
+        int(row.get("gathered_berries", 0)),
+        int(row.get("gathered_wood", 0)),
+        round(float(row.get("effective_berries_per_day", 0.0)), 4),
+        round(float(row.get("effective_wood_per_day", 0.0)), 4),
+        round(float(row.get("max_berries_per_day", 0.0)), 4),
+        round(float(row.get("max_wood_per_day", 0.0)), 4),
+        int(row.get("post_trade_berries", 0)),
+        int(row.get("post_trade_wood", 0)),
+        bool(row["alive"]),
+    ]
 
 
 def _history_by_tick(
@@ -706,8 +724,152 @@ def _build_events(
     return entries
 
 
+INTEGER_AGENT_FIELDS = (
+    "health",
+    "berries",
+    "wood",
+    "crates",
+    "debt_wood",
+    "debt_berries",
+    "debt_crates",
+    "credit_out_wood",
+    "credit_out_berries",
+    "credit_out_crates",
+    "storage_capacity",
+    "planned_crates",
+    "crafted_crates",
+    "gathered_berries",
+    "gathered_wood",
+    "post_trade_berries",
+    "post_trade_wood",
+)
+FLOAT_AGENT_FIELDS = (
+    "crate_durability",
+    "craft_progress",
+    "price_belief",
+    "trust",
+    "labor_berries",
+    "labor_wood",
+    "labor_craft",
+    "wood_progress",
+    "planned_berries",
+    "planned_wood",
+    "effective_berries_per_day",
+    "effective_wood_per_day",
+    "max_berries_per_day",
+    "max_wood_per_day",
+)
+
+
+def _validate_state_rows(
+    states: list[Any],
+    expected_ids: set[str],
+    iteration: int,
+) -> None:
+    """Validate schema-3 positional state rows for one tick."""
+
+    width = len(AGENT_STATE_FIELDS)
+    index = AGENT_STATE_INDEX
+    id_index = index["id"]
+    alive_index = index["alive"]
+    int_indexes = tuple(index[field] for field in INTEGER_AGENT_FIELDS)
+    float_indexes = tuple(index[field] for field in FLOAT_AGENT_FIELDS)
+    seen: set[str] = set()
+    for state in states:
+        if not isinstance(state, list) or len(state) != width:
+            raise ValueError(
+                f"Tick {iteration} needs {width} fields per agent state"
+            )
+        agent_id = state[id_index]
+        if agent_id not in expected_ids:
+            raise ValueError(
+                f"Tick {iteration} references unknown agent {agent_id!r}"
+            )
+        seen.add(agent_id)
+        for field_index in int_indexes:
+            value = state[field_index]
+            if type(value) is not int or value < 0:
+                raise ValueError(
+                    f"tick {iteration} {agent_id} "
+                    f"{AGENT_STATE_FIELDS[field_index]} must be a "
+                    "non-negative integer"
+                )
+        for field_index in float_indexes:
+            value = state[field_index]
+            if type(value) not in (int, float) or not math.isfinite(value):
+                raise ValueError(
+                    f"tick {iteration} {agent_id} "
+                    f"{AGENT_STATE_FIELDS[field_index]} must be finite"
+                )
+        if type(state[alive_index]) is not bool:
+            raise ValueError(f"Tick {iteration} has a non-boolean alive flag")
+    if seen != expected_ids:
+        raise ValueError(f"Tick {iteration} does not cover every agent")
+
+
+def _validate_state_dict(state: dict[str, Any], iteration: int) -> None:
+    """Validate a legacy schema-2 agent state mapping."""
+
+    for field in (
+        "health",
+        "berries",
+        "wood",
+        "storage_capacity",
+        "gathered_berries",
+        "gathered_wood",
+        "post_trade_berries",
+        "post_trade_wood",
+    ):
+        required_int(
+            state.get(field),
+            f"tick {iteration} {state.get('id')} {field}",
+            minimum=0,
+        )
+    for field in (
+        "crates",
+        "planned_crates",
+        "debt_wood",
+        "debt_berries",
+        "debt_crates",
+        "credit_out_wood",
+        "credit_out_berries",
+        "credit_out_crates",
+    ):
+        if field in state:
+            required_int(
+                state[field],
+                f"tick {iteration} {state.get('id')} {field}",
+                minimum=0,
+            )
+    for field in (
+        "labor_berries",
+        "labor_wood",
+        "labor_craft",
+        "planned_berries",
+        "planned_wood",
+        "craft_progress",
+        "crate_durability",
+        "price_belief",
+        "trust",
+    ):
+        if field in state:
+            required_float(
+                state[field],
+                f"tick {iteration} {state.get('id')} {field}",
+            )
+    if "wood_progress" in state:
+        required_float(
+            state["wood_progress"],
+            f"tick {iteration} {state.get('id')} wood_progress",
+        )
+    if not isinstance(state.get("alive"), bool):
+        raise ValueError(
+            f"Tick {iteration} has a non-boolean alive flag"
+        )
+
+
 def validate_replay(replay: dict[str, Any]) -> None:
-    """Raise ``ValueError`` if ``replay`` is not a valid v2 replay."""
+    """Raise ``ValueError`` unless ``replay`` is a valid subsistence replay."""
 
     if not isinstance(replay, dict):
         raise ValueError("Replay must be a mapping")
@@ -715,11 +877,14 @@ def validate_replay(replay: dict[str, Any]) -> None:
     missing = required - replay.keys()
     if missing:
         raise ValueError(f"Replay is missing keys: {sorted(missing)}")
-    if replay["schema_version"] != SCHEMA_VERSION:
+    version = replay["schema_version"]
+    if version not in SUPPORTED_SCHEMA_VERSIONS:
         raise ValueError(
             "Unsupported replay schema version "
-            f"{replay['schema_version']!r}; expected {SCHEMA_VERSION}"
+            f"{version!r}; expected one of "
+            f"{sorted(SUPPORTED_SCHEMA_VERSIONS)}"
         )
+    compact = version >= 3
 
     meta = replay["meta"]
     if not isinstance(meta, dict):
@@ -735,6 +900,12 @@ def validate_replay(replay: dict[str, Any]) -> None:
         raise ValueError("Replay meta.config must be a mapping")
     if not isinstance(meta["features"], dict):
         raise ValueError("Replay meta.features must be a mapping")
+    if compact:
+        fields = meta.get("agent_state_fields")
+        if not isinstance(fields, list) or tuple(fields) != AGENT_STATE_FIELDS:
+            raise ValueError(
+                "meta.agent_state_fields must list the schema 3 agent fields"
+            )
 
     agents = replay["agents"]
     if not isinstance(agents, list) or not agents:
@@ -775,67 +946,15 @@ def validate_replay(replay: dict[str, Any]) -> None:
         states = tick.get("agents")
         if not isinstance(states, list) or len(states) != len(agent_ids):
             raise ValueError("Every replay tick needs one state per agent")
-        if {state.get("id") for state in states} != expected_ids:
-            raise ValueError(
-                f"Tick {expected_iteration} does not cover every agent"
-            )
-        for state in states:
-            for field in (
-                "health",
-                "berries",
-                "wood",
-                "storage_capacity",
-                "gathered_berries",
-                "gathered_wood",
-                "post_trade_berries",
-                "post_trade_wood",
-            ):
-                required_int(
-                    state.get(field),
-                    f"tick {expected_iteration} {state.get('id')} {field}",
-                    minimum=0,
-                )
-            for field in (
-                "crates",
-                "planned_crates",
-                "debt_wood",
-                "debt_berries",
-                "debt_crates",
-                "credit_out_wood",
-                "credit_out_berries",
-                "credit_out_crates",
-            ):
-                if field in state:
-                    required_int(
-                        state[field],
-                        f"tick {expected_iteration} {state.get('id')} {field}",
-                        minimum=0,
-                    )
-            for field in (
-                "labor_berries",
-                "labor_wood",
-                "labor_craft",
-                "planned_berries",
-                "planned_wood",
-                "craft_progress",
-                "crate_durability",
-                "price_belief",
-                "trust",
-            ):
-                if field in state:
-                    required_float(
-                        state[field],
-                        f"tick {expected_iteration} {state.get('id')} {field}",
-                    )
-            if "wood_progress" in state:
-                required_float(
-                    state["wood_progress"],
-                    f"tick {expected_iteration} {state.get('id')} wood_progress",
-                )
-            if not isinstance(state.get("alive"), bool):
+        if compact:
+            _validate_state_rows(states, expected_ids, expected_iteration)
+        else:
+            if {state.get("id") for state in states} != expected_ids:
                 raise ValueError(
-                    f"Tick {expected_iteration} has a non-boolean alive flag"
+                    f"Tick {expected_iteration} does not cover every agent"
                 )
+            for state in states:
+                _validate_state_dict(state, expected_iteration)
 
     events = replay["events"]
     if not isinstance(events, list):
@@ -961,10 +1080,12 @@ def write_replay(
     path: str | Path,
     *,
     indent: int | None = None,
+    validate: bool = True,
 ) -> Path:
     """Validate and write ``replay``; ``.gz`` paths are compressed."""
 
-    validate_replay(replay)
+    if validate:
+        validate_replay(replay)
     return write_replay_json(replay, path, indent=indent)
 
 

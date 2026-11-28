@@ -3,10 +3,63 @@
   "use strict";
 
   var LOGICAL_W = 1000;
-  var LOGICAL_H = 680;
-  var CENTER = { x: 500, y: 342 };
-  var HOME_RADIUS = 218;
-  var COMMONS_RADIUS = 314;
+  var LOGICAL_H = 700;
+  var CENTER = { x: 500, y: 350 };
+  var COMMONS_RADIUS = 280;
+  var WILD_RADIUS = 340;
+
+  var SEASONS = {
+    spring: {
+      sky: "#e8efdc",
+      canvas: "#dfe6d2",
+      deep: "#d3dcc4",
+      ground: "rgba(244, 239, 230, 0.45)",
+      leaf: "#4f7450",
+      leafLight: "#78906c",
+      wild: "#5c7d58",
+      note: "berries regrow"
+    },
+    summer: {
+      sky: "#eef0d6",
+      canvas: "#e4e6c6",
+      deep: "#d9dbaf",
+      ground: "rgba(246, 240, 220, 0.45)",
+      leaf: "#486c3f",
+      leafLight: "#7d9257",
+      wild: "#4f7038",
+      note: "berries flourish"
+    },
+    autumn: {
+      sky: "#efe6d2",
+      canvas: "#e8dcc3",
+      deep: "#ddcfae",
+      ground: "rgba(247, 238, 221, 0.45)",
+      leaf: "#a8703f",
+      leafLight: "#c1955a",
+      wild: "#9a6a3a",
+      note: "berries thin"
+    },
+    winter: {
+      sky: "#e5ebef",
+      canvas: "#dde5ea",
+      deep: "#cfd9df",
+      ground: "rgba(240, 244, 247, 0.55)",
+      leaf: "#7d8b8f",
+      leafLight: "#9aa8ab",
+      wild: "#6f7f84",
+      note: "berries dormant"
+    },
+    temperate: {
+      sky: "#e7ecdb",
+      canvas: "#dfe6d2",
+      deep: "#d3dcc4",
+      ground: "rgba(244, 239, 230, 0.42)",
+      leaf: "#4e6b50",
+      leafLight: "#78906c",
+      wild: "#54735a",
+      note: "steady growth"
+    }
+  };
 
   var COLORS = {
     paper: "#f4efe6",
@@ -130,6 +183,7 @@
     var homes = buildHomes(A);
     var berrySites = buildBerrySites();
     var treeSites = buildTreeSites();
+    var wildTrees = buildWildTrees();
 
     var state = {
       tick: 0,
@@ -151,45 +205,115 @@
       startedAt: 0
     };
 
+    // A village of `count` huts arranged in up to three jittered rings around
+    // the market square. Bigger villages use more rings and smaller huts.
+    function hutScale(count) {
+      return clamp(1.02 - count * 0.0042, 0.58, 1);
+    }
+
     function buildHomes(count) {
+      var rings = count <= 12
+        ? [172]
+        : count <= 32
+          ? [138, 196]
+          : count <= 72
+            ? [132, 180, 224]
+            : [122, 164, 205, 242];
+      var scale = hutScale(count);
+      var perRing = Math.ceil(count / rings.length);
       var result = [];
-      for (var i = 0; i < count; i += 1) {
-        var angle = -Math.PI / 2 + (i * Math.PI * 2) / Math.max(count, 1);
-        result.push({
-          x: CENTER.x + Math.cos(angle) * HOME_RADIUS,
-          y: CENTER.y + Math.sin(angle) * HOME_RADIUS,
-          angle: angle
-        });
+      for (var ring = 0; ring < rings.length; ring += 1) {
+        var inRing = Math.min(perRing, count - ring * perRing);
+        if (inRing <= 0) break;
+        var radius = rings[ring];
+        var step = (Math.PI * 2) / inRing;
+        for (var slot = 0; slot < inRing; slot += 1) {
+          var index = ring * perRing + slot;
+          var seed = index + 1;
+          var angle = -Math.PI / 2 + slot * step +
+            (randomFor(seed * 3.1) - 0.5) * step * 0.22;
+          var distance = radius + (randomFor(seed * 7.7) - 0.5) * 16;
+          result.push({
+            x: CENTER.x + Math.cos(angle) * distance,
+            y: CENTER.y + Math.sin(angle) * distance * 0.93,
+            angle: angle,
+            scale: scale
+          });
+        }
       }
       return result;
     }
 
-    function buildBerrySites() {
+    function scatteredSites(count, startDegrees, endDegrees, radius, seedBase) {
       var sites = [];
-      var angles = [128, 148, 168, 188, 208, 228];
-      angles.forEach(function (degrees, index) {
-        var angle = (degrees * Math.PI) / 180;
+      for (var i = 0; i < count; i += 1) {
+        var t = count <= 1 ? 0.5 : i / (count - 1);
+        var base = startDegrees + (endDegrees - startDegrees) * t;
+        var angle =
+          ((base + (randomFor((seedBase + i) * 1.7) - 0.5) * 9) * Math.PI) /
+          180;
+        var distance = radius + (randomFor((seedBase + i) * 4.3) - 0.5) * 22;
         sites.push({
-          x: CENTER.x + Math.cos(angle) * COMMONS_RADIUS,
-          y: CENTER.y + Math.sin(angle) * COMMONS_RADIUS,
-          seed: index + 1
+          x: CENTER.x + Math.cos(angle) * distance,
+          y: CENTER.y + Math.sin(angle) * distance * 0.9,
+          seed: seedBase + i
         });
-      });
+      }
       return sites;
     }
 
+    function buildBerrySites() {
+      return scatteredSites(8, 118, 242, COMMONS_RADIUS, 1);
+    }
+
     function buildTreeSites() {
-      var sites = [];
-      var angles = [-48, -28, -8, 12, 32, 52];
-      angles.forEach(function (degrees, index) {
-        var angle = (degrees * Math.PI) / 180;
-        sites.push({
-          x: CENTER.x + Math.cos(angle) * COMMONS_RADIUS,
-          y: CENTER.y + Math.sin(angle) * COMMONS_RADIUS,
-          seed: index + 11
+      return scatteredSites(8, -58, 62, COMMONS_RADIUS, 21);
+    }
+
+    // Decorative forest beyond the worked commons. These trees never change
+    // and are never harvested; they give the village a horizon.
+    function buildWildTrees() {
+      var trees = [];
+      var count = 52;
+      for (var i = 0; i < count; i += 1) {
+        var angle =
+          -Math.PI / 2 +
+          (i * Math.PI * 2) / count +
+          (randomFor(i * 2.3) - 0.5) * 0.07;
+        var distance = WILD_RADIUS + (randomFor(i * 5.1) - 0.5) * 30;
+        trees.push({
+          x: CENTER.x + Math.cos(angle) * distance,
+          y: CENTER.y + Math.sin(angle) * distance * 0.86,
+          size: 0.72 + randomFor(i * 9.7) * 0.55,
+          seed: i + 41
         });
-      });
-      return sites;
+      }
+      return trees;
+    }
+
+    function seasonInfoAt(tick) {
+      var seasons = meta.seasons;
+      if (!seasons || !seasons.enabled) return null;
+      var cycle = seasons.cycle || [];
+      if (!cycle.length) return null;
+      var raw = series.season
+        ? series.season[clamp(tick, 0, N - 1)]
+        : 0;
+      var index = Number(raw);
+      if (!Number.isFinite(index) || index < 0) index = 0;
+      index = ((index % cycle.length) + cycle.length) % cycle.length;
+      var entry = cycle[index] || {};
+      return {
+        index: index,
+        name: String(entry.name || "season " + (index + 1)),
+        berry: entry.berry_regen == null ? 1 : Number(entry.berry_regen),
+        wood: entry.wood_regen == null ? 1 : Number(entry.wood_regen)
+      };
+    }
+
+    function seasonStyleAt(tick) {
+      var info = seasonInfoAt(tick);
+      return SEASONS[info ? info.name : "temperate"] || SEASONS.temperate;
     }
 
     function stateAt(index, tick) {
@@ -315,10 +439,11 @@
 
     // --------------------------------------------------------------- drawing
     function drawBackground() {
+      var style = seasonStyleAt(state.tick);
       var gradient = ctx.createLinearGradient(0, 0, 0, LOGICAL_H);
-      gradient.addColorStop(0, "#e7ecdb");
-      gradient.addColorStop(0.55, COLORS.canvas);
-      gradient.addColorStop(1, "#d3dcc4");
+      gradient.addColorStop(0, style.sky);
+      gradient.addColorStop(0.55, style.canvas);
+      gradient.addColorStop(1, style.deep);
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
 
@@ -327,20 +452,37 @@
       ctx.globalAlpha = 0.16;
       ctx.strokeStyle = "#b9c4a9";
       ctx.lineWidth = 1;
-      for (var i = 0; i < 7; i += 1) {
-        ellipse(ctx, CENTER.x, CENTER.y, 120 + i * 52, 90 + i * 40);
+      for (var i = 0; i < 8; i += 1) {
+        ellipse(ctx, CENTER.x, CENTER.y, 116 + i * 52, 86 + i * 38);
         ctx.stroke();
       }
       ctx.restore();
 
       // Village ground.
       ctx.save();
-      ellipse(ctx, CENTER.x, CENTER.y, 268, 238);
-      ctx.fillStyle = "rgba(244, 239, 230, 0.42)";
+      ellipse(ctx, CENTER.x, CENTER.y, 306, 268);
+      ctx.fillStyle = style.ground;
       ctx.fill();
       ctx.strokeStyle = "rgba(184, 174, 154, 0.5)";
       ctx.lineWidth = 1;
       ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawWildTrees() {
+      var style = seasonStyleAt(state.tick);
+      ctx.save();
+      ctx.globalAlpha = 0.42;
+      wildTrees.forEach(function (tree) {
+        drawTreeShape(
+          tree.x,
+          tree.y,
+          0.72,
+          style.wild,
+          mixColor(style.wild, "#f4efe6", 0.25),
+          tree.size
+        );
+      });
       ctx.restore();
     }
 
@@ -378,12 +520,13 @@
       ctx.fillStyle = "rgba(44, 54, 40, 0.6)";
       ctx.font = "10px 'IBM Plex Mono', monospace";
       ctx.textAlign = "center";
-      ctx.fillText("BERRY BUSHES", 255, 636);
-      ctx.fillText("FOREST", 745, 636);
+      ctx.fillText("BERRY BUSHES", CENTER.x - 250, LOGICAL_H - 62);
+      ctx.fillText("FOREST", CENTER.x + 250, LOGICAL_H - 62);
       ctx.restore();
     }
 
     function drawBerryBush(site, ratio) {
+      var style = seasonStyleAt(state.tick);
       var size = 15 + 9 * clamp(ratio, 0, 1.2);
       ctx.save();
       ctx.globalAlpha = 0.62 + 0.38 * clamp(ratio, 0, 1);
@@ -397,7 +540,9 @@
           size * 0.7,
           size * 0.55
         );
-        ctx.fillStyle = i % 2 === 0 ? "#55764f" : "#64845a";
+        ctx.fillStyle = i % 2 === 0
+          ? mixColor(style.leaf, "#3f5a3a", 0.25)
+          : mixColor(style.leafLight, "#55764f", 0.3);
         ctx.fill();
       }
       var berries = Math.round(clamp(ratio, 0, 1) * 9);
@@ -411,23 +556,36 @@
       ctx.restore();
     }
 
+    function drawTreeShape(x, y, ratio, leaf, leafLight, scale) {
+      var s = scale == null ? 1 : scale;
+      var height = (28 + 22 * clamp(ratio, 0, 1.2)) * s;
+      var width = (9 + 4 * clamp(ratio, 0, 1)) * s;
+      ctx.fillStyle = COLORS.woodDark;
+      ctx.fillRect(x - width / 2, y, width, height * 0.72);
+      var canopy = (13 + 12 * clamp(ratio, 0, 1.2)) * s;
+      ellipse(ctx, x, y - canopy * 0.12, canopy, canopy * 0.72);
+      ctx.fillStyle = leaf;
+      ctx.fill();
+      ellipse(ctx, x - canopy * 0.34, y + canopy * 0.16, canopy * 0.62, canopy * 0.5);
+      ctx.fillStyle = leafLight;
+      ctx.fill();
+      ellipse(ctx, x + canopy * 0.34, y + canopy * 0.2, canopy * 0.56, canopy * 0.46);
+      ctx.fillStyle = leaf;
+      ctx.fill();
+    }
+
     function drawTree(site, ratio) {
-      var height = 28 + 22 * clamp(ratio, 0, 1.2);
-      var width = 9 + 4 * clamp(ratio, 0, 1);
+      var style = seasonStyleAt(state.tick);
       ctx.save();
       ctx.globalAlpha = 0.55 + 0.45 * clamp(ratio, 0, 1);
-      ctx.fillStyle = COLORS.woodDark;
-      ctx.fillRect(site.x - width / 2, site.y, width, height * 0.72);
-      var canopy = 13 + 12 * clamp(ratio, 0, 1.2);
-      ellipse(ctx, site.x, site.y - canopy * 0.12, canopy, canopy * 0.72);
-      ctx.fillStyle = "#3f6246";
-      ctx.fill();
-      ellipse(ctx, site.x - canopy * 0.34, site.y + canopy * 0.16, canopy * 0.62, canopy * 0.5);
-      ctx.fillStyle = "#4f7450";
-      ctx.fill();
-      ellipse(ctx, site.x + canopy * 0.34, site.y + canopy * 0.2, canopy * 0.56, canopy * 0.46);
-      ctx.fillStyle = "#466a4a";
-      ctx.fill();
+      drawTreeShape(
+        site.x,
+        site.y,
+        ratio,
+        style.leaf,
+        mixColor(style.leafLight, "#6f9466", 0.35),
+        1
+      );
       ctx.restore();
     }
 
@@ -517,15 +675,20 @@
       var hovered = state.hover === index;
       var x = home.x;
       var y = home.y;
+      var scale = home.scale || 1;
       var maxHealth = meta.health.max || 4;
       var healthFraction = clamp(agentState.health / maxHealth, 0, 1);
       var alive = agentState.alive;
+      var labelled = A <= 40 || selected || hovered;
 
       ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(scale, scale);
 
       if (!alive) {
-        drawTombstone(x, y, agent.color, selected || hovered);
+        drawTombstone(0, 0, agent.color, selected || hovered);
         ctx.restore();
+        if (labelled) drawHutLabel(agent, x, y, scale, selected);
         return;
       }
 
@@ -533,7 +696,7 @@
       if (selected || hovered) {
         ctx.save();
         ctx.globalAlpha = selected ? 0.5 : 0.28;
-        ellipse(ctx, x, y + 8, 38, 27);
+        ellipse(ctx, 0, 8, 38, 27);
         ctx.fillStyle = agent.color;
         ctx.fill();
         ctx.restore();
@@ -544,14 +707,14 @@
       ctx.lineWidth = 5;
       ctx.strokeStyle = "rgba(28, 27, 24, 0.12)";
       ctx.beginPath();
-      ctx.arc(x, y - 2, 30, 0, Math.PI * 2);
+      ctx.arc(0, -2, 30, 0, Math.PI * 2);
       ctx.stroke();
       ctx.strokeStyle = healthColor(healthFraction);
       ctx.lineCap = "round";
       ctx.beginPath();
       ctx.arc(
-        x,
-        y - 2,
+        0,
+        -2,
         30,
         -Math.PI / 2,
         -Math.PI / 2 + Math.PI * 2 * healthFraction
@@ -560,7 +723,7 @@
       ctx.restore();
 
       // Hut body.
-      roundedRect(ctx, x - 15, y - 4, 30, 22, 3);
+      roundedRect(ctx, -15, -4, 30, 22, 3);
       ctx.fillStyle = "#e4d3b3";
       ctx.fill();
       ctx.strokeStyle = "#9b7d55";
@@ -569,9 +732,9 @@
 
       // Roof.
       ctx.beginPath();
-      ctx.moveTo(x - 23, y - 4);
-      ctx.lineTo(x, y - 24);
-      ctx.lineTo(x + 23, y - 4);
+      ctx.moveTo(-23, -4);
+      ctx.lineTo(0, -24);
+      ctx.lineTo(23, -4);
       ctx.closePath();
       ctx.fillStyle = agent.color;
       ctx.fill();
@@ -580,14 +743,14 @@
       ctx.stroke();
 
       // Door.
-      roundedRect(ctx, x - 4, y + 6, 8, 12, 1.5);
+      roundedRect(ctx, -4, 6, 8, 12, 1.5);
       ctx.fillStyle = "#7b5a37";
       ctx.fill();
 
       // Berry basket.
       var berryFill = clamp(agentState.berries / Math.max(4, meta.health.food_per_iteration * 4), 0, 1);
       ctx.save();
-      ctx.translate(x - 31, y + 14);
+      ctx.translate(-31, 14);
       ctx.beginPath();
       ctx.moveTo(-8, 0);
       ctx.lineTo(8, 0);
@@ -610,7 +773,7 @@
       // Wood pile.
       var woodCount = Math.round(clamp(agentState.wood / 8, 0, 1) * 4);
       ctx.save();
-      ctx.translate(x + 24, y + 15);
+      ctx.translate(24, 15);
       for (var w = 0; w < woodCount; w += 1) {
         roundedRect(ctx, -8 + (w % 2) * 5, -w * 4, 13, 3.4, 1.7);
         ctx.fillStyle = w % 2 === 0 ? COLORS.wood : "#ad7a45";
@@ -625,8 +788,8 @@
       if (agentState.storage > 0) {
         var crateWidth = 20;
         var crateHeight = 9;
-        var cx = x - crateWidth / 2;
-        var cy = y + 24;
+        var cx = -crateWidth / 2;
+        var cy = 24;
         roundedRect(ctx, cx, cy, crateWidth, crateHeight, 2);
         ctx.fillStyle = "rgba(199, 154, 98, 0.9)";
         ctx.fill();
@@ -648,12 +811,16 @@
         }
       }
 
-      // Label.
+      ctx.restore();
+      if (labelled) drawHutLabel(agent, x, y, scale, selected);
+    }
+
+    function drawHutLabel(agent, x, y, scale, selected) {
+      ctx.save();
       ctx.fillStyle = selected ? COLORS.ink : "rgba(28, 27, 24, 0.72)";
       ctx.font = (selected ? "600 " : "") + "9px 'IBM Plex Mono', monospace";
       ctx.textAlign = "center";
-      ctx.fillText(agent.label, x, y + 46);
-
+      ctx.fillText(agent.label, x, y + 46 * scale + 2);
       ctx.restore();
     }
 
@@ -1021,6 +1188,7 @@
 
       var metrics = metricsAt(state.tick);
       drawBackground();
+      drawWildTrees();
       drawCommons(metrics);
       drawPaths();
       drawMarket(metrics);
@@ -1043,19 +1211,20 @@
       ctx.fillStyle = "rgba(28, 27, 24, 0.55)";
       ctx.font = "10px 'IBM Plex Mono', monospace";
       ctx.textAlign = "left";
-      ctx.fillText(
-        "berries " + formatPercent(
-          meta.initialCommons.berries > 0
-            ? metrics.commonsBerries / meta.initialCommons.berries
-            : 0
-        ) + "  ·  wood " + formatPercent(
-          meta.initialCommons.wood > 0
-            ? metrics.commonsWood / meta.initialCommons.wood
-            : 0
-        ),
-        22,
-        30
+      var seasonInfo = seasonInfoAt(state.tick);
+      var tag = "berries " + formatPercent(
+        meta.initialCommons.berries > 0
+          ? metrics.commonsBerries / meta.initialCommons.berries
+          : 0
+      ) + "  ·  wood " + formatPercent(
+        meta.initialCommons.wood > 0
+          ? metrics.commonsWood / meta.initialCommons.wood
+          : 0
       );
+      if (seasonInfo) {
+        tag = seasonInfo.name + "  ·  " + tag;
+      }
+      ctx.fillText(tag, 22, 30);
       ctx.restore();
     }
 
@@ -1076,6 +1245,18 @@
             ? metrics.commonsWood / meta.initialCommons.wood
             : 0
         );
+      var seasonEl = document.getElementById("statSeason");
+      if (seasonEl) {
+        var season = seasonInfoAt(state.tick);
+        var style = season ? SEASONS[season.name] : SEASONS.temperate;
+        seasonEl.textContent = season ? season.name : "temperate";
+        document.getElementById("statSeasonNote").textContent = style
+          ? style.note
+          : "steady growth";
+        seasonEl.style.color = season && season.berry <= 0
+          ? COLORS.alert
+          : COLORS.ink;
+      }
       document.getElementById("readout").textContent = state.tick;
       document.getElementById("readoutTotal").textContent = "/ " + meta.iterations;
       document.getElementById("scrub").value = state.tick;
@@ -1729,12 +1910,17 @@
       var rect = canvas.getBoundingClientRect();
       var logical = toLogical(clientX - rect.left, clientY - rect.top);
       var best = null;
-      var bestDistance = 46;
+      var bestScore = Infinity;
       homes.forEach(function (home, index) {
-        var distance = Math.hypot(logical.x - home.x, logical.y - home.y);
-        if (distance < bestDistance) {
+        var scale = home.scale || 1;
+        var distance = Math.hypot(
+          logical.x - home.x,
+          logical.y - (home.y + 6 * scale)
+        );
+        var reach = 34 * scale + 10;
+        if (distance < reach && distance / reach < bestScore) {
           best = index;
-          bestDistance = distance;
+          bestScore = distance / reach;
         }
       });
       return best;

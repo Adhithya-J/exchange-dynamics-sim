@@ -6,8 +6,10 @@ import pytest
 
 from utils.replay import replay_to_json
 from worlds.subsistence.replay import (
+    AGENT_STATE_FIELDS,
     SCHEMA_VERSION,
     build_replay,
+    decode_tick_agents,
     load_replay,
     validate_replay,
     write_replay,
@@ -48,15 +50,20 @@ def test_build_replay_has_versioned_structure():
     world = small_world()
     replay = build_replay(world)
 
-    assert replay["schema_version"] == SCHEMA_VERSION == 2
+    assert replay["schema_version"] == SCHEMA_VERSION == 3
     assert replay["meta"]["world"] == "subsistence"
     assert replay["meta"]["iterations"] == 100
     assert replay["meta"]["agent_count"] == 10
     assert replay["meta"]["features"]["TRADE"] is True
+    assert replay["meta"]["agent_state_fields"] == list(AGENT_STATE_FIELDS)
     assert len(replay["ticks"]) == 101
     assert replay["ticks"][0]["iteration"] == 0
     assert replay["ticks"][-1]["iteration"] == 100
     assert len(replay["agents"]) == 10
+    assert all(
+        isinstance(state, list)
+        for state in replay["ticks"][1]["agents"]
+    )
     validate_replay(replay)
 
 
@@ -82,7 +89,7 @@ def test_replay_contains_typed_events():
 
 def test_replay_records_pre_and_post_trade_points():
     replay = build_replay(small_world())
-    state = replay["ticks"][1]["agents"][0]
+    state = decode_tick_agents(replay["ticks"][1])[0]
 
     for field in (
         "labor_berries",
@@ -111,7 +118,7 @@ def test_replay_records_commons_density_and_effective_yields():
 
     assert "berries_commons_pct" in tick["metrics"]
     assert "wood_commons_pct" in tick["metrics"]
-    for state in tick["agents"]:
+    for state in decode_tick_agents(tick):
         assert "effective_berries_per_day" in state
         assert "effective_wood_per_day" in state
         assert state["effective_berries_per_day"] >= 0
@@ -121,7 +128,7 @@ def test_replay_records_commons_density_and_effective_yields():
 def test_replay_records_beliefs_crates_and_crafting():
     replay = build_replay(small_world())
     tick = replay["ticks"][1]
-    state = tick["agents"][0]
+    state = decode_tick_agents(tick)[0]
 
     assert "price_belief" in state
     assert "crates" in state
@@ -139,7 +146,7 @@ def test_replay_records_credit_trust_and_shock_layers():
     assert replay["meta"]["credit"]["mode"] == "reciprocal"
     assert replay["meta"]["trust"]["default"] == 0.5
     assert replay["meta"]["shocks"]["probability"] == 0.5
-    state = replay["ticks"][1]["agents"][0]
+    state = decode_tick_agents(replay["ticks"][1])[0]
     for field in (
         "trust",
         "debt_wood",

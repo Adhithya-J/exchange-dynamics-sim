@@ -22,6 +22,13 @@ loans settle before soft gifts. Partial chopping and crafting carry between days
 Little villagers walk out to the berry bushes and forest, visiting several sparse
 sites when the commons is depleted.
 
+Seasons turn every 45 iterations by default: berries regrow fastest in summer
+and not at all in winter, while wood keeps regrowing all year. The commons is
+the village granary, so a village that strips the bushes in summer goes hungry
+in winter. Commons stocks and regeneration also scale with the number of agents
+relative to a 10-agent baseline, so 50- and 100-agent runs keep a comparable
+per-villager ecology.
+
 ## Run it
 
 ```bash
@@ -86,7 +93,7 @@ and a single-seed group is reported with an undefined interval.
 - `features/` — composable layers for trade, gifting, trust, reciprocity,
   credit, and shocks, plus the shared goods ledger and obligation book.
 - `config.yaml` — default parameters and flags.
-- `replay.py` — version 2 replay builder and validator.
+- `replay.py` — version 3 replay builder and validator (reads version 2 too).
 - `visualize.py` — self-contained HTML page builder.
 - `viewer/` — canvas village, event feed, inspector, and PPF chart.
 - `experiments.py` — seed and flag sweeps.
