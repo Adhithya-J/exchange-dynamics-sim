@@ -34,6 +34,7 @@ Each agent has:
 - `health` and `max_health`;
 - `berries`, `wood`, and `crates`;
 - `price_belief` — whole berries per wood, used for planning and barter;
+- `reserve_days_preference` — this villager's stable taste for a food reserve;
 - `wood_progress` — fractional chopping work carried toward the next block;
 - `craft_progress` — minutes invested in the next crate;
 - `storage_wood_per_container` and `storage_berries_per_container`;
@@ -136,8 +137,10 @@ tomorrow. Wood stocks therefore stay whole without throwing away slow work.
 
 ### Labour allocation
 
-With `FEATURES.TRADE: true`, an agent first chooses the activity with the
-higher density-adjusted market value per minute:
+With `FEATURES.TRADE: true`, an agent first samples the activity with the
+higher density-adjusted market value per minute. Each value carries a daily
+log-normal taste shock, and with probability `EXPLORATION_RATE` the two values
+are swapped:
 
 ```text
 berry value per minute =
@@ -146,20 +149,22 @@ wood value per minute =
     wood_skill * max(wood_density, MIN_DENSITY) * price / WOOD_TIME_COST
 ```
 
-- A **wood specialist** spends enough time to finish the next whole block
-  (using any carried `wood_progress`), then uses the rest of the day to gather
-  food and its berry reserve.
-- A **berry specialist** covers today's food and its berry reserve, then
-  produces a small surplus to buy one block of wood plus `TRADE_SURPLUS`.
-- Berry pickup is also capped at one daily ration plus the empty space left in
-  the crate:
-  `FOOD_PER_ITERATION + max(0, storage_capacity - berries)`. Planned barter
-  can raise that cap. Any leftover working minutes are reallocated to chopping
-  wood instead of picking berries that would only spoil.
-- A berry specialist does not have to chop its own wood, but it will use spare
-  minutes that way once its rational berry target is met.
-- A wood specialist does not have to gather all of its own berries; it can sell
-  wood for them.
+- A **wood specialist** picks up to its daily meal if the larder is short, then
+  finishes or advances a crate when raw wood is available, then chops. It does
+  not gather a large berry reserve of its own; it sells wood for food.
+- A **berry specialist** covers today's meal, then refills the post-meal
+  reserve only when it has fallen below the refill threshold. Above the
+  threshold it leaves the larder alone and uses the day for carpentry or
+  chopping.
+- Berry pickup is capped at one daily ration plus the empty space left in the
+  crates: `FOOD_PER_ITERATION + max(0, storage_capacity - berries)`. A refill
+  batch therefore never picks berries that must spoil, and leftover minutes go
+  to wood or carpentry instead.
+- A wood worker keeps `WOOD_RESERVE_CRATES` spare crate's worth of raw wood
+  once it owns a crate, so it can replace a worn crate without a fresh chopping
+  binge.
+- Neither specialist has to produce everything itself; the market is how the
+  two sides cover their deficits.
 
 With `FEATURES.TRADE: false`, agents follow a self-sufficiency rule: today's
 food, then wood for storage, then a berry reserve, then extra berries only if
@@ -249,6 +254,31 @@ one crate and ten berries, enough to save food and material while working toward
 the next crate. If every crate wears out, storage capacity is zero and the
 villager can only carry today's food until a new crate is finished.
 
+### Food reserve and refill threshold
+
+A villager keeps a **post-meal** reserve of `RESERVE_DAYS` days of food,
+subject to capacity:
+
+```text
+reserve_target = min(capacity, RESERVE_DAYS * FOOD_PER_ITERATION)
+```
+
+With two days and a six-berry ration the target is twelve berries. One crate
+therefore holds a full reserve, while two crates hold twelve of their twenty
+slots: the second crate is useful without being filled to the brim. A small
+per-villager `RESERVE_JITTER` varies the target, so stocks differ across the
+population.
+
+Villagers do not top up a few berries every single day. They refill in a batch
+only when the larder falls below `REFILL_FRACTION` of the reserve target, and
+otherwise spend whole days on wood or carpentry. A below-target wood worker
+first picks up to its daily meal if it can, then specialises.
+
+Raw wood is also held as a small replacement reserve. Once a villager owns a
+crate, it chops toward `WOOD_RESERVE_CRATES` spare crate's worth of material in
+addition to any missing crate. Raw wood is durable, so this is the cheapest way
+to be ready when a crate wears out.
+
 ### Skilled crate crafting
 
 Crafting one crate requires `WOOD_PER_CONTAINER` raw wood and:
@@ -301,10 +331,16 @@ berry value/minute = berry_skill * density / BERRY_TIME_COST
 wood value/minute  = wood_skill * density * price_belief / WOOD_TIME_COST
 ```
 
-Carpentry is a third use of the day. A wood specialist first secures a small
-food floor, then finishes or advances a crate when raw wood is available, then
+Each day the villager draws a log-normal taste shock on each value and, with
+probability `EXPLORATION_RATE`, swaps the two activities. This is deliberate
+sampling rather than a deterministic argmax: choices vary slightly around the
+rational comparison, and a villager occasionally tries the other activity.
+
+Carpentry is a third use of the day. A wood specialist first covers its meal if
+it can, then finishes or advances a crate when raw wood is available, then
 chops or gathers with the remainder. Berry specialists cover food and the crate
-reserve before using spare minutes for carpentry or chopping.
+reserve before using spare minutes for carpentry or chopping. A non-urgent craft
+is occasionally deferred for a day of chopping.
 
 ### Reservation prices
 
@@ -320,9 +356,10 @@ crate buyer max    = blend(crate opportunity, crate belief) + urgency
 ```
 
 The blend is mostly belief with a smaller opportunity-cost anchor. A wood
-buyer's maximum is also capped by its affordable berry surplus and its
-sustainable daily surplus, so stored wealth cannot bid the ongoing wood price
-above what daily production can support. Crate opportunities include the eight
+buyer may spend saved berries down to today's meal, so savings can smooth a thin
+market instead of limiting bids to the day's production surplus. A seller whose
+health is low and who is short of food accepts almost any price, because eating
+today matters more than the quoted ratio. Crate opportunities include the eight
 raw wood and the craft minutes valued at the villager's berry rate.
 
 ### Bilateral matching
@@ -332,7 +369,8 @@ The market square runs two order books, crates first and then raw wood:
 - sellers have a private minimum acceptable price and a whole-unit quantity;
 - buyers have a private maximum willingness to pay, a quantity, and a berry
   budget;
-- sellers and buyers are shuffled and matched greedily.
+- the cheapest asks are matched against the highest bids first, with a random
+  tie-break, so a desperate seller reaches the buyers who can actually pay.
 
 If `seller_min <= buyer_max`, the whole-unit trade clears at the integer
 midpoint:

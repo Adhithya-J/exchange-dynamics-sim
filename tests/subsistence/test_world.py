@@ -151,16 +151,20 @@ def test_spoilage_off_keeps_berries_without_storage():
 
 
 def test_labour_allocation_follows_comparative_advantage():
-    world = SubsistenceWorld(make_config())
+    world = SubsistenceWorld(
+        make_config(
+            AGENTS={"CHOICE_NOISE": 0.0, "EXPLORATION_RATE": 0.0}
+        )
+    )
     world.initialize_agents()
     berry_specialist = world.agents[0]
     wood_specialist = world.agents[1]
     berry_specialist.berry_skill = 4.0
     berry_specialist.wood_skill = 0.5
-    berry_specialist.berries = 6
+    berry_specialist.berries = 4
     wood_specialist.berry_skill = 0.8
     wood_specialist.wood_skill = 2.5
-    wood_specialist.berries = 6
+    wood_specialist.berries = 4
     # The wood specialist needs something to sell before it can specialise.
     wood_specialist.wood = 1
     world.trade_price = 4
@@ -240,6 +244,12 @@ def test_default_skill_and_health_parameters():
     assert settings["wood_slope"] == pytest.approx(-0.25)
     assert settings["berry_skill_range"] == pytest.approx((0.30, 1.50))
     assert settings["wood_skill_range"] == pytest.approx((0.45, 1.45))
+    assert settings["reserve_days"] == 2
+    assert settings["refill_fraction"] == pytest.approx(0.5)
+    assert settings["max_crates_target"] == 2
+    assert settings["wood_reserve_crates"] == 1
+    assert settings["choice_noise"] > 0
+    assert 0 <= settings["exploration_rate"] <= 1
 
 
 def test_partial_wood_work_carries_between_days():
@@ -319,12 +329,61 @@ def test_berry_cap_bounds_new_pickup_not_total_holding():
     agent.wood = 0
     agent.berries = 8
 
-    # The starter crate stores 10 berries, plus the six-berry daily ration.
-    assert world._target_berries(agent) == 16
+    # The reserve is two days of food, capped by the starter crate's ten
+    # berries. With eight berries the larder is already above the refill
+    # threshold, so the villager leaves it alone and chops instead.
+    assert world._target_berries(agent) == 10
+    assert world._berry_refill_threshold(agent) == 6
+    assert world._rational_berry_target(agent) == 8
+
+    # After the reserve runs down, it refills in one batch to the reserve plus
+    # today's meal.
+    agent.berries = 4
     assert world._rational_berry_target(agent) == 16
 
     agent.berries = 20
     assert world._rational_berry_target(agent) == 20
+
+
+def test_wood_reserve_target_keeps_a_spare_crate_of_material():
+    world = SubsistenceWorld(make_config(SIMULATION={"AGENTS": 1}))
+    world.initialize_agents()
+    agent = world.agents[0]
+
+    # One crate owned, one missing, plus one spare crate of raw wood.
+    agent.crates = [1.0]
+    assert world._target_wood(agent) == 16
+
+    agent.crates = [1.0, 1.0]
+    assert world._target_wood(agent) == 8
+
+    agent.crates = []
+    assert world._target_wood(agent) == 16
+
+
+def test_choice_sampling_can_swap_the_preferred_activity():
+    world = SubsistenceWorld(
+        make_config(
+            SIMULATION={"AGENTS": 1},
+            AGENTS={"CHOICE_NOISE": 0.0, "EXPLORATION_RATE": 1.0},
+        )
+    )
+    world.initialize_agents()
+    agent = world.agents[0]
+    # A strong berry picker who would normally spend the day on berries.
+    agent.berry_skill = 1.5
+    agent.wood_skill = 0.45
+    agent.price_belief = 5
+    agent.berries = 0
+    agent.crates = []
+    world._current_berries_density = 1.0
+    world._current_wood_density = 1.0
+
+    world._allocate_labour(agent)
+
+    # With exploration forced, the sampled choice flips to wood, so the agent
+    # works the day for wood instead of picking every available berry.
+    assert agent.planned_wood > 0
 
 
 def test_zero_storage_agent_picks_ration_then_chops():

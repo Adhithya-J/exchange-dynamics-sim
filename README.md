@@ -4,10 +4,11 @@
 
 *Default subsistence configuration at iteration 50. Five villagers remain, the
 berry commons is full, and the forest is at about 69%. The selected villager has
-two crates holding twenty berries, a price belief of nine while the market
-clears at eight, and an effective wood frontier contracted by harvest density.
-The inspector shows the crate, craft, belief, and density state used by the PPF
-and search animation.*
+two crates with four stored berries, nine raw wood kept as a replacement
+reserve, a price belief of four while the market clears at three, and an
+effective wood frontier contracted by harvest density. The inspector shows the
+small post-meal reserve, the spare wood, the belief, and the density state used
+by the PPF and search animation.*
 
 An experimental agent-based laboratory for exchange, survival, and inequality.
 The repository now holds **two worlds** that share a small set of simulation
@@ -15,7 +16,7 @@ utilities:
 
 | World | Directory | What it models |
 | --- | --- | --- |
-| **Subsistence** | `worlds/subsistence/` | Goods only. Villagers start with nothing, gather perishable berries and durable wood from a shared commons, eat, store food, and barter. No money. |
+| **Subsistence** | `worlds/subsistence/` | Goods only. Villagers start with ten berries and one crate, gather perishable berries and durable wood from a shared commons, eat, store food in perishable crates, and barter. No money. |
 | **Money** | `worlds/money/` | The original model: money transfers, gifts, a goods market, reciprocity, trust, and environmental shocks. |
 
 The subsistence world is the new primary world and has its own experiment
@@ -54,6 +55,11 @@ drag the timeline to scrub, and click a villager to inspect them.
   food drains one. The default daily ration is six berries.
 - **Berries are food and spoil.** Berries not eaten and not inside storage
   spoil at the end of the iteration. Berries and wood are always whole units.
+- **Food is kept as a small reserve, not a full larder.** A villager aims for
+  about two days of post-meal berries, capped by crate space, and refills only
+  when the reserve runs low. The rest of the day goes to wood or carpentry, and
+  a villager with crates keeps one spare crate's worth of raw wood for
+  replacements.
 - **Crates are capital.** Eight raw wood plus about a day of skilled carpentry
   make one crate, which stores ten berries. Raw wood is only material, not
   storage. Crates wear out faster when they are full.
@@ -72,6 +78,9 @@ drag the timeline to scrub, and click a villager to inspect them.
   berries per wood. Bilateral bargains clear at the midpoint of seller and
   buyer reservations, and realized prices plus market gossip update beliefs with
   a one-tick lag. There is no global price setter.
+- **Choices are sampled.** Each day a villager draws a small taste shock on the
+  berry-versus-wood comparison and occasionally explores the other activity, so
+  behaviour varies around the rational benchmark instead of repeating exactly.
 - **The commons is shared and depletable.** Berry bushes and forest regenerate
   each iteration. Berry bushes recover quickly; wood regrows much more slowly.
 

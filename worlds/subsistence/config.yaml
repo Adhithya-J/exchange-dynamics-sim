@@ -61,16 +61,35 @@ AGENTS:
   # One starter crate gives villagers enough storage to save food and wood
   # while they work toward their first crafted crate.
   STARTING_CRATES: 1
-  # How many days of food an agent tries to keep, subject to storage.
-  RESERVE_DAYS: 4
+  # How many days of food an agent tries to keep after eating, subject to
+  # storage capacity. Two days is a small reserve: two crates hold it without
+  # being filled to the brim.
+  RESERVE_DAYS: 2
+  # Refill storage only after the reserve falls below this fraction of the
+  # target. Between refills the villager spends whole days on wood or carpentry
+  # instead of topping up a few berries every single day.
+  REFILL_FRACTION: 0.5
+  # Random per-villager variation in preferred reserve days, as a fraction.
+  # This stops every villager from holding exactly the same stock.
+  RESERVE_JITTER: 0.15
   # How many extra units an agent produces beyond its own target when it is
   # specialising for trade.
   TRADE_SURPLUS: 1
+  # Raw wood kept back as a replacement reserve, in crates' worth of material.
+  # A villager with two crates still chops toward one spare crate's wood.
+  WOOD_RESERVE_CRATES: 1
   # Upper bound on the raw wood an agent deliberately keeps for crafting and
   # trade.
   MAX_WOOD_TARGET: 20
   # Finished crates an agent tries to keep for its own berry reserve.
-  MAX_CRATES_TARGET: 3
+  MAX_CRATES_TARGET: 2
+  # Taste noise on the per-minute value of berries versus wood. Each day the
+  # villager draws a log-normal shock, so choices vary slightly around the
+  # rational comparison.
+  CHOICE_NOISE: 0.25
+  # Chance per day of an epsilon-greedy experiment: swap the preferred
+  # berry/wood activity or defer a non-urgent craft.
+  EXPLORATION_RATE: 0.08
 
 # Shared natural stocks. Stocks and harvests are whole units. Berry bushes
 # regrow steadily; wood regrows much more slowly. Gathering time scales with

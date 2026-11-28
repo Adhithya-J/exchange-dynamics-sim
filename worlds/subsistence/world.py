@@ -67,10 +67,15 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
     "STARTING_BERRIES": 10,
     "STARTING_WOOD": 0,
     "STARTING_CRATES": 1,
-    "RESERVE_DAYS": 4,
+    "RESERVE_DAYS": 2,
+    "REFILL_FRACTION": 0.5,
+    "RESERVE_JITTER": 0.15,
     "TRADE_SURPLUS": 1,
+    "WOOD_RESERVE_CRATES": 1,
     "MAX_WOOD_TARGET": 20,
-    "MAX_CRATES_TARGET": 3,
+    "MAX_CRATES_TARGET": 2,
+    "CHOICE_NOISE": 0.25,
+    "EXPLORATION_RATE": 0.08,
 }
 
 DEFAULT_RESOURCE_SETTINGS: dict[str, float] = {
@@ -147,6 +152,9 @@ class Agent:
         self.wood = int(wood)
         self.crates: list[float] = [float(value) for value in (crates or [])]
         self.price_belief = int(price_belief)
+        # Per-villager taste for a days-of-food reserve. The world draws this
+        # once at initialization so stocks differ across the population.
+        self.reserve_days_preference = 0.0
         # Fractional wood work completed toward the next whole block. It
         # persists across iterations so slow chopping is not lost each day.
         self.wood_progress = 0.0
@@ -382,9 +390,14 @@ class SubsistenceWorld:
             starting_wood = int(merged["STARTING_WOOD"])
             starting_crates = int(merged["STARTING_CRATES"])
             reserve_days = int(merged["RESERVE_DAYS"])
+            refill_fraction = float(merged["REFILL_FRACTION"])
+            reserve_jitter = float(merged["RESERVE_JITTER"])
             trade_surplus = int(merged["TRADE_SURPLUS"])
+            wood_reserve_crates = int(merged["WOOD_RESERVE_CRATES"])
             max_wood_target = int(merged["MAX_WOOD_TARGET"])
             max_crates_target = int(merged["MAX_CRATES_TARGET"])
+            choice_noise = float(merged["CHOICE_NOISE"])
+            exploration_rate = float(merged["EXPLORATION_RATE"])
         except (TypeError, ValueError) as exc:
             raise ValueError(
                 "AGENTS health, food, and starting stock settings must be whole "
@@ -427,12 +440,22 @@ class SubsistenceWorld:
             raise ValueError("AGENTS starting goods must not be negative")
         if reserve_days < 0:
             raise ValueError("AGENTS.RESERVE_DAYS must not be negative")
+        if not 0 <= refill_fraction <= 1:
+            raise ValueError("AGENTS.REFILL_FRACTION must be between 0 and 1")
+        if not 0 <= reserve_jitter <= 1:
+            raise ValueError("AGENTS.RESERVE_JITTER must be between 0 and 1")
         if trade_surplus < 0:
             raise ValueError("AGENTS.TRADE_SURPLUS must not be negative")
+        if wood_reserve_crates < 0:
+            raise ValueError("AGENTS.WOOD_RESERVE_CRATES must not be negative")
         if max_wood_target < 0:
             raise ValueError("AGENTS.MAX_WOOD_TARGET must not be negative")
         if max_crates_target < 0:
             raise ValueError("AGENTS.MAX_CRATES_TARGET must not be negative")
+        if choice_noise < 0:
+            raise ValueError("AGENTS.CHOICE_NOISE must not be negative")
+        if not 0 <= exploration_rate <= 1:
+            raise ValueError("AGENTS.EXPLORATION_RATE must be between 0 and 1")
         return {
             "skill_z_range": skill_z_range,
             "berry_intercept": berry_intercept,
@@ -453,9 +476,14 @@ class SubsistenceWorld:
             "starting_wood": starting_wood,
             "starting_crates": starting_crates,
             "reserve_days": reserve_days,
+            "refill_fraction": refill_fraction,
+            "reserve_jitter": reserve_jitter,
             "trade_surplus": trade_surplus,
+            "wood_reserve_crates": wood_reserve_crates,
             "max_wood_target": max_wood_target,
             "max_crates_target": max_crates_target,
+            "choice_noise": choice_noise,
+            "exploration_rate": exploration_rate,
         }
 
     def _resource_settings(self, name: str) -> dict[str, float]:
@@ -682,6 +710,7 @@ class SubsistenceWorld:
         self._agent_index = {agent.id: agent for agent in self.agents}
         baseline = self._initial_price_belief()
         beliefs = self.trade_settings
+        jitter = settings["reserve_jitter"]
         for agent in self.agents:
             noise = self.random.randint(
                 -beliefs["belief_noise"], beliefs["belief_noise"]
@@ -691,6 +720,13 @@ class SubsistenceWorld:
                     beliefs["max_price"],
                     max(beliefs["min_price"], baseline + noise),
                 )
+            )
+            # A small stable taste for how many days of food this villager
+            # likes to keep, within the configured reserve window.
+            agent.reserve_days_preference = max(
+                0.0,
+                settings["reserve_days"]
+                * self.random.uniform(1.0 - jitter, 1.0 + jitter),
             )
         self.initial_price = baseline
         self.last_market_price = baseline
@@ -904,6 +940,14 @@ class SubsistenceWorld:
             else:
                 self._last_regenerated_wood = amount
 
+    def _reserve_days(self, agent: Agent) -> float:
+        """This villager's preferred food-reserve length in days."""
+
+        preferred = agent.reserve_days_preference
+        if preferred <= 0:
+            return float(self.agent_settings["reserve_days"])
+        return float(preferred)
+
     def _target_crates(self, agent: Agent) -> int:
         if not self.features["STORAGE"] or not self.features["SPOILAGE"]:
             return 0
@@ -912,8 +956,7 @@ class SubsistenceWorld:
         if berries_per_crate <= 0:
             return 0
         reserve = min(
-            self.agent_settings["reserve_days"]
-            * self.agent_settings["food_per_iteration"],
+            self._reserve_days(agent) * self.agent_settings["food_per_iteration"],
             self.agent_settings["max_crates_target"] * berries_per_crate,
         )
         return int(math.ceil(reserve / berries_per_crate))
@@ -926,7 +969,14 @@ class SubsistenceWorld:
         if wood_per_crate <= 0:
             return 0
         missing = max(0, self._target_crates(agent) - agent.crate_count)
-        material = missing * wood_per_crate
+        # Once a villager owns a crate, keep one crate's worth of raw wood as
+        # a replacement reserve. Raw wood is durable and does not wear out.
+        spare = (
+            self.agent_settings["wood_reserve_crates"]
+            if agent.crate_count > 0
+            else 0
+        )
+        material = (missing + spare) * wood_per_crate
         return max(
             0, min(self.agent_settings["max_wood_target"], material)
         )
@@ -966,12 +1016,32 @@ class SubsistenceWorld:
             )
 
     def _target_berries(self, agent: Agent) -> int:
+        """Berries to keep after eating: a few days, capped by storage.
+
+        This is deliberately a *post-meal* reserve. The old rule added a
+        whole daily ration on top of full crate capacity, so the target was
+        unreachable after spoilage and villagers topped up every single day.
+        """
+
         food = self.agent_settings["food_per_iteration"]
-        reserve = self.agent_settings["reserve_days"] * food
+        reserve = self._reserve_days(agent) * food
         if not self.features["SPOILAGE"]:
-            return max(food, reserve)
+            return int(max(food, reserve))
         capacity = agent.storage_capacity if self.features["STORAGE"] else 0
-        return food + min(capacity, reserve)
+        if capacity <= 0:
+            # Without a crate only today's ration can survive.
+            return food
+        return int(min(capacity, max(food, reserve)))
+
+    def _berry_refill_threshold(self, agent: Agent) -> int:
+        """Refill storage only once the reserve has run down."""
+
+        food = self.agent_settings["food_per_iteration"]
+        if not self.features["SPOILAGE"]:
+            return 0
+        target = self._target_berries(agent)
+        fraction = self.agent_settings["refill_fraction"]
+        return int(max(food, round(target * fraction)))
 
     def _rational_berry_cap(self, agent: Agent) -> float:
         """Most new berries worth picking today, before planned barter.
@@ -989,12 +1059,27 @@ class SubsistenceWorld:
         return float(ration + remaining_crate)
 
     def _rational_berry_target(self, agent: Agent) -> float:
-        """Total berry holding to aim for after non-barter gathering."""
+        """Total berry holding to aim for after non-barter gathering.
 
+        When the larder is above the refill threshold the villager leaves it
+        alone and spends the whole day on wood or carpentry. Otherwise it
+        refills toward ``reserve + today's ration`` in one batch.
+        """
+
+        food = self.agent_settings["food_per_iteration"]
+        if not self.features["SPOILAGE"]:
+            return float(self._target_berries(agent))
+        capacity = agent.storage_capacity if self.features["STORAGE"] else 0
+        if capacity <= 0:
+            return float(max(agent.berries, food))
         target = self._target_berries(agent)
-        new_needed = max(0, target - agent.berries)
+        if agent.berries >= self._berry_refill_threshold(agent):
+            return float(agent.berries)
+        harvest_target = food + target
         new_allowed = self._rational_berry_cap(agent)
-        return float(agent.berries + min(new_needed, new_allowed))
+        return float(
+            min(harvest_target, agent.berries + new_allowed)
+        )
 
     def _allocate_labour(self, agent: Agent) -> None:
         """Spend the finite day between berries and wood.
@@ -1035,6 +1120,28 @@ class SubsistenceWorld:
         if not wood_has_value:
             # Wood is only fuel for storage here; do not spend berry time on it.
             wood_value_per_minute = 0.0
+
+        def sample_value(value: float) -> float:
+            """A log-normal taste shock, so daily choices are not identical."""
+
+            if value <= 0 or settings["choice_noise"] <= 0:
+                return value
+            return value * math.exp(
+                self.random.gauss(0.0, settings["choice_noise"])
+            )
+
+        berry_choice_value = sample_value(berry_value_per_minute)
+        wood_choice_value = sample_value(wood_value_per_minute)
+        # Epsilon-greedy exploration: occasionally try the other activity even
+        # when the comparison favours one side.
+        explored = self.random.random() < settings["exploration_rate"]
+        if explored:
+            berry_choice_value, wood_choice_value = (
+                wood_choice_value,
+                berry_choice_value,
+            )
+        prefer_wood = wood_choice_value > berry_choice_value
+
         target_crates = self._target_crates(agent)
         own_crate_need = max(0, target_crates - agent.crate_count)
         finish_craft_minutes = (
@@ -1106,18 +1213,32 @@ class SubsistenceWorld:
                 and math.isfinite(craft_minutes)
             )
 
-            if wood_value_per_minute > berry_value_per_minute:
-                # Secure a small food floor before specializing in wood or
-                # carpentry; the rest of the ration still comes from trade.
-                spend_berries(
-                    max(0, min(food, 1) - agent.berries)
+            if prefer_wood:
+                # Eat first, then specialise. A wood worker picks up to its
+                # full meal when the larder is short, and otherwise spends the
+                # day chopping or crafting.
+                potential = self.effective_max_berries_per_day(
+                    agent, self._current_berries_density
                 )
+                if agent.berries < food:
+                    spend_berries(
+                        max(0.0, min(food, potential) - agent.berries)
+                    )
                 should_craft = can_craft and (
                     own_crate_need > 0
                     or agent.craft_progress > 0
                     or agent.berries >= food
                     or agent.crate_count > target_crates
                 )
+                # Now and then defer a non-urgent craft for a day of chopping.
+                if (
+                    should_craft
+                    and own_crate_need <= 0
+                    and agent.craft_progress <= 0
+                    and agent.berries >= food
+                    and self.random.random() < settings["exploration_rate"]
+                ):
+                    should_craft = False
                 if should_craft:
                     minutes = min(
                         remaining,
@@ -1343,6 +1464,11 @@ class SubsistenceWorld:
         )
         if agent.health < agent.max_health or agent.berries < food:
             raw += 1
+        if agent.health <= 2 and agent.berries < food:
+            # A villager close to starvation will accept almost any price to
+            # eat today. Without this, a thin market leaves both sides worse
+            # off: the specialist starves and the buyer goes without wood.
+            raw = float(settings["min_price"])
         price = int(round(raw))
         return int(
             min(settings["max_price"], max(settings["min_price"], price))
@@ -1356,12 +1482,10 @@ class SubsistenceWorld:
         raw = 0.2 * opportunity + 0.8 * float(belief)
         urgency = 1 if agent.berries > agent.storage_capacity else 0
         price = int(round(raw)) + urgency
-        daily_surplus = self.effective_max_berries_per_day(
-            agent, self._current_berries_density
-        ) - food
-        sustainable = max(1, int(math.ceil(daily_surplus)))
         if budget > 0:
-            price = min(price, budget, sustainable)
+            # Savings can smooth a thin market: a buyer may spend down to
+            # today's meal, not only its daily production surplus.
+            price = min(price, budget)
         return int(
             min(settings["max_price"], max(settings["min_price"], price))
         )
@@ -1404,7 +1528,9 @@ class SubsistenceWorld:
             target_crates = self._target_crates(agent)
             berry_target = self._target_berries(agent)
             berry_deficit = max(0, berry_target - agent.berries)
-            berry_budget = max(0, agent.berries - food)
+            # Spend only berries above the reserve, so a bargain does not eat
+            # into the few days of food the villager is keeping.
+            berry_budget = max(0, agent.berries - berry_target)
             hungry = agent.berries < food
             keep = target_crates
             if hungry:
@@ -1444,11 +1570,12 @@ class SubsistenceWorld:
         for agent in agents:
             berry_target = self._target_berries(agent)
             berry_deficit = max(0, berry_target - agent.berries)
+            # Keep today's meal back; the rest can buy wood or a crate.
             berry_budget = max(0, agent.berries - food)
             hungry = agent.berries < food
             # Keep at most one crate's material for own use. A hungry agent
-            # without storage sells down to zero. Wood specialists sell at
-            # most one block a day so they can slowly accumulate crate stock.
+            # sells down to zero. A wood specialist sells at most one block a
+            # day while it has food, but may sell two when it is starving.
             if agent.wood_skill > agent.berry_skill:
                 reserve = 0
             else:
@@ -1459,7 +1586,7 @@ class SubsistenceWorld:
                 )
             surplus = max(0, agent.wood - reserve)
             if agent.wood_skill > agent.berry_skill:
-                surplus = min(surplus, 1)
+                surplus = min(surplus, 2 if hungry else 1)
             target_wood = self._target_wood(agent)
             need = max(
                 0, min(target_wood, wood_per_crate) - agent.wood
@@ -1498,8 +1625,17 @@ class SubsistenceWorld:
         list[dict[str, Any]],
     ]:
         settings = self.trade_settings
-        self.random.shuffle(sellers)
-        self.random.shuffle(buyers)
+        # Price priority: the cheapest ask meets the highest bid first, with a
+        # random tie-break. This lets a desperate seller reach the buyers who
+        # can actually pay, instead of clearing at a random low bid.
+        sellers = sorted(
+            sellers,
+            key=lambda entry: (entry["price"], self.random.random()),
+        )
+        buyers = sorted(
+            buyers,
+            key=lambda entry: (-entry["price"], self.random.random()),
+        )
         seller_done = {id(entry): 0 for entry in sellers}
         buyer_done = {id(entry): 0 for entry in buyers}
         trades: list[dict[str, Any]] = []

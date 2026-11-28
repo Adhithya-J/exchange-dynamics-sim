@@ -8,9 +8,12 @@ that stores ten berries; raw wood itself is only material, not storage.
 Crates are perishable and wear faster when full. Gathering and chopping slow
 down as the commons thins. Each villager carries an integer price belief, and
 bilateral bargaining plus market gossip discovers prices with a one-tick lag.
-Partial chopping and crafting carry between days. Little villagers walk out to
-the berry bushes and forest, visiting several sparse sites when the commons is
-depleted.
+Villagers keep a small post-meal food reserve and refill it in batches rather
+than topping up every day; spare time goes to wood, and owned crates come with a
+spare crate's worth of raw wood. Daily choices carry a small taste shock and
+occasional exploration. Partial chopping and crafting carry between days. Little
+villagers walk out to the berry bushes and forest, visiting several sparse sites
+when the commons is depleted.
 
 ## Run it
 
