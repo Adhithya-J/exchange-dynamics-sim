@@ -52,6 +52,7 @@ def test_credit_is_off_by_default():
 def test_reciprocal_loan_moves_wood_and_charges_no_interest():
     world = SubsistenceWorld(credit_config("reciprocal"))
     lender, borrower = prepare_pair(world)
+    borrower.trust = 0.30
 
     world._originate_credit()
 
@@ -110,6 +111,7 @@ def test_default_seizes_pledged_crate_and_lowers_trust():
         credit_config("reciprocal", CREDIT={"GRACE_DAYS": 0})
     )
     lender, borrower = prepare_pair(world)
+    borrower.trust = 0.30
     world._originate_credit()
     loan = world.loans[0]
     loan.due_iteration = 2
@@ -167,7 +169,9 @@ def test_market_mode_prices_risk_into_a_positive_interest_rate():
     safe.berries = 6
     risky.trust = 0.35
     risky.health = 1
-    risky.berries = 0
+    # Keep the risky borrower fed so its first demand is wood, like the safe
+    # borrower; otherwise the two loans are in different goods.
+    risky.berries = 6
 
     world._current_iteration = 1
     world._originate_credit()

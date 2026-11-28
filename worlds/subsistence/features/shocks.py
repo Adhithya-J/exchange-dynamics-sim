@@ -48,6 +48,10 @@ class ShockLayer(FeatureLayer):
         self.active_until = 0
         self._last_started = 0
 
+    def reset(self) -> None:
+        self.active_until = 0
+        self._last_started = 0
+
     def before_regenerate(self) -> None:
         world = self.world
         iteration = world._current_iteration

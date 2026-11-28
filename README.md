@@ -74,22 +74,27 @@ drag the timeline to scrub, and click a villager to inspect them.
   Berry skill rises with `z` and wood skill falls with it, so strong pickers are
   weak choppers and strong choppers are weak pickers. Woodworkers also have a
   comparative advantage in carpentry.
-- **Prices are discovered.** Every villager carries an integer price belief in
-  berries per wood. Bilateral bargains clear at the midpoint of seller and
-  buyer reservations, and realized prices plus market gossip update beliefs with
-  a one-tick lag. There is no global price setter.
+- **Prices are discovered.** Every villager carries a fractional price belief in
+  berries per wood. Bilateral bargains clear at the fractional midpoint of
+  seller and buyer reservations, and realized prices plus market gossip update
+  beliefs with a one-tick lag. There is no global price setter and no price
+  clamp; goods stay whole, so a fractional price leaves a small rounding
+  residual in the berry payment.
 - **Choices are sampled.** Each day a villager draws a small taste shock on the
   berry-versus-wood comparison and occasionally explores the other activity, so
   behaviour varies around the rational benchmark instead of repeating exactly.
 - **Credit is optional.** A loan moves wood, berries, or crate capacity now and
-  returns the same good later. Reciprocal mode is zero-interest and gated by
-  trust or collateral; market mode prices default risk into a real goods
-  interest rate. Loans, repayments, and defaults run through the same goods
-  ledger as gifts and trade.
+  returns the same good later. Food is the first loan priority, berry debt keeps
+  today's meal before servicing, and formal loans settle before soft gifts.
+  Reciprocal mode is zero-interest and gated by trust or collateral; market mode
+  prices default risk and crate durability into a real goods interest rate.
+  Loans, repayments, and defaults run through the same goods ledger as gifts and
+  trade.
 - **Gifts and reciprocity share one obligation book.** A plain gift is one-way.
   With reciprocity on it also creates a soft zero-interest obligation that the
-  receiver repays when it has surplus berries. That is the low-commitment end of
-  the credit spectrum.
+  receiver repays when it has surplus berries. Gifts are capped before they move,
+  and an unserviced soft claim eventually writes off and lowers trust. That is
+  the low-commitment end of the credit spectrum.
 - **Shocks are optional.** A drought temporarily cuts berry and wood
   regeneration, so the same labour yields less until it passes.
 - **The commons is shared and depletable.** Berry bushes and forest regenerate
@@ -175,9 +180,13 @@ CREDIT:
 
 A loan can move wood, berries, or a whole crate. Crate lending is direct
 capacity lending: the borrower gets storage now and returns a crate later. The
-lent crate also serves as collateral, so crate-capacity loans carry no goods
-interest in either mode. Defaults seize pledged crates and then the borrower's
-stock of the loan good; the rest is a claim loss, not destroyed goods.
+lent crate also serves as collateral. Reciprocal crate loans remain zero-interest;
+market crate loans price the durability-adjusted residual risk. A fully covering
+new crate is risk-free, while a worn crate carries a positive rate. Defaults
+seize pledged crates and then the borrower's stock of the loan good, leaving a
+living berry debtor's daily meal; the rest is a claim loss, not destroyed goods.
+If a whole crate exceeds the claim, the excess is recorded as
+`collateral_excess`.
 
 ![Credit and trust in the subsistence viewer](docs/subsistence-credit.png)
 
@@ -212,10 +221,12 @@ python -m worlds.subsistence.experiments --iterations 300 --seeds 1 2 3 \
   --output results/subsistence.csv
 ```
 
-It writes raw runs plus a summary with 95% confidence intervals. Useful metrics
-include `alive`, `mean_health`, `berries_spoiled`, `trade_berries`,
-`barter_price`, `ppf_efficiency`, `specialisation`, `gini_berries`,
-`gini_wood`, and `unmet_food`.
+It writes raw runs plus a summary with 95% Student-t confidence intervals.
+Flow metrics such as `berries_spoiled`, `trade_berries`, `loans_originated`, and
+`gifts` are summed over the run; stock metrics such as `alive`,
+`credit_outstanding_wood`, and `gini_berries` use the final tick. Useful
+metrics also include `mean_health`, `barter_price`, `ppf_efficiency`,
+`specialisation`, `gini_wood`, and `unmet_food`.
 
 The original money-world experiment runner is still available as
 `python experiments.py`.

@@ -31,6 +31,132 @@ DEFAULT_METRICS: tuple[str, ...] = (
     "mean_risk_tolerance",
 )
 
+# Metrics whose per-tick values are flows: experiments should report the run
+# total, not the last tick's value. Stock and cumulative metrics stay final.
+SUMMED_METRICS = frozenset(
+    {
+        "altruism_volume",
+        "berries_eaten",
+        "berries_gathered",
+        "berries_spoiled",
+        "collateral_excess_value",
+        "collateral_seized",
+        "commons_depleted",
+        "commons_extracted",
+        "commons_regenerated",
+        "commons_regenerated_berries",
+        "commons_regenerated_wood",
+        "commons_waste",
+        "commons_waste_berries",
+        "commons_waste_wood",
+        "crate_trades",
+        "crates_crafted",
+        "crates_worn",
+        "default_loss_berries",
+        "default_loss_crates",
+        "default_loss_wood",
+        "defaults",
+        "dividend_paid",
+        "failed_trades",
+        "gift_berries",
+        "gift_default_berries",
+        "gift_defaults",
+        "gift_repayment_berries",
+        "gift_repayments",
+        "gifts",
+        "goods_consumed",
+        "goods_produced",
+        "goods_traded",
+        "living_cost_due",
+        "living_cost_paid",
+        "loan_principal_berries",
+        "loan_principal_crates",
+        "loan_principal_wood",
+        "loans_defaulted",
+        "loans_late",
+        "loans_originated",
+        "loans_repaid",
+        "market_participants",
+        "market_traders",
+        "repayment_berries",
+        "repayment_crates",
+        "repayment_volume",
+        "repayment_wood",
+        "repayments",
+        "shocks",
+        "trade_berries",
+        "trade_crates",
+        "trade_volume",
+        "trade_wood",
+        "transfers",
+        "transfer_volume",
+        "unmet_demand",
+        "unmet_food",
+        "wood_crafted",
+        "wood_decayed",
+        "wood_gathered",
+        "written_off_berries",
+        "written_off_crates",
+        "written_off_wood",
+    }
+)
+
+MEAN_METRICS = frozenset(
+    {
+        "average_trade_price",
+        "barter_price",
+        "berries_commons_pct",
+        "gossip_price",
+        "mean_accept_probability",
+        "mean_give_probability",
+        "mean_health",
+        "mean_price_belief",
+        "mean_reputation",
+        "mean_risk_tolerance",
+        "mean_trust",
+        "ppf_efficiency",
+        "price",
+        "production_modifier",
+        "reputation_brier",
+        "reputation_error",
+        "reputation_noise",
+        "shock_active",
+        "specialisation",
+        "storage_utilization",
+        "trust_observations",
+        "wood_commons_pct",
+    }
+)
+
+NONZERO_MEAN_METRICS = frozenset(
+    {"last_crate_price", "mean_interest_rate"}
+)
+
+
+def _aggregate_metric(history: list[dict[str, Any]], metric: str) -> Any:
+    """Aggregate a metric over a run using its measurement semantics."""
+
+    final = history[-1].get(metric)
+    if metric not in SUMMED_METRICS and metric not in MEAN_METRICS:
+        if metric not in NONZERO_MEAN_METRICS:
+            return final
+    values = []
+    for row in history:
+        value = row.get(metric)
+        if isinstance(value, bool) or not isinstance(
+            value, (int, float, np.integer, np.floating)
+        ):
+            continue
+        values.append(float(value))
+    if not values:
+        return final
+    if metric in SUMMED_METRICS:
+        return float(sum(values))
+    if metric in NONZERO_MEAN_METRICS:
+        nonzero = [value for value in values if value != 0]
+        return float(sum(nonzero) / len(nonzero)) if nonzero else 0.0
+    return float(sum(values) / len(values))
+
 
 def split_top_level(value: str) -> list[str]:
     """Split comma-separated sweep options without breaking JSON lists."""
@@ -107,6 +233,8 @@ def run_experiment(
 
     if iterations < 0:
         raise ValueError("iterations must not be negative")
+    if iterations == 0:
+        raise ValueError("iterations must be at least 1")
     if world_factory is None:
         from worlds.money.world import CONFIG as money_config
         from worlds.money.world import ResourceSimulation
@@ -132,18 +260,62 @@ def run_experiment(
             config["SIMULATION"]["RANDOM_SEED"] = int(seed)
             simulation = world_factory(config)
             simulation.run(iterations=iterations)
-            final = simulation.metrics_history[-1]
             record: dict[str, Any] = {
                 "seed": int(seed),
                 "iterations": iterations,
                 **labels,
             }
             for metric in metric_names:
-                record[metric] = final.get(metric)
+                record[metric] = _aggregate_metric(
+                    simulation.metrics_history, metric
+                )
             recovery = getattr(simulation, "recovery_time", None)
             record["recovery_time"] = recovery() if callable(recovery) else None
             records.append(record)
     return pd.DataFrame(records)
+
+
+# Two-sided 95% Student-t critical values by degrees of freedom. With few
+# seeds the normal 1.96 approximation is far too narrow.
+_T95 = {
+    1: 12.706,
+    2: 4.303,
+    3: 3.182,
+    4: 2.776,
+    5: 2.571,
+    6: 2.447,
+    7: 2.365,
+    8: 2.306,
+    9: 2.262,
+    10: 2.228,
+    11: 2.201,
+    12: 2.179,
+    13: 2.160,
+    14: 2.145,
+    15: 2.131,
+    16: 2.120,
+    17: 2.110,
+    18: 2.101,
+    19: 2.093,
+    20: 2.086,
+    25: 2.060,
+    30: 2.042,
+    40: 2.021,
+    60: 2.000,
+    120: 1.980,
+}
+
+
+def _t_critical(df: int) -> float:
+    if df <= 0:
+        return float("nan")
+    if df in _T95:
+        return _T95[df]
+    keys = sorted(_T95)
+    for key in keys:
+        if key >= df:
+            return _T95[key]
+    return 1.960
 
 
 def summarize_runs(
@@ -185,7 +357,11 @@ def summarize_runs(
                 continue
             mean = float(values.mean())
             std = float(values.std(ddof=1)) if count > 1 else 0.0
-            half_width = 1.96 * std / math.sqrt(count) if count else float("nan")
+            if count > 1:
+                half_width = _t_critical(count - 1) * std / math.sqrt(count)
+            else:
+                # A single seed cannot identify a sampling interval.
+                half_width = float("nan")
             rows.append(
                 {
                     **labels,
@@ -221,8 +397,20 @@ def write_results(
         else output_path.with_name(f"{output_path.stem}_summary.json")
     )
     json_path.parent.mkdir(parents=True, exist_ok=True)
+    records = []
+    for row in summary.to_dict(orient="records"):
+        records.append(
+            {
+                key: (
+                    None
+                    if isinstance(value, float) and math.isnan(value)
+                    else value
+                )
+                for key, value in row.items()
+            }
+        )
     json_path.write_text(
-        json.dumps(summary.to_dict(orient="records"), indent=2),
+        json.dumps(records, indent=2),
         encoding="utf-8",
     )
     return output_path, summary_csv, json_path

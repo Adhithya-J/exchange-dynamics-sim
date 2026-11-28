@@ -127,10 +127,13 @@ rules.
 
 Set `SHOCKS.ENABLED: true` and list events in `SHOCKS.SCHEDULE` to apply
 `scarcity` (reduced production) or `information` (noisy reputation) shocks for
-a fixed `duration`. Living agents adapt their risk tolerance when demand is
-unmet. Metrics include `shock_active`, `production_modifier`,
-`reputation_noise`, `mean_risk_tolerance`, and `alive`; `recovery_time()`
-reports how long unmet demand took to return to its pre-shock level.
+a fixed `duration`. While an active scarcity shock is running and the market is
+enabled, living agents adapt their risk tolerance to unmet or met demand; an
+empty schedule or an information-only shock does not adapt. Metrics include
+`shock_active`, `production_modifier`, `reputation_noise`,
+`mean_risk_tolerance`, and `alive`; `recovery_time()` reports how long unmet
+demand took to return to its pre-shock level, and returns `None` for information
+shocks.
 `tests/test_shocks.py` covers the rules.
 
 ## Trust and reputation (optional)
@@ -149,7 +152,9 @@ prior; expected net payoff is `risk-adjusted belief * REPAY_FRACTION - 1`,
 turned into a probability with a fixed `DECISION_TEMPERATURE`, then blended with
 the legacy memory weight. Giving and accepting keep their affordability scores,
 so trust is counted once instead of being multiplied through selection, giving,
-and acceptance. `decision_log` records each attempt; `tests/test_trust.py` and
+and acceptance. When reciprocity is enabled, existing debt reduces acceptance
+because accepting creates another obligation. `decision_log` records each
+attempt; `tests/test_trust.py` and
 `tests/test_decisions.py` cover the update and decision rules.
 
 ## Experiments

@@ -16,6 +16,7 @@ from experiments import (
     write_results,
 )
 from main import CONFIG
+from utils.experiments import _aggregate_metric
 
 
 def make_config() -> dict:
@@ -113,6 +114,26 @@ class TestRunExperiment:
                 base_config=make_config(),
             )
 
+    def test_zero_iterations_are_rejected(self):
+        with pytest.raises(ValueError, match="at least 1"):
+            run_experiment(
+                iterations=0,
+                seeds=[1],
+                metrics=["gini"],
+                base_config=make_config(),
+            )
+
+    def test_flow_metrics_are_summed_across_the_run(self):
+        history = [
+            {"loans_originated": 1, "alive": 3, "barter_price": 5.0},
+            {"loans_originated": 2, "alive": 2, "barter_price": 7.0},
+            {"loans_originated": 0, "alive": 2, "barter_price": 9.0},
+        ]
+
+        assert _aggregate_metric(history, "loans_originated") == 3.0
+        assert _aggregate_metric(history, "alive") == 2
+        assert _aggregate_metric(history, "barter_price") == 7.0
+
 
 class TestSummaries:
     def test_summary_reports_confidence_interval(self):
@@ -144,6 +165,23 @@ class TestSummaries:
 
         assert set(summary["SIMULATION.AGENTS"]) == {"2", "3"}
         assert set(summary["n"]) == {2}
+
+    def test_single_seed_interval_is_undefined(self):
+        runs = pd.DataFrame({"seed": [1], "gini": [0.2]})
+
+        summary = summarize_runs(runs, [], ["gini"])
+
+        assert pd.isna(summary.iloc[0]["ci_low"])
+        assert pd.isna(summary.iloc[0]["ci_high"])
+
+    def test_small_seed_interval_uses_student_t(self):
+        runs = pd.DataFrame({"seed": [1, 2], "gini": [0.1, 0.2]})
+
+        summary = summarize_runs(runs, [], ["gini"])
+        row = summary.iloc[0]
+        normal_half_width = 1.96 * row["std"] / 2**0.5
+
+        assert (row["ci_high"] - row["mean"]) > normal_half_width
 
     def test_empty_runs_return_an_empty_summary(self):
         empty = pd.DataFrame(columns=["seed", "gini"])

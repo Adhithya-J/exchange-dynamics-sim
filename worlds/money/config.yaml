@@ -87,7 +87,8 @@ SHOCKS:
   # Events keyed by 1-based iteration; type is scarcity or information.
   # Example: [{iteration: 100, type: scarcity, magnitude: 0.5, duration: 10}]
   SCHEDULE: []
-  # Risk-tolerance change per iteration when demand is unmet.
+  # Risk-tolerance change per iteration while a scarcity shock is active and
+  # the market is enabled. An empty schedule does not adapt.
   ADAPTATION_RATE: 0.05
 
 # Direct transfers between agents. Off by default so a run can isolate the
@@ -105,7 +106,7 @@ SOCIAL:
   REPAY_PROBABILITY_RANGE: [0.2, 0.8]
   # Iterations between a gift and its attempted repayment.
   REPAY_DELAY: 3
-  # Fraction of the gift returned per attempt.
+  # Fraction of the gift returned per attempt; must be in [0, 1].
   REPAY_FRACTION: 1.0
   # Iterations before an unpaid remainder is retried.
   REPAY_RETRY_DELAY: 1

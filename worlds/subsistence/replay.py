@@ -63,12 +63,14 @@ EVENT_TYPES = {
     "loan",
     "repay",
     "default",
+    "write_off",
     "late",
     "shock",
     "spoil",
     "death",
 }
-TRADE_FIELDS = ("berries", "wood", "price")
+TRADE_INT_FIELDS = ("berries", "wood")
+TRADE_FLOAT_FIELDS = ("price",)
 
 
 def export_replay(
@@ -149,8 +151,8 @@ def build_replay(simulation: SubsistenceWorld) -> dict[str, Any]:
                         "craft_progress": float(
                             rows[agent_id].get("craft_progress", 0.0)
                         ),
-                        "price_belief": int(
-                            rows[agent_id].get("price_belief", 5)
+                        "price_belief": float(
+                            rows[agent_id].get("price_belief", 5.0)
                         ),
                         "trust": float(rows[agent_id].get("trust", 0.0)),
                         "debt_wood": int(rows[agent_id].get("debt_wood", 0)),
@@ -282,11 +284,8 @@ def build_replay(simulation: SubsistenceWorld) -> dict[str, Any]:
                 ),
             },
             "beliefs": {
-                "min_price": int(simulation.trade_settings["min_price"]),
-                "max_price": int(simulation.trade_settings["max_price"]),
-                "max_crate_price": int(
-                    simulation.trade_settings["max_crate_price"]
-                ),
+                "fractional": True,
+                "initial_price": float(simulation.initial_price),
             },
             "credit": jsonable(dict(getattr(simulation, "credit_settings", {}))),
             "trust": jsonable(dict(getattr(simulation, "trust_settings", {}))),
@@ -316,7 +315,7 @@ def build_replay(simulation: SubsistenceWorld) -> dict[str, Any]:
                 "berries": int(initial_berries),
                 "wood": int(initial_wood),
             },
-            "initial_price": int(simulation.initial_price),
+            "initial_price": float(simulation.initial_price),
             "config": config,
         },
         "agents": _agent_metadata(simulation, history_by_tick[0]),
@@ -364,8 +363,8 @@ def _agent_metadata(
                 "max_berries_per_day": float(agent.max_berries_per_day),
                 "max_wood_per_day": float(agent.max_wood_per_day),
                 "initial_health": int(first["health"]),
-                "price_belief": int(agent.price_belief),
-                "initial_crates": int(agent.crate_count),
+                "price_belief": float(first.get("price_belief", 5.0)),
+                "initial_crates": int(first.get("crates", 0)),
                 "craft_minutes": float(simulation._craft_minutes(agent)),
                 "storage_wood_per_container": int(
                     agent.storage_wood_per_container
@@ -387,7 +386,7 @@ def _initial_metrics(
     health = [int(row["health"]) for row in first_rows.values()]
     skills_b = [float(row["berry_skill"]) for row in first_rows.values()]
     skills_w = [float(row["wood_skill"]) for row in first_rows.values()]
-    beliefs = [int(row.get("price_belief", 5)) for row in first_rows.values()]
+    beliefs = [float(row.get("price_belief", 5.0)) for row in first_rows.values()]
     crates = [int(row.get("crates", 0)) for row in first_rows.values()]
     durabilities = [
         float(row.get("crate_durability", 0.0))
@@ -397,6 +396,15 @@ def _initial_metrics(
     total_berries = sum(berries)
     total_wood = sum(wood)
     total_crates = sum(crates)
+    storage_capacity = int(
+        sum(int(row["storage_capacity"]) for row in first_rows.values())
+    )
+    storage_used = int(
+        sum(
+            min(int(row["berries"]), int(row["storage_capacity"]))
+            for row in first_rows.values()
+        )
+    )
     return {
         "iteration": 0,
         "alive": len(first_rows),
@@ -422,10 +430,10 @@ def _initial_metrics(
         "total_wood_all": total_wood + int(simulation.initial_commons_wood),
         "gini_berries": MetricsCalculator.calculate_gini(berries) if berries else 0.0,
         "gini_wood": MetricsCalculator.calculate_gini(wood) if wood else 0.0,
-        "barter_price": int(simulation.initial_price),
-        "last_crate_price": 0,
-        "average_trade_price": int(simulation.initial_price),
-        "gossip_price": int(simulation.initial_price),
+        "barter_price": float(simulation.initial_price),
+        "last_crate_price": 0.0,
+        "average_trade_price": float(simulation.initial_price),
+        "gossip_price": float(simulation.initial_price),
         "mean_price_belief": (
             float(np.mean(beliefs)) if beliefs else 0.0
         ),
@@ -447,11 +455,11 @@ def _initial_metrics(
         "commons_regenerated_wood": 0,
         "commons_waste_berries": 0,
         "commons_waste_wood": 0,
-        "storage_capacity": int(
-            sum(int(row["storage_capacity"]) for row in first_rows.values())
+        "storage_capacity": storage_capacity,
+        "storage_used": storage_used,
+        "storage_utilization": (
+            storage_used / storage_capacity if storage_capacity > 0 else 0.0
         ),
-        "storage_used": 0,
-        "storage_utilization": 0.0,
         "trade_berries": 0,
         "trade_wood": 0,
         "crate_trades": 0,
@@ -558,7 +566,7 @@ def _build_events(
                 "wood": int(entry.get("wood", 0)),
                 "crates": int(entry.get("crates", 0)),
                 "quantity": int(entry.get("quantity", 0)),
-                "price": int(entry["price"]),
+                "price": float(entry["price"]),
                 "amount": int(entry["berries"]),
             }
         )
@@ -579,6 +587,9 @@ def _build_events(
             "interest_rate": float(entry.get("interest_rate", 0.0)),
             "due_iteration": int(entry.get("due_iteration") or 0),
             "collateral_crates": int(entry.get("collateral_crates", 0)),
+            "collateral_durability": float(
+                entry.get("collateral_durability", 0.0)
+            ),
         }
         if event == "origination":
             base.update(
@@ -601,11 +612,23 @@ def _build_events(
             base.update(
                 {
                     "type": "default",
-                    "recovered": int(entry.get("recovered", 0)),
+                    "recovered": int(round(entry.get("recovered", 0))),
                     "loss": int(entry.get("loss", 0)),
                     "collateral_seized": int(
                         entry.get("collateral_seized", 0)
                     ),
+                    "collateral_excess": float(
+                        entry.get("collateral_excess", 0.0)
+                    ),
+                    "reason": str(entry.get("reason", "")),
+                }
+            )
+        elif event == "write_off":
+            base.update(
+                {
+                    "type": "write_off",
+                    "recovered": int(round(entry.get("recovered", 0))),
+                    "loss": int(entry.get("loss", 0)),
                     "reason": str(entry.get("reason", "")),
                 }
             )
@@ -774,7 +797,6 @@ def validate_replay(replay: dict[str, Any]) -> None:
                 )
             for field in (
                 "crates",
-                "price_belief",
                 "planned_crates",
                 "debt_wood",
                 "debt_berries",
@@ -797,6 +819,7 @@ def validate_replay(replay: dict[str, Any]) -> None:
                 "planned_wood",
                 "craft_progress",
                 "crate_durability",
+                "price_belief",
                 "trust",
             ):
                 if field in state:
@@ -858,13 +881,23 @@ def validate_replay(replay: dict[str, Any]) -> None:
                 event["crates"], f"event {event_id} crates", minimum=0
             )
         if event["type"] == "trade":
-            for field in TRADE_FIELDS:
+            for field in TRADE_INT_FIELDS:
                 required_int(
                     event.get(field), f"event {event_id} {field}", minimum=0
                 )
-            if event.get("price", 0) < 1:
+            for field in TRADE_FLOAT_FIELDS:
+                required_float(
+                    event.get(field), f"event {event_id} {field}"
+                )
+            if event.get("price", 0) <= 0:
                 raise ValueError(f"Event {event_id} price must be positive")
-        if event["type"] in {"loan", "repay", "default", "late"}:
+        if event["type"] in {
+            "loan",
+            "repay",
+            "default",
+            "write_off",
+            "late",
+        }:
             if event.get("resource") not in {"wood", "berries", "crates"}:
                 raise ValueError(
                     f"Event {event_id} has an invalid credit resource"
@@ -891,7 +924,7 @@ def validate_replay(replay: dict[str, Any]) -> None:
                     f"event {event_id} repayment",
                     minimum=0,
                 )
-            if event["type"] == "default":
+            if event["type"] in {"default", "write_off"}:
                 for field in ("recovered", "loss", "collateral_seized"):
                     if event.get(field) is not None:
                         required_int(
@@ -899,6 +932,16 @@ def validate_replay(replay: dict[str, Any]) -> None:
                             f"event {event_id} {field}",
                             minimum=0,
                         )
+                if event.get("collateral_excess") is not None:
+                    required_float(
+                        event["collateral_excess"],
+                        f"event {event_id} collateral_excess",
+                    )
+            if event.get("collateral_durability") is not None:
+                required_float(
+                    event["collateral_durability"],
+                    f"event {event_id} collateral_durability",
+                )
         if event["type"] == "shock":
             required_int(
                 event.get("duration"), f"event {event_id} duration", minimum=1

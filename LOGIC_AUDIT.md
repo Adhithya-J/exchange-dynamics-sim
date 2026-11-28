@@ -1,5 +1,9 @@
 # Logic, Economic, Visual, and Game-Theory Audit
 
+> **Newer audit:** the current-model review and fixes are in
+> [`LOGIC_AUDIT_2026-11-28.md`](LOGIC_AUDIT_2026-11-28.md). This document is kept
+> as the historical audit of the original money world.
+
 > **Status:** Sections 1 (1.1–1.8) and 2 (2.1–2.5) have been fixed and are
 > covered by the test suite. Money is now conserved through a commons fund, and
 > the commons is a real goods stock with extraction, so the old “money sink”

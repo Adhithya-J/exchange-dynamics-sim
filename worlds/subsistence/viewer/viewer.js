@@ -498,7 +498,7 @@
       ctx.font = "9px 'IBM Plex Mono', monospace";
       ctx.textAlign = "center";
       ctx.fillText(
-        "1 wood = " + formatNumber(metrics.price, 0) + " berries",
+        "1 wood = " + formatNumber(metrics.price, 2) + " berries",
         x,
         y - 14
       );
@@ -1064,7 +1064,7 @@
       document.getElementById("statIteration").textContent = state.tick;
       document.getElementById("statAlive").textContent = metrics.alive;
       document.getElementById("statHealth").textContent = formatNumber(metrics.meanHealth, 1);
-      document.getElementById("statPrice").textContent = formatNumber(metrics.price, 0);
+      document.getElementById("statPrice").textContent = formatNumber(metrics.price, 2);
       var commonsRatio = meta.initialCommons.berries > 0
         ? metrics.commonsBerries / meta.initialCommons.berries
         : 0;
@@ -1084,7 +1084,7 @@
 
     function describeTick(metrics) {
       if (state.tick === 0) {
-        return "A village with nothing but its skills.";
+        return "A village with a starter kit of berries, one crate, and its skills.";
       }
       if (metrics.alive === 0) {
         return "The village is empty. " + formatNumber(metrics.totalBerries, 0) +
@@ -1095,12 +1095,12 @@
       if (metrics.crateTrades > 0.05) {
         parts.push(
           formatNumber(metrics.crateTrades, 0) + " crates traded at " +
-          formatNumber(metrics.lastCratePrice, 0) + " berries each"
+          formatNumber(metrics.lastCratePrice, 2) + " berries each"
         );
       } else if (metrics.tradeBerries > 0.05) {
         parts.push(
           formatNumber(metrics.tradeBerries, 0) + " berries changed hands at " +
-          formatNumber(metrics.price, 0) + " berries per wood"
+          formatNumber(metrics.price, 2) + " berries per wood"
         );
       }
       if (metrics.spoiled > 0.05) {
@@ -1202,7 +1202,7 @@
         meter("Craft", craftFraction, formatPercent(craftFraction), "craft") +
         "<div class=\"detail-grid\">" +
         detail("Price belief", formatNumber(belief, 0) + " berries / wood") +
-        detail("Market price", formatNumber(metrics.price, 0) + " berries / wood") +
+        detail("Market price", formatNumber(metrics.price, 2) + " berries / wood") +
         detail("Opportunity cost", opportunity == null ? "-" : formatNumber(opportunity, 2) + " berries / wood") +
         detail("Effective max", formatNumber(potentialB, 1) + " b · " + formatNumber(potentialW, 1) + " w") +
         detail("Harvest density", formatPercent(metrics.commonsBerriesPct) + " b · " + formatPercent(metrics.commonsWoodPct) + " w") +
@@ -1257,7 +1257,7 @@
               formatNumber(isCrate ? event.crates : event.wood, 0) +
               (isCrate ? " crate" : " wood") + " with " +
               agents[event.target].label,
-            sub: formatNumber(event.price, 0) +
+            sub: formatNumber(event.price, 2) +
               (isCrate ? " berries per crate" : " berries per wood"),
             select: event.actor
           });
@@ -1319,7 +1319,24 @@
                 event.resource === "crates" ? "crate" : "berries") +
               (event.collateralSeized > 0
                 ? " · " + formatNumber(event.collateralSeized, 0) + " crate seized"
+                : "") +
+              (event.collateralExcess > 0.0001
+                ? " · " + formatNumber(event.collateralExcess, 1) +
+                  " collateral excess"
                 : ""),
+            select: event.actor
+          });
+        } else if (event.type === "write_off") {
+          rows.push({
+            order: 2,
+            icon: "quiet",
+            title: "A claim on " + agents[event.actor].label + " was written off",
+            sub: formatNumber(event.loss, 0) + " " +
+              (event.resource === "wood" ? "wood" :
+                event.resource === "crates" ? "crate" : "berries") +
+              " · " + (event.reason === "creditor_death"
+                ? "creditor died"
+                : "no surviving holder"),
             select: event.actor
           });
         } else if (event.type === "late") {
@@ -1644,8 +1661,8 @@
         ? "Each line is one villager's density-adjusted frontier. Filled dots are actual gathering; diamonds are holdings after barter." + densityNote + scaleNote
         : chosen.label + ": opportunity cost " +
           (opportunity == null ? "—" : formatNumber(opportunity, 2) + " berries per wood") +
-          ", market price " + formatNumber(tickMetrics.price, 0) +
-          ", belief " + formatNumber(chosenState.priceBelief, 0) +
+          ", market price " + formatNumber(tickMetrics.price, 2) +
+          ", belief " + formatNumber(chosenState.priceBelief, 2) +
           ". " + ratioNote + densityNote + scaleNote;
 
       var legendHtml =

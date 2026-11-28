@@ -49,6 +49,7 @@ def process_berry_gifts(
     settings: GiftSettings,
     random: Random,
     transfer: Callable[[BerryAgent, BerryAgent, int], int] | None = None,
+    receiver_capacity: Callable[[BerryAgent], int] | None = None,
 ) -> list[dict[str, Any]]:
     """Move whole berries from agents with a surplus to the neediest agent.
 
@@ -76,10 +77,16 @@ def process_berry_gifts(
         if surplus < 1:
             continue
         receivers = [agent for agent in living if agent.id != giver.id]
+        if receiver_capacity is not None:
+            receivers = [
+                agent for agent in receivers if receiver_capacity(agent) > 0
+            ]
         if not receivers:
             continue
         receiver = min(receivers, key=lambda agent: (agent.health, agent.berries))
         amount = min(random.randint(*settings.amount_range), surplus)
+        if receiver_capacity is not None:
+            amount = min(amount, int(receiver_capacity(receiver)))
         if amount < 1:
             continue
         if transfer is not None:

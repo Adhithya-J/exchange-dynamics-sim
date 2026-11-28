@@ -26,7 +26,7 @@ DEFAULT_CREDIT_SETTINGS: dict[str, Any] = {
     "RISK_PREMIUM": 0.75,
     "MIN_INTEREST": 0.02,
     "MAX_INTEREST": 0.75,
-    "COLLATERAL_DISCOUNT": 0.50,
+    "COLLATERAL_DISCOUNT": 1.00,
 }
 
 CREDIT_MODES = ("reciprocal", "market")
@@ -136,14 +136,6 @@ class CreditLayer(FeatureLayer):
         living = [agent for agent in world.agents if agent.is_alive]
         if len(living) < 2:
             return
-        borrowers = []
-        for agent in living:
-            demand = self._demand(agent)
-            if demand:
-                borrowers.append((agent, demand))
-        if not borrowers:
-            return
-
         lenders = []
         for agent in living:
             supply = self._supply(agent)
@@ -152,8 +144,15 @@ class CreditLayer(FeatureLayer):
         if not lenders:
             return
 
+        # Demand is recomputed at each borrower's turn. An agent that acted as
+        # a lender earlier in the same tick may have lent away goods it now
+        # needs; stale demand would understate its shortfall.
+        borrowers = list(living)
         world.random.shuffle(borrowers)
-        for borrower, demand in borrowers:
+        for borrower in borrowers:
+            demand = self._demand(borrower)
+            if not demand:
+                continue
             if self._active_count(borrower.id, "debtor") >= int(
                 self.settings["max_loans_per_borrower"]
             ):
@@ -204,6 +203,7 @@ class CreditLayer(FeatureLayer):
                         (repayment / principal) - 1.0 if principal > 0 else 0.0
                     ),
                     collateral_crates=offer["collateral"],
+                    collateral_durability=offer["collateral_durability"],
                 )
                 lender.loans_given += 1
                 borrower.loans_taken += 1
@@ -217,6 +217,21 @@ class CreditLayer(FeatureLayer):
         food = int(world.agent_settings["food_per_iteration"])
         storage = world.storage_settings
         requests: list[tuple[str, int]] = []
+
+        # Food is the first claim on credit. A starving villager must not
+        # borrow crate material or wood before it borrows today's meal.
+        if agent.berries < food:
+            capacity = self._repayment_capacity(agent, "berries")
+            outstanding = world.obligations.outstanding(
+                agent.id, "berries", kind="loan"
+            )
+            principal = min(
+                food - agent.berries,
+                int(self.settings["max_berry_principal"]),
+                max(0, capacity - outstanding),
+            )
+            if principal >= 1:
+                requests.append(("berries", principal))
 
         if (
             world.features.get("STORAGE")
@@ -248,59 +263,64 @@ class CreditLayer(FeatureLayer):
             )
             if principal >= 1:
                 requests.append(("wood", principal))
-
-        if agent.berries < food:
-            capacity = self._repayment_capacity(agent, "berries")
-            outstanding = world.obligations.outstanding(
-                agent.id, "berries", kind="loan"
-            )
-            principal = min(
-                food - agent.berries,
-                int(self.settings["max_berry_principal"]),
-                max(0, capacity - outstanding),
-            )
-            if principal >= 1:
-                requests.append(("berries", principal))
         return requests
 
     def _repayment_capacity(self, agent: Any, good: str) -> int:
         world = self.world
+        term = int(self.settings["term_days"])
+        fraction = float(self.settings["capacity_fraction"])
+        if good == "crates":
+            wood_per_crate = max(
+                1, int(world.storage_settings["wood_per_container"])
+            )
+            wood_rate = world.effective_max_wood_per_day(
+                agent, world._current_wood_density
+            )
+            craft_minutes = world._craft_minutes(agent)
+            craft_days = (
+                craft_minutes / agent.time_per_iteration
+                if math.isfinite(craft_minutes)
+                and craft_minutes > 0
+                and agent.time_per_iteration > 0
+                else float("inf")
+            )
+            wood_limited = (
+                wood_rate * term / wood_per_crate
+                if math.isfinite(wood_rate) and wood_rate > 0
+                else 0.0
+            )
+            craft_limited = term / craft_days if craft_days > 0 else 0.0
+            capacity = int(
+                math.floor(min(wood_limited, craft_limited) * fraction)
+            )
+            return max(0, capacity)
         if good == "wood":
             rate = world.effective_max_wood_per_day(
                 agent, world._current_wood_density
             )
-        elif good == "crates":
-            rate = world.effective_max_wood_per_day(
-                agent, world._current_wood_density
-            )
-            wood_per_crate = max(
-                1, int(world.storage_settings["wood_per_container"])
-            )
-            rate = rate / wood_per_crate
         else:
-            rate = world.effective_max_berries_per_day(
+            food = float(world.agent_settings["food_per_iteration"])
+            berry_rate = world.effective_max_berries_per_day(
                 agent, world._current_berries_density
             )
+            wood_rate = world.effective_max_wood_per_day(
+                agent, world._current_wood_density
+            )
+            price = max(float(agent.price_belief), float(1e-9))
+            # A borrower can service a berry loan from berry production or by
+            # selling wood. Capacity is net of the borrower's own food need.
+            rate = max(0.0, berry_rate + wood_rate * price - food)
         if not math.isfinite(rate) or rate <= 0:
             return 0
-        capacity = int(
-            math.floor(
-                rate
-                * int(self.settings["term_days"])
-                * float(self.settings["capacity_fraction"])
-            )
-        )
-        if good == "crates":
-            return max(1, capacity)
-        return capacity
+        return int(math.floor(rate * term * fraction))
 
     def _supply(self, agent: Any) -> dict[str, int]:
         world = self.world
         food = int(world.agent_settings["food_per_iteration"])
         supply: dict[str, int] = {}
-        crates = int(agent.crate_count) - int(
-            self.settings["lender_crate_reserve"]
-        )
+        pledged = int(world.obligations.pledged_crates(agent.id))
+        reserve = int(self.settings["lender_crate_reserve"])
+        crates = int(agent.crate_count) - max(reserve, pledged)
         if crates > 0:
             supply["crates"] = crates
         wood = int(agent.wood) - int(self.settings["lender_wood_buffer"])
@@ -330,15 +350,20 @@ class CreditLayer(FeatureLayer):
             borrower.crate_count
             - world.obligations.pledged_crates(borrower.id),
         )
-        if mode == "reciprocal":
-            if borrower.trust < float(self.settings["min_trust"]):
-                if good == "crates":
-                    # The lent crate itself is the security.
-                    pass
-                elif available_collateral <= 0 or borrower.health < 2:
-                    return []
-        elif borrower.trust < float(self.settings["min_market_trust"]):
+        trust_floor = (
+            float(self.settings["min_trust"])
+            if mode == "reciprocal"
+            else float(self.settings["min_market_trust"])
+        )
+        needs_collateral = borrower.trust < trust_floor
+        if needs_collateral and good != "crates" and available_collateral <= 0:
+            # A low-trust borrower needs security. A low-health borrower with
+            # security is not refused: the collateral protects the lender.
             return []
+        if not needs_collateral and mode == "market" and good == "crates":
+            # The lent crate itself secures a crate loan even when trust is
+            # already high.
+            needs_collateral = True
 
         for entry in lenders:
             lender = entry["agent"]
@@ -356,19 +381,20 @@ class CreditLayer(FeatureLayer):
                 continue
             if good == "crates":
                 collateral = int(principal)
-            else:
-                collateral = (
-                    1 if available_collateral > 0 and principal >= 2 else 0
+                durability = (
+                    min(lender.crates) if lender.crates else 1.0
                 )
-            if (
-                mode == "reciprocal"
-                and good != "crates"
-                and borrower.trust < float(self.settings["min_trust"])
-                and collateral <= 0
-            ):
-                continue
+            else:
+                collateral = 1 if needs_collateral and available_collateral > 0 else 0
+                pledged = int(
+                    world.obligations.pledged_crates(borrower.id)
+                )
+                unpledged = sorted(borrower.crates, reverse=True)[pledged:]
+                durability = max(unpledged) if unpledged else 0.0
             fixed = mode == "reciprocal"
-            interest = self._interest(borrower, good, principal, collateral)
+            interest = self._interest(
+                borrower, good, principal, collateral, durability
+            )
             repayment = self._repayment(
                 principal, interest, fixed=fixed
             )
@@ -380,6 +406,7 @@ class CreditLayer(FeatureLayer):
                     "interest": interest,
                     "repayment": repayment,
                     "collateral": collateral,
+                    "collateral_durability": float(durability),
                     "fixed": fixed,
                 }
             )
@@ -410,12 +437,9 @@ class CreditLayer(FeatureLayer):
         good: str,
         principal: int,
         collateral: int,
+        durability: float = 1.0,
     ) -> float:
-        # A crate-capacity loan is secured by the lent crate itself, so it has
-        # no goods interest in either mode. Whole-crate interest would round a
-        # one-crate principal to a two-crate repayment (100%), which is not a
-        # useful risk price. Market pricing applies to wood and berry loans.
-        if good == "crates" or self.settings["mode"] == "reciprocal":
+        if self.settings["mode"] == "reciprocal":
             return 0.0
         probability = self._risk_probability(borrower)
         break_even = (1.0 - probability) / max(probability, 1e-6)
@@ -423,10 +447,15 @@ class CreditLayer(FeatureLayer):
             float(self.settings["risk_premium"]) * break_even
         )
         if collateral > 0 and principal > 0:
-            coverage = min(1.0, self._crate_value(good) / principal)
-            interest *= 1.0 - (
-                float(self.settings["collateral_discount"]) * coverage
+            value = self._crate_value(good, borrower, durability)
+            coverage = min(
+                1.0,
+                (float(self.settings["collateral_discount"]) * value)
+                / principal,
             )
+            interest *= max(0.0, 1.0 - coverage)
+            if coverage >= 1.0:
+                return 0.0
         return min(
             float(self.settings["max_interest"]),
             max(float(self.settings["min_interest"]), interest),
@@ -442,13 +471,15 @@ class CreditLayer(FeatureLayer):
             int(math.ceil(principal * (1.0 + max(0.0, interest)))),
         )
 
-    def _crate_value(self, good: str) -> int:
-        storage = self.world.storage_settings
+    def _crate_value(
+        self, good: str, agent: Any | None = None, durability: float = 1.0
+    ) -> float:
+        world = self.world
         if good == "crates":
-            return 1
+            return max(0.0, min(1.0, float(durability)))
         if good == "wood":
-            return int(storage["wood_per_container"])
-        return int(storage["berries_per_container"])
+            return world.crate_wood_value(agent, durability=durability)
+        return world.crate_berry_value(agent, durability=durability)
 
     # ------------------------------------------------------------------
     # Metrics
@@ -470,6 +501,10 @@ class CreditLayer(FeatureLayer):
             "default_loss_crates": 0,
             "loans_late": 0,
             "collateral_seized": 0,
+            "collateral_excess_value": 0.0,
+            "written_off_wood": 0,
+            "written_off_berries": 0,
+            "written_off_crates": 0,
             "loans_active": 0,
             "credit_outstanding_wood": 0,
             "credit_outstanding_berries": 0,
@@ -484,7 +519,15 @@ class CreditLayer(FeatureLayer):
         ]
         originated = [event for event in events if event["event"] == "origination"]
         repaid = [event for event in events if event["event"] == "repayment"]
-        defaulted = [event for event in events if event["event"] == "default"]
+        defaulted = [
+            event
+            for event in events
+            if event["event"] == "default"
+            and event.get("reason") != "creditor_death"
+        ]
+        written_off = [
+            event for event in events if event["event"] == "write_off"
+        ]
         late = [event for event in events if event["event"] == "late"]
         active = self.world.obligations.loans()
         outstanding_wood = sum(
@@ -561,6 +604,25 @@ class CreditLayer(FeatureLayer):
             "collateral_seized": sum(
                 int(event.get("collateral_seized", 0))
                 for event in defaulted
+            ),
+            "collateral_excess_value": sum(
+                float(event.get("collateral_excess", 0.0))
+                for event in defaulted
+            ),
+            "written_off_wood": sum(
+                int(event.get("loss", 0))
+                for event in written_off
+                if event["good"] == "wood"
+            ),
+            "written_off_berries": sum(
+                int(event.get("loss", 0))
+                for event in written_off
+                if event["good"] == "berries"
+            ),
+            "written_off_crates": sum(
+                int(event.get("loss", 0))
+                for event in written_off
+                if event["good"] == "crates"
             ),
             "loans_active": len(active),
             "credit_outstanding_wood": int(outstanding_wood),

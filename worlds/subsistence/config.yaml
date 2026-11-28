@@ -1,8 +1,9 @@
 # Goods-only subsistence world.
 #
-# Agents start with nothing, gather whole berries and wood from a shared
-# commons, eat, store food, and optionally barter. There is no money and no
-# unit of account: the trade price is only a whole-berry-per-wood ratio.
+# Agents start with a starter kit (ten berries and one finished crate), gather
+# whole berries and wood from a shared commons, eat, store food, and optionally
+# barter. There is no money and no unit of account: the trade price is a
+# fractional berries-per-wood ratio, while the goods exchanged stay whole.
 
 SIMULATION:
   AGENTS: 10
@@ -153,7 +154,8 @@ CREDIT:
   LENDER_CRATE_RESERVE: 1
   # Reciprocal loans require this trust level unless a crate is pledged.
   MIN_TRUST: 0.40
-  # Market loans require at least this much trust; risk is priced above it.
+  # Market loans require at least this much trust unless a crate is pledged;
+  # above the threshold default risk is priced into the rate.
   MIN_MARKET_TRUST: 0.30
   # Concurrent loan limits per side.
   MAX_LOANS_PER_BORROWER: 2
@@ -166,24 +168,23 @@ CREDIT:
   RISK_PREMIUM: 0.75
   MIN_INTEREST: 0.02
   MAX_INTEREST: 0.75
-  # Pledged crates reduce the risk premium by at most this fraction.
-  COLLATERAL_DISCOUNT: 0.50
+  # Fraction of a pledged crate's durability-adjusted value that counts as
+  # collateral coverage. At 1.0 a fully covering new crate makes the loan
+  # risk-free; a worn crate covers only its remaining durability.
+  COLLATERAL_DISCOUNT: 1.00
 
 TRADE:
   # Fallback baseline when agents have no usable opportunity costs.
-  INITIAL_PRICE: 5
-  # Individual price beliefs are whole berries per wood, clamped here.
-  MIN_PRICE: 1
-  MAX_PRICE: 20
+  INITIAL_PRICE: 5.0
   # Random +/- offset applied to the village baseline at initialization.
-  BELIEF_NOISE: 1
+  BELIEF_NOISE: 1.0
   # How far an observer moves toward the latest market gossip, in berries.
-  GOSSIP_STEP: 1
-  # Beliefs are allowed to discover inside this band around the initial
-  # village baseline, while remaining inside [MIN_PRICE, MAX_PRICE].
-  BELIEF_BAND: 3
-  # Safe upper bound for a whole crate price in berries.
-  MAX_CRATE_PRICE: 400
+  GOSSIP_STEP: 1.0
+  # Prices and price beliefs are fractional berries per wood (or berries per
+  # crate). Goods themselves stay whole, so a trade's total berry payment is
+  # rounded to a whole number and the residual is an indivisibility cost.
+  # There is deliberately no MIN_PRICE, MAX_PRICE, or belief band: the market
+  # decides the level and the level is allowed to move.
 
 GIFTING:
   PROBABILITY: 0.25
@@ -210,6 +211,9 @@ RECIPROCITY:
   MIN_GIFT: 1
   # Cap outstanding soft-gift berries per receiver.
   MAX_OUTSTANDING: 6
+  # A soft obligation that remains unpaid this many days is written off and
+  # lowers the debtor's trust. Set 0 to keep soft claims open forever.
+  DEFAULT_AFTER_DAYS: 30
 
 # Temporary commons shocks. A shock reduces regeneration for a few iterations.
 SHOCKS:

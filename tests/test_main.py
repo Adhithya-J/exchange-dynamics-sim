@@ -344,26 +344,23 @@ class TestResourceSimulation:
     def test_transfer_amount_bounds_invalid_sequence_rejected(self):
         config = make_config()
         config["SIMULATION"]["TRANSFER_AMOUNT_RANGE"] = [1.0]
-        simulation = ResourceSimulation(config)
 
         with pytest.raises(ValueError, match="sequence of two values"):
-            simulation._transfer_amount_bounds()
+            ResourceSimulation(config)
 
     def test_transfer_amount_bounds_invalid_ordering_rejected(self):
         config = make_config()
         config["SIMULATION"]["TRANSFER_AMOUNT_RANGE"] = [10.0, 2.0]
-        simulation = ResourceSimulation(config)
 
         with pytest.raises(ValueError, match="ascending order"):
-            simulation._transfer_amount_bounds()
+            ResourceSimulation(config)
 
     def test_transfer_amount_bounds_non_positive_rejected(self):
         config = make_config()
         config["SIMULATION"]["TRANSFER_AMOUNT_RANGE"] = [0.0, 5.0]
-        simulation = ResourceSimulation(config)
 
         with pytest.raises(ValueError, match="positive values"):
-            simulation._transfer_amount_bounds()
+            ResourceSimulation(config)
 
 
 def test_gifting_is_off_by_default_in_the_money_world():

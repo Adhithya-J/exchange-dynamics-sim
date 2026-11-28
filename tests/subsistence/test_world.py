@@ -167,7 +167,6 @@ def test_labour_allocation_follows_comparative_advantage():
     wood_specialist.berries = 4
     # The wood specialist needs something to sell before it can specialise.
     wood_specialist.wood = 1
-    world.trade_price = 4
 
     world._allocate_labour(berry_specialist)
     world._allocate_labour(wood_specialist)
@@ -309,7 +308,6 @@ def test_berry_pickup_is_capped_and_leftover_goes_to_wood():
     agent.wood_skill = 1.0
     agent.berries = 20
     agent.wood = 0
-    world.trade_price = 5
     world._current_berries_density = 1.0
     world._current_wood_density = 1.0
 
@@ -405,12 +403,12 @@ def test_zero_storage_agent_picks_ration_then_chops():
     assert agent.planned_wood > 0
 
 
-def test_price_beliefs_start_as_bounded_integers():
+def test_price_beliefs_start_as_positive_fractions():
     world = SubsistenceWorld(make_config())
 
     for agent in world.initialize_agents():
-        assert isinstance(agent.price_belief, int)
-        assert 1 <= agent.price_belief <= 20
+        assert isinstance(agent.price_belief, float)
+        assert agent.price_belief > 0.0
 
 
 def test_used_crates_wear_faster_than_idle_crates():
@@ -525,7 +523,6 @@ def test_gossip_and_failed_adjustments_only_touch_participants():
         make_config(SIMULATION={"AGENTS": 3, "RANDOM_SEED": 6})
     )
     living = world.initialize_agents()
-    world.trade_settings["belief_band"] = 20
     trader, observer, absent = living
     start = {
         trader.id: 4,
@@ -559,6 +556,10 @@ def test_gossip_and_failed_adjustments_only_touch_participants():
 
     non_participant = start[absent.id]
     absent.price_belief = non_participant
+    # Make the failed seller hungry and the failed buyer able to raise its
+    # bid, so both updates are feasible under the new guards.
+    trader.berries = 0
+    observer.berries = 20
     world._apply_belief_updates(
         living,
         {agent.id: agent.price_belief for agent in living},

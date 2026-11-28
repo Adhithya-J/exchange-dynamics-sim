@@ -325,6 +325,8 @@
         interestRate: Number(event.interest_rate) || 0,
         dueIteration: Number(event.due_iteration) || 0,
         collateralCrates: Number(event.collateral_crates) || 0,
+        collateralDurability: Number(event.collateral_durability) || 0,
+        collateralExcess: Number(event.collateral_excess) || 0,
         recovered: Number(event.recovered) || 0,
         loss: Number(event.loss) || 0,
         collateralSeized: Number(event.collateral_seized) || 0,

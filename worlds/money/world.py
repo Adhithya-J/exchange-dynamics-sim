@@ -196,6 +196,7 @@ class ResourceSimulation:
 
     def __init__(self, config: dict[str, dict[str, Any]] | None = None) -> None:
         self.config = deepcopy(config or CONFIG)
+        self._validate_config()
         self.random = Random(self.config["SIMULATION"]["RANDOM_SEED"])
         self.affordability = AffordabilityCalculator(self.config)
         self.agents: list[Agent] = []
@@ -254,6 +255,84 @@ class ResourceSimulation:
                 f"{name} must contain non-negative values in ascending order"
             )
         return lower, upper
+
+    def _validate_config(self) -> None:
+        """Reject settings that would break conservation or survival rules."""
+
+        simulation = self.config["SIMULATION"]
+        agents = self.config["AGENTS"]
+        memory = self.config.get("MEMORY") or {}
+        affordability = self.config.get("AFFORDABILITY") or {}
+        try:
+            count = int(simulation["AGENTS"])
+            iterations = int(simulation["ITERATIONS"])
+            initial = float(simulation["INITIAL_RESOURCES"])
+            floor = float(simulation["RESOURCE_FLOOR"])
+            living_cost = float(agents["LIVING_COST"])
+            giving_floor = float(agents["MIN_RESOURCES_AFTER_GIVING"])
+            receiving_ceiling = float(
+                agents["MAX_RESOURCES_AFTER_RECEIVING"]
+            )
+            memory_size = int(memory.get("SIZE", 10))
+            affordability_low = float(
+                affordability.get("MIN_RESOURCES", 50.0)
+            )
+            affordability_high = float(
+                affordability.get("MAX_RESOURCES", 300.0)
+            )
+            score_low = float(affordability.get("MIN_SCORE", 0.0))
+            score_high = float(affordability.get("MAX_SCORE", 1.0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "SIMULATION and AGENTS settings must be numeric"
+            ) from exc
+        if count < 1:
+            raise ValueError("SIMULATION.AGENTS must be at least 1")
+        if iterations < 0:
+            raise ValueError("SIMULATION.ITERATIONS must not be negative")
+        if floor < 0:
+            raise ValueError("SIMULATION.RESOURCE_FLOOR must not be negative")
+        if initial < floor:
+            raise ValueError(
+                "SIMULATION.INITIAL_RESOURCES must not be below RESOURCE_FLOOR"
+            )
+        if living_cost < 0:
+            raise ValueError("AGENTS.LIVING_COST must not be negative")
+        if giving_floor < floor:
+            raise ValueError(
+                "AGENTS.MIN_RESOURCES_AFTER_GIVING must be at least "
+                "RESOURCE_FLOOR"
+            )
+        if receiving_ceiling < giving_floor:
+            raise ValueError(
+                "AGENTS.MAX_RESOURCES_AFTER_RECEIVING must be at least "
+                "MIN_RESOURCES_AFTER_GIVING"
+            )
+        if memory_size < 0:
+            raise ValueError("MEMORY.SIZE must not be negative")
+        if affordability_high <= affordability_low:
+            raise ValueError(
+                "AFFORDABILITY.MAX_RESOURCES must exceed MIN_RESOURCES"
+            )
+        if not 0 <= score_low <= score_high <= 1:
+            raise ValueError(
+                "AFFORDABILITY scores must be in [0, 1] and ascending"
+            )
+        for name in ("GENEROSITY", "ACCEPTANCE", "RISK_TOLERANCE"):
+            self._validated_range(agents.get(name, [0.0, 1.0]), name)
+            lower, upper = self._validated_range(
+                agents.get(name, [0.0, 1.0]), name
+            )
+            if upper > 1:
+                raise ValueError(f"AGENTS.{name} values must be at most 1")
+        self._transfer_amount_bounds()
+        # Force section validators to run at construction time instead of
+        # surfacing bad values only when the first iteration happens.
+        self._market_settings()
+        self._commons_settings()
+        self._trust_settings()
+        self._social_settings()
+        self._gifting_settings()
 
     def _market_settings(self) -> dict[str, Any]:
         """Return validated market settings, defaulting to a disabled market."""
@@ -434,8 +513,8 @@ class ResourceSimulation:
                 )
         if delay < 0:
             raise ValueError("SOCIAL.REPAY_DELAY must not be negative")
-        if fraction < 0:
-            raise ValueError("SOCIAL.REPAY_FRACTION must not be negative")
+        if not 0 <= fraction <= 1:
+            raise ValueError("SOCIAL.REPAY_FRACTION must be between 0 and 1")
         if retry_delay < 1:
             raise ValueError("SOCIAL.REPAY_RETRY_DELAY must be at least 1")
         if default_penalty < 0:
@@ -555,7 +634,10 @@ class ResourceSimulation:
                 spendable = max(0.0, debtor.resources - floor)
                 amount = min(due_amount, spendable)
             outcome = amount / due_amount if due_amount > 0 else 0.0
-            self._observe_repayment(debtor, creditor, outcome)
+            # Only a live creditor can observe repayment behaviour. A
+            # creditor's death is a write-off, not a borrower default.
+            if debtor.is_alive and creditor.is_alive:
+                self._observe_repayment(debtor, creditor, outcome)
             if amount > 0:
                 debtor.resources -= amount
                 creditor.resources += amount
@@ -736,6 +818,12 @@ class ResourceSimulation:
         settings = self._shock_settings()
         if not settings["enabled"]:
             return
+        if not self._market_settings()["enabled"]:
+            return
+        if not any(
+            shock["type"] == "scarcity" for shock in self._active_shocks
+        ):
+            return
         rate = settings["adaptation_rate"]
         for agent in self.agents:
             if not agent.is_alive:
@@ -748,16 +836,15 @@ class ResourceSimulation:
                 )
 
     def _shock_metrics(self) -> dict[str, Any]:
+        living = [agent for agent in self.agents if agent.is_alive]
         return {
             "shock_active": int(bool(self._active_shocks)),
             "shock_count": self.shock_count,
             "production_modifier": self._production_modifier(),
             "reputation_noise": self._information_noise(),
             "mean_risk_tolerance": (
-                float(
-                    np.mean([agent.risk_tolerance for agent in self.agents])
-                )
-                if self.agents
+                float(np.mean([agent.risk_tolerance for agent in living]))
+                if living
                 else 0.0
             ),
             "iterations_since_shock": (
@@ -772,7 +859,12 @@ class ResourceSimulation:
 
         if not self.shock_log:
             return None
-        shock_iteration = self.shock_log[-1]["iteration"]
+        last_shock = self.shock_log[-1]
+        if last_shock.get("type") != "scarcity":
+            # Information shocks do not move unmet demand, so a demand-based
+            # recovery time would be meaningless.
+            return None
+        shock_iteration = last_shock["iteration"]
         before = [
             metrics
             for metrics in self.metrics_history
@@ -1227,11 +1319,23 @@ class ResourceSimulation:
     def _receive_probability(self, agent: Agent, giver: Agent | None = None) -> float:
         """Return the acceptance probability.
 
-        Accepting a gift has no downside in this model: repayment is optional
-        and default has no penalty. Trust therefore does not gate acceptance.
+        Accepting a gift creates a repayment obligation when reciprocity is
+        enabled, and default is costly. Existing debt therefore reduces
+        willingness to accept a new one instead of being ignored.
         """
 
-        return self.affordability.effective_acceptance(agent)
+        probability = self.affordability.effective_acceptance(agent)
+        social = self._social_settings()
+        if social["enabled"]:
+            debt = sum(
+                entry["remaining"]
+                for entry in self._repayment_queue
+                if entry["debtor"] == agent.id
+            )
+            if debt > 0:
+                burden = debt / max(debt + max(agent.resources, 0.0), 1e-9)
+                probability *= max(0.0, 1.0 - 0.5 * burden)
+        return float(probability)
 
     def _can_give(
         self,
@@ -1389,7 +1493,7 @@ class ResourceSimulation:
         exact reduction in total money.
         """
 
-        cost = self.config["AGENTS"]["LIVING_COST"]
+        cost = max(0.0, float(self.config["AGENTS"]["LIVING_COST"]))
         market = self._market_settings()
         penalty_rate = (
             market["unmet_demand_penalty"] if market["enabled"] else 0.0
@@ -1408,8 +1512,10 @@ class ResourceSimulation:
             paid_here = min(due, spendable)
             agent.resources = before - paid_here
             if agent.resources <= minimum:
-                # Reaching the floor is death, not a resource top-up.
-                agent.resources = minimum
+                # Reaching the floor is death, not a resource top-up. If the
+                # agent somehow began below the floor, never create money by
+                # raising it to the floor.
+                agent.resources = min(before, minimum)
             paid += before - agent.resources
             if not agent.is_alive:
                 self._log_death(agent, "living_cost")
@@ -1808,8 +1914,11 @@ def main() -> None:
 
         print(f"Replay written to {export_replay(simulation, args.replay)}")
     print(final_state.head())
-    print("\nFinal statistics:")
-    print(simulation.metrics_history[-1])
+    if simulation.metrics_history:
+        print("\nFinal statistics:")
+        print(simulation.metrics_history[-1])
+    else:
+        print("\nNo iterations run; no final statistics.")
 
 
 if __name__ == "__main__":

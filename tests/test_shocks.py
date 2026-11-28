@@ -159,11 +159,30 @@ class TestInformationShock:
 
 
 class TestAdaptation:
+    def test_empty_shock_layer_does_not_adapt(self):
+        config = shock_config()
+        config["MARKET"]["PRODUCTION_RANGE"] = (1.0, 1.0)
+        config["MARKET"]["CONSUMPTION_RANGE"] = (1.0, 1.0)
+        simulation = ResourceSimulation(config)
+        simulation.initialize_agents()
+        for agent in simulation.agents:
+            agent.risk_tolerance = 0.5
+
+        simulation.run(iterations=5)
+
+        assert all(
+            agent.risk_tolerance == pytest.approx(0.5)
+            for agent in simulation.agents
+        )
+
     def test_unmet_demand_raises_risk_tolerance(self):
         config = shock_config()
         config["MARKET"]["PRODUCTION_RANGE"] = (0.0, 0.0)
         config["MARKET"]["CONSUMPTION_RANGE"] = (1.0, 1.0)
         config["SHOCKS"]["ADAPTATION_RATE"] = 0.1
+        config["SHOCKS"]["SCHEDULE"] = [
+            {"iteration": 1, "type": "scarcity", "magnitude": 0.0, "duration": 2}
+        ]
         simulation = ResourceSimulation(config)
 
         simulation.run(iterations=2)
@@ -181,6 +200,9 @@ class TestAdaptation:
         config["MARKET"]["PRODUCTION_RANGE"] = (1.0, 1.0)
         config["MARKET"]["CONSUMPTION_RANGE"] = (1.0, 1.0)
         config["SHOCKS"]["ADAPTATION_RATE"] = 0.1
+        config["SHOCKS"]["SCHEDULE"] = [
+            {"iteration": 1, "type": "scarcity", "magnitude": 0.0, "duration": 2}
+        ]
         simulation = ResourceSimulation(config)
 
         simulation.run(iterations=2)
@@ -195,6 +217,9 @@ class TestAdaptation:
         config["MARKET"]["PRODUCTION_RANGE"] = (0.0, 0.0)
         config["MARKET"]["CONSUMPTION_RANGE"] = (1.0, 1.0)
         config["SHOCKS"]["ADAPTATION_RATE"] = 0.5
+        config["SHOCKS"]["SCHEDULE"] = [
+            {"iteration": 1, "type": "scarcity", "magnitude": 0.0, "duration": 2}
+        ]
         simulation = ResourceSimulation(config)
         simulation.initialize_agents()
         for agent in simulation.agents:
@@ -209,6 +234,9 @@ class TestAdaptation:
         config["MARKET"]["PRODUCTION_RANGE"] = (1.0, 1.0)
         config["MARKET"]["CONSUMPTION_RANGE"] = (1.0, 1.0)
         config["SHOCKS"]["ADAPTATION_RATE"] = 0.5
+        config["SHOCKS"]["SCHEDULE"] = [
+            {"iteration": 1, "type": "scarcity", "magnitude": 0.0, "duration": 2}
+        ]
         simulation = ResourceSimulation(config)
         simulation.initialize_agents()
         for agent in simulation.agents:
@@ -243,6 +271,22 @@ class TestResilience:
         simulation = ResourceSimulation(shock_config())
 
         simulation.run(iterations=2)
+
+        assert simulation.recovery_time() is None
+
+    def test_information_shock_has_no_demand_recovery_time(self):
+        config = shock_config()
+        config["SHOCKS"]["SCHEDULE"] = [
+            {
+                "iteration": 1,
+                "type": "information",
+                "magnitude": 0.5,
+                "duration": 1,
+            }
+        ]
+        simulation = ResourceSimulation(config)
+
+        simulation.run(iterations=3)
 
         assert simulation.recovery_time() is None
 

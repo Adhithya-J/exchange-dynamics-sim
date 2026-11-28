@@ -19,6 +19,9 @@ class FeatureLayer:
     def setup(self) -> None:
         """Read and validate this layer's configuration."""
 
+    def reset(self) -> None:
+        """Clear per-run state before the world is initialized again."""
+
     def before_regenerate(self) -> None:
         """Run before the commons regenerate."""
 
@@ -96,6 +99,10 @@ class FeatureRegistry:
             if layer.enabled:
                 layer.setup()
         return dict(enabled)
+
+    def reset(self) -> None:
+        for layer in self.layers.values():
+            layer.reset()
 
     def enabled(self, name: str) -> bool:
         return bool(self.effective.get(name, False))
